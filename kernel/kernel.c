@@ -23,6 +23,19 @@ static void print_hex64(uint64_t value) {
     }
 }
 
+static void demo_thread(void *arg) {
+    const char *name = arg;
+
+    for (uint64_t i = 0; i < 3; i++) {
+        uart_puts("THREAD ");
+        uart_puts(name);
+        uart_puts(" step: ");
+        print_hex64(i);
+        uart_puts("\n");
+        sched_yield();
+    }
+}
+
 void kernel_main(uint64_t dtb_addr) {
     dtb_memory_t memory;
 
@@ -151,11 +164,14 @@ void kernel_main(uint64_t dtb_addr) {
             gicv2_init();
             gicv2_enable_irq(TIMER_IRQ);
             sched_init(5);
+            (void)sched_create_kernel_thread(demo_thread, "A", "thread-a");
+            (void)sched_create_kernel_thread(demo_thread, "B", "thread-b");
             timer_init(10);
             irq_enable();
 
             uart_puts("IRQ timer: armed\n");
             uart_puts("SCHED quantum ticks: 0x0000000000000005\n");
+            sched_start();
         } else {
             uart_puts("VMM smoke: failed\n");
         }

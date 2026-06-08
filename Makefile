@@ -33,6 +33,7 @@ OBJS := \
     $(BUILD_DIR)/kernel/mm/pmm.o \
     $(BUILD_DIR)/kernel/mm/vmm.o \
     $(BUILD_DIR)/kernel/sched/sched.o \
+    $(BUILD_DIR)/kernel/sched/switch.o \
     $(BUILD_DIR)/kernel/timer/timer.o \
     $(BUILD_DIR)/drivers/uart/pl011.o
 

@@ -8,6 +8,7 @@
 void pmm_init(uint64_t mem_base, uint64_t mem_size);
 void pmm_reserve_range(uint64_t start, uint64_t size);
 uint64_t pmm_alloc_page(void);
+uint64_t pmm_alloc_pages(uint64_t count);
 void pmm_free_page(uint64_t paddr);
 uint64_t pmm_free_count(void);
 

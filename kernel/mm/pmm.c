@@ -97,6 +97,39 @@ uint64_t pmm_alloc_page(void) {
     return 0;
 }
 
+uint64_t pmm_alloc_pages(uint64_t count) {
+    uint64_t run_start = 0;
+    uint64_t run_count = 0;
+
+    if (count == 0 || count > g_total_pages) {
+        return 0;
+    }
+
+    for (uint64_t page = 0; page < g_total_pages; page++) {
+        uint64_t word = page / BITS_PER_WORD;
+        uint64_t bit = page % BITS_PER_WORD;
+
+        if ((g_bitmap[word] & (1ULL << bit)) == 0) {
+            if (run_count == 0) {
+                run_start = page;
+            }
+
+            run_count++;
+            if (run_count == count) {
+                for (uint64_t used = run_start; used < run_start + count; used++) {
+                    set_used(used);
+                }
+
+                return g_mem_base + run_start * PAGE_SIZE;
+            }
+        } else {
+            run_count = 0;
+        }
+    }
+
+    return 0;
+}
+
 void pmm_free_page(uint64_t paddr) {
     uint64_t page;
 
