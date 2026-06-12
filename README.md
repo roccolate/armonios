@@ -24,19 +24,39 @@ KolibriARM is a bare-metal operating system for ARM64 (AArch64) processors, writ
 
 ## Current Status
 
-> **Pre-alpha.** The project is in active early development. Only the boot sequence and UART output are functional.
+> **Pre-alpha.** The kernel boots on QEMU `virt`, brings up early memory management, enables an identity-mapped MMU, initializes timer interrupts, and runs a small kernel-thread scheduler demo.
 
-| Component         | Status       | Notes                          |
-|-------------------|-------------|--------------------------------|
-| Bootloader        | In progress  | AArch64 ASM, QEMU virt tested  |
-| Physical memory   | Planned      | Bitmap allocator               |
-| Virtual memory    | Planned      | 4-level page tables (ARMv8)    |
-| Scheduler         | Planned      | Preemptive, single core first  |
-| UART driver       | Working      | PL011, QEMU virt               |
-| Framebuffer       | Planned      | Linear framebuffer via DTB     |
-| Filesystem        | Planned      | FAT32 read-only first          |
-| GUI               | Planned      | Custom compositor, no X11      |
-| Networking        | Planned      | lwIP integration               |
+| Component         | Status       | Notes                                  |
+|-------------------|-------------|----------------------------------------|
+| Bootloader        | Working      | AArch64 ASM, QEMU virt tested          |
+| Physical memory   | Working      | Bitmap allocator, host tests           |
+| Virtual memory    | In progress  | Identity map active, user maps pending |
+| Scheduler         | Early demo   | Kernel threads and timer IRQ tested    |
+| UART driver       | Working      | PL011, QEMU virt                       |
+| Syscalls          | Early        | `svc #0`, `sys_write`, `sys_exit`      |
+| Userland          | Early        | Embedded EL0 hello world demo          |
+| Framebuffer       | Planned      | Linear framebuffer via DTB             |
+| Filesystem        | Planned      | FAT32 read-only first                  |
+| GUI               | Planned      | Custom compositor, no X11              |
+| Networking        | Planned      | lwIP integration                       |
+
+## Current Milestone
+
+The current milestone is a real userland `hello world` running at EL0.
+
+Initial scope:
+- [x] Add a syscall path for `svc #0` with syscall number in `x8`.
+- [x] Implement `sys_write` and `sys_exit` first.
+- [x] Build an initial EL0 context with a user stack and `eret` into an embedded hello program.
+- [x] Print `Hello from EL0` through `sys_write`, then return to the kernel through `sys_exit`.
+- [ ] Move the current `kernel_main()` smoke tests behind smaller debug/demo helpers.
+- [ ] Move from an embedded demo image to a tiny loader-owned program image.
+
+Out of scope for this milestone:
+- Filesystem loading.
+- GUI.
+- Porting KolibriOS applications directly.
+- Multi-process userland.
 
 ---
 
@@ -110,7 +130,7 @@ kolibriarm/
 │   ├── kernel.c        # kernel_main, early init
 │   ├── mm/             # Memory management
 │   ├── sched/          # Scheduler
-│   └── ipc/            # System calls and IPC
+│   └── ipc/            # System calls and IPC (planned)
 ├── drivers/            # Hardware drivers (C + minimal ASM)
 │   ├── uart/           # PL011 UART
 │   ├── display/        # Framebuffer / DRM

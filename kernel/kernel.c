@@ -10,6 +10,7 @@
 #include "kernel/mm/vmm.h"
 #include "kernel/sched/sched.h"
 #include "kernel/timer/timer.h"
+#include "kernel/user_demo.h"
 #include "uart/pl011.h"
 
 extern char __kernel_end[];
@@ -111,6 +112,11 @@ void kernel_main(uint64_t dtb_addr) {
 
         kfree(heap_b);
         kfree(heap_c);
+
+        uint64_t user_exit_code = user_demo_run();
+        uart_puts("USER demo exit code: ");
+        print_hex64(user_exit_code);
+        uart_puts("\n");
 
         uint64_t *kernel_pgd = vmm_new_table();
         int vmm_ok = 0;

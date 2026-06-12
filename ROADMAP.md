@@ -72,6 +72,23 @@ This document describes the planned development trajectory for KolibriARM. Each 
 
 **Goal:** Multiple independent processes can run concurrently, each in its own address space.
 
+**Immediate milestone:** before full processes, run one embedded EL0 program that prints `Hello from EL0` through `sys_write` and exits through `sys_exit`. This proves the exception path, syscall ABI, EL1-to-EL0 transition, and basic user stack setup without requiring a filesystem or loader.
+
+### 2.0 First EL0 Hello World
+- Keep the first user program embedded in the kernel image
+- Create a user stack and initial register frame
+- Enter EL0 with `eret`
+- Handle `svc #0` from EL0
+- Dispatch syscall number from `x8`
+- Implement `sys_write` by forwarding to UART
+- Implement `sys_exit` by returning control to the kernel or halting the task
+
+**Exit criteria:**
+- [x] QEMU prints `Hello from EL0`
+- [x] `sys_write` validates the user buffer range before reading it
+- [x] `sys_exit` cleanly stops the user task
+- [x] Kernel remains alive after the user task exits
+
 ### 2.1 Process Control Block (PCB)
 ```c
 typedef struct process {

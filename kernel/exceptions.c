@@ -2,7 +2,12 @@
 
 #include <stdint.h>
 
+#include "kernel/syscall.h"
 #include "uart/pl011.h"
+
+#define ESR_EC_SHIFT 26U
+#define ESR_EC_MASK  0x3fULL
+#define ESR_EC_SVC64 0x15ULL
 
 static void print_hex64(uint64_t value) {
     static const char digits[] = "0123456789abcdef";
@@ -66,4 +71,15 @@ void exception_handler(uint64_t esr, uint64_t far, uint64_t elr, uint64_t kind) 
     for (;;) {
         __asm__ volatile("wfe");
     }
+}
+
+void exception_lower_sync_handler(exception_frame_t *frame, uint64_t esr, uint64_t far) {
+    uint64_t ec = (esr >> ESR_EC_SHIFT) & ESR_EC_MASK;
+
+    if (ec == ESR_EC_SVC64) {
+        syscall_dispatch(frame);
+        return;
+    }
+
+    exception_handler(esr, far, frame->elr, 8);
 }

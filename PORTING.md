@@ -4,9 +4,9 @@ KolibriARM is designed so that porting to a new ARM64 board requires changing **
 
 ---
 
-## Architecture Guarantee
+## Architecture Goal
 
-The following components are **fully portable** and must never contain board-specific code:
+KolibriARM should be structured so that the following components remain portable and avoid board-specific constants:
 
 - `kernel/mm/` — physical and virtual memory management
 - `kernel/sched/` — scheduler and context switch
@@ -15,7 +15,7 @@ The following components are **fully portable** and must never contain board-spe
 - `kernel/gui/` — window manager and compositor
 - `boot/start.S` — except the initial stack address (see below)
 
-The following components are **board-specific** and live in `drivers/`:
+The following components are board-specific and should live behind `drivers/boards/<board>/` or an equivalent platform layer:
 
 - UART (base address, register layout)
 - Interrupt controller (GIC version and base address)
@@ -24,6 +24,10 @@ The following components are **board-specific** and live in `drivers/`:
 - Storage (eMMC, NVMe, or virtio)
 - USB host controller
 - Network controller
+
+**Current note:** the QEMU `virt` bring-up still has some board constants wired directly into early kernel code, especially UART and GIC addresses. Before serious Raspberry Pi or other board work, move those constants behind a board/platform layer and make QEMU `virt` the reference board.
+
+**Next portability step:** create a `drivers/boards/qemu_virt/` implementation and have `kernel_main()` call board helpers instead of using raw MMIO addresses.
 
 ---
 

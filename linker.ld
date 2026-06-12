@@ -15,6 +15,13 @@ SECTIONS {
         *(.text*)
     } :text
 
+    .user_demo : ALIGN(16) {
+        __user_demo_start = .;
+        *(.user.text*)
+        *(.user.rodata*)
+        __user_demo_end = .;
+    } :text
+
     .rodata : ALIGN(8) {
         *(.rodata*)
     } :rodata
