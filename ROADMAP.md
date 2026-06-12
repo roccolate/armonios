@@ -4,7 +4,7 @@ This document describes the planned development trajectory for KolibriARM. Each 
 
 ---
 
-## Phase 0 — Foundation `[current]`
+## Phase 0 — Foundation [done]
 
 **Goal:** A binary that boots, prints to UART, and halts cleanly.
 
@@ -19,15 +19,23 @@ This document describes the planned development trajectory for KolibriARM. Each 
 - Makefile with `make`, `make qemu`, `make qemu-debug` targets
 
 **Exit criteria:**
-- [ ] `make qemu` prints a boot message to the terminal
-- [ ] GDB can attach, set a breakpoint at `kernel_main`, and step through C code
-- [ ] Binary size under 32 KB
+- [x] `make qemu` prints a boot message to the terminal
+- [x] GDB can attach, set a breakpoint at `kernel_main`, and step through C code
+- [x] Binary size under 32 KB
+
+**Progress:**
+- Boot sequence (EL1) and basic UART output — implemented
+- DTB parsing and RAM map detection — implemented
+- Physical memory manager (bitmap) — implemented
+- Kernel heap (`kheap`) and `kmalloc`/`kfree` smoke tests — implemented
+- VMM helpers, identity page tables and MMU enable — implemented (identity mapping)
+- GIC init, timer and basic scheduler with kernel threads demo — implemented
 
 **Estimated effort:** 1–2 weeks
 
 ---
 
-## Phase 1 — Memory Management
+## Phase 1 — Memory Management `[current]`
 
 **Goal:** The kernel can allocate and free physical memory pages, and map virtual memory with the MMU enabled.
 

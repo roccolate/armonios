@@ -1,0 +1,10 @@
+# Test artifacts
+run_tests
+*.o
+*.d
+*.exe
+*.out
+
+# Temporary files
+*.tmp
+*~
