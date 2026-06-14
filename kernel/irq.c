@@ -2,22 +2,91 @@
 
 #include <stdint.h>
 
-#include "irq/gicv2.h"
-#include "kernel/timer/timer.h"
+#include "board.h"
+#include "kernel/mm/mmu.h"
+#include "kernel/process.h"
 #include "uart/pl011.h"
 
-void irq_handler(void) {
-    uint32_t irq = gicv2_ack_irq();
+#define IRQ_HANDLER_SLOTS 64U
 
-    if (irq == GIC_SPURIOUS_IRQ) {
+typedef struct {
+    irq_handler_fn_t handler;
+    void *context;
+} irq_handler_entry_t;
+
+static irq_handler_entry_t g_irq_handlers[IRQ_HANDLER_SLOTS];
+
+int irq_register_handler(uint32_t irq, irq_handler_fn_t handler, void *context) {
+    if (irq >= IRQ_HANDLER_SLOTS || handler == 0) {
+        return -1;
+    }
+
+    g_irq_handlers[irq].handler = handler;
+    g_irq_handlers[irq].context = context;
+
+    return 0;
+}
+
+void irq_unregister_handler(uint32_t irq) {
+    if (irq >= IRQ_HANDLER_SLOTS) {
         return;
     }
 
-    if (irq == TIMER_IRQ) {
-        timer_handle_irq();
+    g_irq_handlers[irq].handler = 0;
+    g_irq_handlers[irq].context = 0;
+}
+
+static void load_process_frame(process_t *process, exception_frame_t *frame) {
+    if (process == 0 || frame == 0) {
+        return;
+    }
+
+    process_load_context(process, frame);
+
+    if (process->page_table != 0) {
+        mmu_set_ttbr0(process->page_table);
+    }
+}
+
+void irq_handler_frame(exception_frame_t *frame) {
+    process_t *current = process_current();
+    uint32_t irq = board_irq_ack();
+
+    if (current != 0 && frame != 0) {
+        process_save_context(current, frame->x, frame->elr, frame->spsr,
+                             frame->sp_el0);
+    }
+
+    if (board_irq_is_spurious(irq)) {
+        return;
+    }
+
+    if (irq < IRQ_HANDLER_SLOTS && g_irq_handlers[irq].handler != 0) {
+        g_irq_handlers[irq].handler(g_irq_handlers[irq].context);
     } else {
         uart_puts("IRQ unknown\n");
     }
 
-    gicv2_end_irq(irq);
+    board_irq_end(irq);
+
+    if (current != 0 && frame != 0) {
+        current->pc = frame->elr;
+        current->pstate = frame->spsr;
+        current->sp = frame->sp_el0;
+
+        process_t *next = process_next_runnable(current);
+        if (next != 0) {
+            if (current->state == PROCESS_RUNNING) {
+                current->state = PROCESS_READY;
+            }
+
+            next->state = PROCESS_RUNNING;
+            process_set_current(next);
+            load_process_frame(next, frame);
+        }
+    }
+}
+
+void irq_handler(void) {
+    irq_handler_frame(0);
 }

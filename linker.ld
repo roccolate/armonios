@@ -17,8 +17,7 @@ SECTIONS {
 
     .user_demo : ALIGN(16) {
         __user_demo_start = .;
-        *(.user.text*)
-        *(.user.rodata*)
+        KEEP(*(.user_demo_blob*))
         __user_demo_end = .;
     } :text
 

@@ -1,0 +1,336 @@
+#include <stdint.h>
+
+#include "unity/unity.h"
+#include "../kernel/process.h"
+
+void test_process_user_range_contains_registered_regions(void) {
+    process_t process;
+
+    process_init(&process, 7, "test");
+    TEST_ASSERT_EQUAL_UINT64(7, process.pid);
+    TEST_ASSERT_TRUE(process.name == (const char *)"test");
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_READY, process.state);
+    TEST_ASSERT_EQUAL_UINT64(0, process.sp);
+    TEST_ASSERT_EQUAL_UINT64(0, process.pc);
+    TEST_ASSERT_EQUAL_UINT64(0, process.pstate);
+    TEST_ASSERT_NULL(process.page_table);
+    TEST_ASSERT_NULL(process.next);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_MMAP_BASE, process.next_user_vaddr);
+    TEST_ASSERT_EQUAL_UINT64(0, process.user_region_count);
+
+    for (uint32_t i = 0; i < PROCESS_MAX_USER_REGIONS; i++) {
+        TEST_ASSERT_EQUAL_UINT64(0, process.user_regions[i].start);
+        TEST_ASSERT_EQUAL_UINT64(0, process.user_regions[i].end);
+        TEST_ASSERT_EQUAL_UINT64(0, process.user_regions[i].paddr);
+        TEST_ASSERT_EQUAL_UINT64(0, process.user_regions[i].flags);
+    }
+
+    for (uint32_t i = 0; i < 31; i++) {
+        TEST_ASSERT_EQUAL_UINT64(0, process.regs[i]);
+    }
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)process_add_user_region(&process,
+                                                                  0x1000ULL,
+                                                                  0x100ULL));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)process_add_user_region(&process,
+                                                                  0x3000ULL,
+                                                                  0x80ULL));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)process_add_user_region(&process,
+                                                               0x1080ULL,
+                                                               0x80ULL));
+
+    TEST_ASSERT_TRUE(process_user_range_contains(&process, 0x1000ULL, 0x100ULL));
+    TEST_ASSERT_TRUE(process_user_range_contains(&process, 0x1040ULL, 0x20ULL));
+    TEST_ASSERT_TRUE(process_user_range_contains(&process, 0x3000ULL, 0x80ULL));
+    TEST_ASSERT_TRUE(process_user_range_contains(&process, 0x3000ULL, 0));
+    TEST_ASSERT_TRUE(!process_user_range_contains(&process, 0x0fffULL, 1));
+    TEST_ASSERT_TRUE(!process_user_range_contains(&process, 0x10f0ULL, 0x20ULL));
+    TEST_ASSERT_TRUE(!process_user_range_contains(&process, 0x2000ULL, 1));
+    TEST_ASSERT_TRUE(!process_user_range_contains(&process, 0xfffffffffffffff0ULL,
+                                                  0x20ULL));
+}
+
+void test_process_remove_user_region_exact_match(void) {
+    process_t process;
+
+    process_init(&process, 8, "remove");
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)process_add_user_region(&process,
+                                                                  0x1000ULL,
+                                                                  0x100ULL));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)process_add_user_region(&process,
+                                                                  0x3000ULL,
+                                                                  0x200ULL));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)process_add_user_region(&process,
+                                                                  0x5000ULL,
+                                                                  0x100ULL));
+
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)process_remove_user_region(&process,
+                                                                  0x3000ULL,
+                                                                  0x100ULL));
+    TEST_ASSERT_EQUAL_UINT64(3, process.user_region_count);
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)process_remove_user_region(&process,
+                                                                     0x3000ULL,
+                                                                     0x200ULL));
+    TEST_ASSERT_EQUAL_UINT64(2, process.user_region_count);
+    TEST_ASSERT_TRUE(!process_user_range_contains(&process, 0x3000ULL, 1));
+    TEST_ASSERT_TRUE(process_user_range_contains(&process, 0x1000ULL, 0x100ULL));
+    TEST_ASSERT_TRUE(process_user_range_contains(&process, 0x5000ULL, 0x100ULL));
+
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)process_remove_user_region(&process,
+                                                                  0x3000ULL,
+                                                                  0x200ULL));
+}
+
+void test_process_user_region_mapping_metadata_round_trips(void) {
+    process_t process;
+    process_user_region_t region;
+    process_user_region_t removed;
+
+    process_init(&process, 15, "mapping");
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)process_add_user_region(&process,
+                                                                  0x4000ULL,
+                                                                  0x2000ULL));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)process_set_user_region_mapping(
+                                 &process, 0x4000ULL, 0x2000ULL,
+                                 0x100000ULL,
+                                 PROCESS_USER_REGION_OWNED_PAGES));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)process_find_user_region(
+                                 &process, 0x4000ULL, 0x2000ULL, &region));
+    TEST_ASSERT_EQUAL_UINT64(0x4000ULL, region.start);
+    TEST_ASSERT_EQUAL_UINT64(0x6000ULL, region.end);
+    TEST_ASSERT_EQUAL_UINT64(0x100000ULL, region.paddr);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_REGION_OWNED_PAGES, region.flags);
+
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)process_find_user_region(
+                                 &process, 0x4000ULL, 0x1000ULL, &region));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)process_set_user_region_mapping(
+                                 &process, 0x5000ULL, 0x1000ULL,
+                                 0x200000ULL,
+                                 PROCESS_USER_REGION_OWNED_PAGES));
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)process_remove_user_region_info(
+                                 &process, 0x4000ULL, 0x2000ULL, &removed));
+    TEST_ASSERT_EQUAL_UINT64(0x100000ULL, removed.paddr);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_REGION_OWNED_PAGES, removed.flags);
+    TEST_ASSERT_EQUAL_UINT64(0, process.user_region_count);
+    TEST_ASSERT_EQUAL_UINT64(0, process.user_regions[0].paddr);
+    TEST_ASSERT_EQUAL_UINT64(0, process.user_regions[0].flags);
+}
+
+void test_process_alloc_user_region_bumps_page_aligned_arena(void) {
+    process_t process;
+    uint64_t first = 0;
+    uint64_t second = 0;
+
+    process_init(&process, 9, "mmap");
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)process_alloc_user_region(&process,
+                                                                    1,
+                                                                    &first));
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_MMAP_BASE, first);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_MMAP_BASE + 0x1000ULL,
+                             process.next_user_vaddr);
+    TEST_ASSERT_TRUE(process_user_range_contains(&process, first, 0x1000ULL));
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)process_alloc_user_region(&process,
+                                                                    0x1800ULL,
+                                                                    &second));
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_MMAP_BASE + 0x1000ULL, second);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_MMAP_BASE + 0x3000ULL,
+                             process.next_user_vaddr);
+    TEST_ASSERT_TRUE(process_user_range_contains(&process, second, 0x2000ULL));
+
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)process_alloc_user_region(&process,
+                                                                 0,
+                                                                 &second));
+}
+
+void test_process_alloc_user_region_respects_region_limit(void) {
+    process_t process;
+    uint64_t addr = 0;
+
+    process_init(&process, 10, "mmap-limit");
+
+    for (uint32_t i = 0; i < PROCESS_MAX_USER_REGIONS; i++) {
+        TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)process_alloc_user_region(&process,
+                                                                        0x1000ULL,
+                                                                        &addr));
+    }
+
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)process_alloc_user_region(&process,
+                                                                 0x1000ULL,
+                                                                 &addr));
+}
+
+void test_process_current_and_region_limits(void) {
+    process_t process;
+
+    process_init(&process, 1, "current");
+    TEST_ASSERT_NULL(process_current());
+
+    process_set_current(&process);
+    TEST_ASSERT_TRUE(process_current() == &process);
+    process_set_current(0);
+    TEST_ASSERT_NULL(process_current());
+
+    for (uint32_t i = 0; i < PROCESS_MAX_USER_REGIONS; i++) {
+        TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)process_add_user_region(&process,
+                                                                      0x1000ULL * i,
+                                                                      0x100ULL));
+    }
+
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)process_add_user_region(&process,
+                                                               0x9000ULL,
+                                                               0x100ULL));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)process_add_user_region(&process,
+                                                               0x1000ULL,
+                                                               0));
+}
+
+void test_process_entry_page_table_and_exit_state(void) {
+    process_t process;
+    uint64_t pgd[512];
+
+    process_init(&process, 2, "pcb");
+    process_set_entry(&process, 0x4000ULL, 0x8000ULL, 0x3c0ULL);
+    process_set_page_table(&process, pgd);
+
+    TEST_ASSERT_EQUAL_UINT64(0x4000ULL, process.pc);
+    TEST_ASSERT_EQUAL_UINT64(0x8000ULL, process.sp);
+    TEST_ASSERT_EQUAL_UINT64(0x3c0ULL, process.pstate);
+    TEST_ASSERT_TRUE(process.page_table == pgd);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_READY, process.state);
+
+    process_mark_exited(&process, 9);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_ZOMBIE, process.state);
+    TEST_ASSERT_EQUAL_UINT64(9, process.exit_code);
+}
+
+void test_process_save_context_copies_registers_and_trap_state(void) {
+    process_t process;
+    uint64_t regs[31];
+
+    for (uint32_t i = 0; i < 31; i++) {
+        regs[i] = 0x1000ULL + i;
+    }
+
+    process_init(&process, 3, "context");
+    process_save_context(&process, regs, 0x4444ULL, 0x3c0ULL, 0x9000ULL);
+
+    for (uint32_t i = 0; i < 31; i++) {
+        TEST_ASSERT_EQUAL_UINT64(0x1000ULL + i, process.regs[i]);
+    }
+
+    TEST_ASSERT_EQUAL_UINT64(0x4444ULL, process.pc);
+    TEST_ASSERT_EQUAL_UINT64(0x3c0ULL, process.pstate);
+    TEST_ASSERT_EQUAL_UINT64(0x9000ULL, process.sp);
+
+    process_save_context(0, regs, 0, 0, 0);
+    process_save_context(&process, 0, 0, 0, 0);
+    TEST_ASSERT_EQUAL_UINT64(0x1000ULL, process.regs[0]);
+    TEST_ASSERT_EQUAL_UINT64(0x4444ULL, process.pc);
+    TEST_ASSERT_EQUAL_UINT64(0x9000ULL, process.sp);
+}
+
+void test_process_load_context_writes_exception_frame(void) {
+    process_t process;
+    exception_frame_t frame;
+
+    process_init(&process, 4, "load");
+    for (uint32_t i = 0; i < 31; i++) {
+        process.regs[i] = 0x2000ULL + i;
+        frame.x[i] = 0;
+    }
+    process.pc = 0x5555ULL;
+    process.pstate = 0x3c0ULL;
+    process.sp = 0xaaaaULL;
+    frame.elr = 0;
+    frame.spsr = 0;
+    frame.sp_el0 = 0;
+
+    process_load_context(&process, &frame);
+
+    for (uint32_t i = 0; i < 31; i++) {
+        TEST_ASSERT_EQUAL_UINT64(0x2000ULL + i, frame.x[i]);
+    }
+    TEST_ASSERT_EQUAL_UINT64(0x5555ULL, frame.elr);
+    TEST_ASSERT_EQUAL_UINT64(0x3c0ULL, frame.spsr);
+    TEST_ASSERT_EQUAL_UINT64(0xaaaaULL, frame.sp_el0);
+}
+
+void test_process_table_alloc_release_and_limits(void) {
+    process_t *processes[PROCESS_MAX_PROCESSES];
+
+    process_table_init();
+    TEST_ASSERT_NULL(process_current());
+    TEST_ASSERT_EQUAL_UINT64(0, process_count());
+
+    for (uint32_t i = 0; i < PROCESS_MAX_PROCESSES; i++) {
+        processes[i] = process_alloc(i + 1, "table");
+        TEST_ASSERT_NOT_NULL(processes[i]);
+        TEST_ASSERT_EQUAL_UINT64(i + 1, processes[i]->pid);
+        TEST_ASSERT_EQUAL_UINT64(PROCESS_READY, processes[i]->state);
+        TEST_ASSERT_EQUAL_UINT64(i + 1, process_count());
+    }
+
+    TEST_ASSERT_NULL(process_alloc(99, "full"));
+
+    process_set_current(processes[1]);
+    process_release(processes[1]);
+    TEST_ASSERT_NULL(process_current());
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_UNUSED, processes[1]->state);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_MAX_PROCESSES - 1ULL, process_count());
+
+    process_t *reused = process_alloc(42, "reused");
+    TEST_ASSERT_NOT_NULL(reused);
+    TEST_ASSERT_EQUAL_UINT64(42, reused->pid);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_READY, reused->state);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_MAX_PROCESSES, process_count());
+}
+
+void test_process_next_runnable_round_robin_and_reclaim_zombies(void) {
+    process_t *a;
+    process_t *b;
+    process_t *c;
+
+    process_table_init();
+    a = process_alloc(1, "a");
+    b = process_alloc(2, "b");
+    c = process_alloc(3, "c");
+
+    TEST_ASSERT_NOT_NULL(a);
+    TEST_ASSERT_NOT_NULL(b);
+    TEST_ASSERT_NOT_NULL(c);
+
+    a->state = PROCESS_RUNNING;
+    b->state = PROCESS_BLOCKED;
+    c->state = PROCESS_READY;
+
+    TEST_ASSERT_TRUE(process_next_runnable(a) == c);
+    TEST_ASSERT_TRUE(process_next_runnable(c) == 0);
+
+    a->state = PROCESS_READY;
+    TEST_ASSERT_TRUE(process_next_runnable(c) == a);
+
+    process_mark_exited(a, 11);
+    process_mark_exited(c, 33);
+    TEST_ASSERT_EQUAL_UINT64(2, process_reclaim_zombies());
+    TEST_ASSERT_EQUAL_UINT64(1, process_count());
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_UNUSED, a->state);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_UNUSED, c->state);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_BLOCKED, b->state);
+}

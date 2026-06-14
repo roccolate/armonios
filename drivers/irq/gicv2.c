@@ -2,9 +2,6 @@
 
 #include <stdint.h>
 
-#define GICD_BASE 0x08000000UL
-#define GICC_BASE 0x08010000UL
-
 #define GICD_CTLR       0x000
 #define GICD_ISENABLER  0x100
 #define GICD_IPRIORITYR 0x400
@@ -14,19 +11,25 @@
 #define GICC_IAR  0x00c
 #define GICC_EOIR 0x010
 
+static uint64_t g_gicd_base;
+static uint64_t g_gicc_base;
+
 static volatile uint32_t *gicd_reg(uint32_t offset) {
-    return (volatile uint32_t *)(GICD_BASE + offset);
+    return (volatile uint32_t *)(g_gicd_base + offset);
 }
 
 static volatile uint32_t *gicc_reg(uint32_t offset) {
-    return (volatile uint32_t *)(GICC_BASE + offset);
+    return (volatile uint32_t *)(g_gicc_base + offset);
 }
 
 static volatile uint8_t *gicd_reg8(uint32_t offset) {
-    return (volatile uint8_t *)(GICD_BASE + offset);
+    return (volatile uint8_t *)(g_gicd_base + offset);
 }
 
-void gicv2_init(void) {
+void gicv2_init(uint64_t distributor_base, uint64_t cpu_base) {
+    g_gicd_base = distributor_base;
+    g_gicc_base = cpu_base;
+
     *gicd_reg(GICD_CTLR) = 0;
     *gicc_reg(GICC_CTLR) = 0;
 

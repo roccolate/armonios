@@ -47,7 +47,7 @@ exception_vector_base:
 
 .macro LOWER_SYNC_ENTRY
 lower_sync_entry:
-    sub sp, sp, #272
+    sub sp, sp, #288
     stp x0, x1, [sp, #0]
     stp x2, x3, [sp, #16]
     stp x4, x5, [sp, #32]
@@ -69,6 +69,8 @@ lower_sync_entry:
     str x1, [sp, #248]
     mrs x1, spsr_el1
     str x1, [sp, #256]
+    mrs x1, sp_el0
+    str x1, [sp, #264]
 
     mrs x1, esr_el1
     mrs x2, far_el1
@@ -79,6 +81,8 @@ lower_sync_entry:
     msr elr_el1, x0
     ldr x0, [sp, #256]
     msr spsr_el1, x0
+    ldr x0, [sp, #264]
+    msr sp_el0, x0
 
     ldp x0, x1, [sp, #0]
     ldp x2, x3, [sp, #16]
@@ -96,13 +100,13 @@ lower_sync_entry:
     ldp x26, x27, [sp, #208]
     ldp x28, x29, [sp, #224]
     ldr x30, [sp, #240]
-    add sp, sp, #272
+    add sp, sp, #288
     eret
 .endm
 
 .macro IRQ_ENTRY
 irq_entry:
-    sub sp, sp, #256
+    sub sp, sp, #288
     stp x0, x1, [sp, #0]
     stp x2, x3, [sp, #16]
     stp x4, x5, [sp, #32]
@@ -120,7 +124,22 @@ irq_entry:
     stp x28, x29, [sp, #224]
     str x30, [sp, #240]
 
-    bl irq_handler
+    mrs x1, elr_el1
+    str x1, [sp, #248]
+    mrs x1, spsr_el1
+    str x1, [sp, #256]
+    mrs x1, sp_el0
+    str x1, [sp, #264]
+
+    mov x0, sp
+    bl irq_handler_frame
+
+    ldr x0, [sp, #248]
+    msr elr_el1, x0
+    ldr x0, [sp, #256]
+    msr spsr_el1, x0
+    ldr x0, [sp, #264]
+    msr sp_el0, x0
 
     ldp x0, x1, [sp, #0]
     ldp x2, x3, [sp, #16]
@@ -138,7 +157,7 @@ irq_entry:
     ldp x26, x27, [sp, #208]
     ldp x28, x29, [sp, #224]
     ldr x30, [sp, #240]
-    add sp, sp, #256
+    add sp, sp, #288
     eret
 .endm
 

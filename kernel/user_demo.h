@@ -3,8 +3,11 @@
 
 #include <stdint.h>
 
-uint64_t user_demo_run(void);
-int user_demo_range_contains(uint64_t start, uint64_t end);
+typedef int (*user_demo_map_mmio_fn_t)(uint64_t *pgd);
+
+int user_demo_prepare_images(void);
+uint64_t user_demo_run(uint64_t memory_base, uint64_t memory_size,
+                       user_demo_map_mmio_fn_t map_mmio);
 uint64_t user_demo_return_address(void);
 
 #endif

@@ -29,6 +29,27 @@ mmu_enable_identity:
 
     ret
 
+.global mmu_set_ttbr0
+.type mmu_set_ttbr0, %function
+
+// void mmu_set_ttbr0(uint64_t *pgd)
+mmu_set_ttbr0:
+    dsb sy
+    msr ttbr0_el1, x0
+    isb
+    tlbi vmalle1
+    dsb ish
+    isb
+    ret
+
+.global mmu_read_ttbr0_el1
+.type mmu_read_ttbr0_el1, %function
+
+// uint64_t mmu_read_ttbr0_el1(void)
+mmu_read_ttbr0_el1:
+    mrs x0, ttbr0_el1
+    ret
+
 .global mmu_read_sctlr_el1
 .type mmu_read_sctlr_el1, %function
 

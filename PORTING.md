@@ -25,9 +25,9 @@ The following components are board-specific and should live behind `drivers/boar
 - USB host controller
 - Network controller
 
-**Current note:** the QEMU `virt` bring-up still has some board constants wired directly into early kernel code, especially UART and GIC addresses. Before serious Raspberry Pi or other board work, move those constants behind a board/platform layer and make QEMU `virt` the reference board.
+**Current note:** QEMU `virt` is the reference board under `drivers/boards/qemu_virt/`. Its board layer owns the early UART init, GIC init, UART IRQ number, and MMIO mappings needed by the identity page table.
 
-**Next portability step:** create a `drivers/boards/qemu_virt/` implementation and have `kernel_main()` call board helpers instead of using raw MMIO addresses.
+**Next portability step:** keep moving new board-specific devices behind `drivers/boards/<board>/` helpers instead of adding raw MMIO addresses to generic kernel code.
 
 ---
 
@@ -49,9 +49,11 @@ drivers/
         └── board.c
 ```
 
-### Step 2: Implement board.h
+### Step 2: Keep the board interface split
 
-Every board must define these constants and implement these functions:
+Generic kernel code includes `drivers/board.h`. A board-specific header under
+`drivers/boards/<board>/board.h` should include that generic contract and keep
+only private constants for the board implementation.
 
 ```c
 // drivers/boards/your_board/board.h
@@ -59,69 +61,88 @@ Every board must define these constants and implement these functions:
 #pragma once
 #include <stdint.h>
 
-// ── Physical memory ───────────────────────────────────────────
-#define BOARD_DRAM_BASE     0x00000000ULL  // where RAM starts
-#define BOARD_DRAM_SIZE     0x08000000ULL  // total RAM size
+#include "drivers/board.h"
 
-// ── UART ──────────────────────────────────────────────────────
+// Private constants for this board implementation.
 #define BOARD_UART_BASE     0x09000000ULL  // change for your board
 #define BOARD_UART_IRQ      33             // GIC SPI number
-
-// ── Interrupt controller ──────────────────────────────────────
 #define BOARD_GIC_DIST_BASE 0x08000000ULL
 #define BOARD_GIC_CPU_BASE  0x08010000ULL
-
-// ── Timer ─────────────────────────────────────────────────────
-#define BOARD_TIMER_FREQ    62500000ULL    // ARM Generic Timer freq
-
-// ── Display ───────────────────────────────────────────────────
-// Set to 0 if display must be queried at runtime (e.g. RPi mailbox)
-#define BOARD_FB_BASE       0x00000000ULL
-#define BOARD_FB_WIDTH      1920
-#define BOARD_FB_HEIGHT     1080
-
-// ── Board init ────────────────────────────────────────────────
-void board_early_init(void);   // called before MMU is enabled
-void board_init(void);         // called after MMU and PMM are ready
-const char *board_name(void);  // returns "your_board_name"
 ```
 
 ### Step 3: Implement board.c
 
+Every board must implement the functions declared by `drivers/board.h`:
+
 ```c
 // drivers/boards/your_board/board.c
 
-#include "board.h"
-#include <drivers/uart/pl011.h>   // or your UART type
-#include <drivers/gic/gic400.h>   // or your GIC version
+#include "boards/your_board/board.h"
 
-void board_early_init(void) {
-    // Minimal init before the kernel is fully up.
-    // Usually just: configure UART clock, set baud rate.
-    pl011_init(BOARD_UART_BASE, 115200);
-}
-
-void board_init(void) {
-    // Full driver init after MMU and heap are available.
-    gic400_init(BOARD_GIC_DIST_BASE, BOARD_GIC_CPU_BASE);
-    // ... storage, display, network ...
-}
+#include "irq/gicv2.h"       // or your interrupt controller
+#include "kernel/mm/vmm.h"
+#include "uart/pl011.h"      // or your UART type
 
 const char *board_name(void) {
-    return "your_board v1.0";
+    return "your_board";
+}
+
+void board_early_init(void) {
+    uart_init(BOARD_UART_BASE);
+}
+
+int board_map_mmio(uint64_t *pgd) {
+    return vmm_map_page(pgd, BOARD_UART_BASE, BOARD_UART_BASE,
+                        VMM_FLAG_READ | VMM_FLAG_WRITE | VMM_FLAG_DEVICE);
+}
+
+void board_irq_init(void) {
+    gicv2_init(BOARD_GIC_DIST_BASE, BOARD_GIC_CPU_BASE);
+}
+
+void board_irq_enable(uint32_t irq) {
+    gicv2_enable_irq(irq);
+}
+
+uint32_t board_irq_ack(void) {
+    return gicv2_ack_irq();
+}
+
+void board_irq_end(uint32_t irq) {
+    gicv2_end_irq(irq);
+}
+
+int board_irq_is_spurious(uint32_t irq) {
+    return irq == GIC_SPURIOUS_IRQ;
+}
+
+uint32_t board_uart0_irq(void) {
+    return BOARD_UART_IRQ;
+}
+
+uint64_t board_virtio_mmio_base(void) {
+    return 0;
+}
+
+uint64_t board_virtio_mmio_size(void) {
+    return 0;
+}
+
+uint64_t board_virtio_mmio_stride(void) {
+    return 0;
 }
 ```
 
 ### Step 4: Select the board at build time
 
 ```bash
-# In Makefile or passed on command line:
+# qemu_virt is the default. Override it on the command line:
 make BOARD=your_board
-
-# Makefile includes the right board:
-BOARD_DIR = drivers/boards/$(BOARD)
-CFLAGS   += -I$(BOARD_DIR)
 ```
+
+The Makefile compiles `drivers/boards/$(BOARD)/board.o`. Do not add the board
+directory to the global include path unless there is a specific reason; generic
+kernel files should keep resolving `#include "board.h"` to `drivers/board.h`.
 
 ---
 
@@ -171,14 +192,14 @@ This is your most important milestone. Nothing else matters until you have text 
 ### Phase D: Memory
 
 - [ ] Find the board's RAM size (from DTB, firmware API, or hardcoded)
-- [ ] Update `BOARD_DRAM_BASE` and `BOARD_DRAM_SIZE`
+- [ ] Verify `dtb_get_memory()` sees the RAM map, or add a board-specific fallback
 - [ ] Verify PMM initializes without overwriting kernel or firmware regions
 
 ### Phase E: Display
 
 **Option 1: Linear framebuffer (simplest)**
 - Find framebuffer base address from DTB (`/chosen/linux,initrd-start` or `/framebuffer` node)
-- Set `BOARD_FB_BASE`, `BOARD_FB_WIDTH`, `BOARD_FB_HEIGHT`
+- Feed the resolved base address, dimensions, pitch, and pixel format into the framebuffer driver
 - No additional driver code needed
 
 **Option 2: Raspberry Pi mailbox (RPi 4/5)**

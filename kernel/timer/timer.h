@@ -6,7 +6,7 @@
 #define TIMER_IRQ 30U
 
 void timer_init(uint32_t hz);
-void timer_handle_irq(void);
+void timer_handle_irq(void *context);
 uint64_t timer_ticks(void);
 
 #endif

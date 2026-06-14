@@ -1,6 +1,6 @@
 # Roadmap
 
-This document describes the planned development trajectory for KolibriARM. Each phase has clear entry/exit criteria — a phase is "done" only when all its criteria are met and verified in QEMU.
+This document describes the planned development trajectory for KolibriARM. Each phase has clear entry/exit criteria — a phase is "done" only when all its criteria are met and verified by the listed host tests and QEMU smoke checks.
 
 ---
 
@@ -15,7 +15,7 @@ This document describes the planned development trajectory for KolibriARM. Each 
 - Stack initialization
 - Jump to `kernel_main()` in C
 - UART PL011 driver (polling, no interrupts)
-- Linker script placing code at `0x40000000`
+- Linker script placing code at `0x40080000`
 - Makefile with `make`, `make qemu`, `make qemu-debug` targets
 
 **Exit criteria:**
@@ -35,7 +35,7 @@ This document describes the planned development trajectory for KolibriARM. Each 
 
 ---
 
-## Phase 1 — Memory Management `[current]`
+## Phase 1 — Memory Management [done]
 
 **Goal:** The kernel can allocate and free physical memory pages, and map virtual memory with the MMU enabled.
 
@@ -49,9 +49,10 @@ This document describes the planned development trajectory for KolibriARM. Each 
 - Enable MMU at EL1
 - 4-level page tables (PGD → PUD → PMD → PTE), 4 KB granule
 - Identity map the kernel (physical == virtual for kernel space)
-- Separate user address space (0x0000_0000_0000_0000 – 0x0000_FFFF_FFFF_FFFF)
 - `vmm_map(vaddr, paddr, flags)` — map a virtual page to a physical frame
-- `vmm_unmap(vaddr)` — unmap and free
+- User-accessible mappings via `VMM_FLAG_USER`
+- `TTBR0_EL1` install/read helpers for process address spaces
+- `vmm_unmap_page()` / `vmm_unmap_range()`
 
 ### 1.3 Kernel Heap
 - Simple slab allocator or bump allocator
@@ -59,29 +60,34 @@ This document describes the planned development trajectory for KolibriARM. Each 
 - Used internally by the kernel only (no userland malloc yet)
 
 **Exit criteria:**
-- [ ] MMU enabled, kernel running with virtual addresses
-- [ ] `pmm_alloc_page()` returns unique non-overlapping frames
-- [ ] `kmalloc(64)` works without crashing
-- [ ] All tests pass in QEMU
+- [x] MMU enabled, kernel running with identity-mapped virtual addresses
+- [x] `pmm_alloc_page()` returns unique non-overlapping frames
+- [x] `kmalloc(64)` works without crashing
+- [x] Host PMM/kheap tests pass
+- [x] Host VMM map/translate/unmap/user-flag tests pass
+- [x] QEMU smoke test reaches MMU, timer, and scheduler demo
+- [x] User-accessible page mappings exist
+- [x] `TTBR0_EL1` helpers exist for Phase 2 process switching
+- [x] `vmm_unmap_*()` exists and is tested
 
 **Estimated effort:** 3–5 weeks
 
 ---
 
-## Phase 2 — Processes and Scheduler
+## Phase 2 — Processes and Scheduler [EL0 demo done]
 
-**Goal:** Multiple independent processes can run concurrently, each in its own address space.
+**Goal:** Multiple EL0 processes can run concurrently under scheduler control. This phase proves the EL0 entry path, syscalls, timer preemption, and PCB save/restore. Fully separate process page tables are tracked explicitly in Phase 2.5.
 
-**Immediate milestone:** before full processes, run one embedded EL0 program that prints `Hello from EL0` through `sys_write` and exits through `sys_exit`. This proves the exception path, syscall ABI, EL1-to-EL0 transition, and basic user stack setup without requiring a filesystem or loader.
+**Result:** the embedded EL0 demo now creates two process table entries with separate stacks. Timer IRQ can preempt one EL0 process, save its frame, load the next READY process, and return to EL0. `sys_yield` and `sys_exit` also switch to the next READY process when possible.
 
 ### 2.0 First EL0 Hello World
-- Keep the first user program embedded in the kernel image
-- Create a user stack and initial register frame
-- Enter EL0 with `eret`
-- Handle `svc #0` from EL0
-- Dispatch syscall number from `x8`
-- Implement `sys_write` by forwarding to UART
-- Implement `sys_exit` by returning control to the kernel or halting the task
+- Embedded first user program in the kernel image
+- Created a user stack and initial EL0 entry path
+- Entered EL0 with `eret`
+- Handled `svc #0` from EL0
+- Dispatched syscall number from `x8`
+- Implemented `sys_write` by forwarding stdout/stderr to UART
+- Implemented `sys_exit` by returning control to the kernel
 
 **Exit criteria:**
 - [x] QEMU prints `Hello from EL0`
@@ -89,53 +95,135 @@ This document describes the planned development trajectory for KolibriARM. Each 
 - [x] `sys_exit` cleanly stops the user task
 - [x] Kernel remains alive after the user task exits
 
+### 2.0.1 Cleanup Before Real Processes
+- [x] Move `kernel_main()` PMM/kheap/VMM smoke tests behind debug/demo helpers
+- [x] Keep the EL0 demo runnable without mixing it into unrelated boot diagnostics
+- [x] Replace the fixed embedded-user range check with process-owned user memory metadata
+- [x] Keep the next user image linked into the kernel until a tiny loader-owned blob exists
+- [x] Add `user_image_t` metadata and a tiny loader helper that prepares a PCB from image base/size/entry plus a user stack
+- [x] Copy the linked EL0 blob into per-process loader-owned executable slots before running it
+- [x] Move the EL0 demo payload into `programs/` so kernel entry glue and user code are separate modules
+- [x] Add a tiny flat image header with magic, image size, and multiple entry offsets
+- [x] Build the EL0 demo as a standalone flat binary and embed that serialized image as the current boot-time source
+
 ### 2.1 Process Control Block (PCB)
 ```c
 typedef struct process {
-    uint64_t  pid;
-    uint64_t  regs[31];      // x0–x30
-    uint64_t  sp, pc, pstate;
-    uint64_t *page_table;    // PGD physical address
-    int       state;         // RUNNING, READY, BLOCKED, ZOMBIE
+    uint32_t pid;
+    uint64_t regs[31];       // x0-x30
+    uint64_t sp, pc, pstate;
+    uint64_t *page_table;    // PGD address
+    process_state_t state;   // READY, RUNNING, BLOCKED, ZOMBIE
     struct process *next;
 } process_t;
 ```
+
+Implemented so far:
+- [x] Initial PCB structure with saved-register slots, EL0 entry state, page-table pointer, state, exit code, and linked-list pointer
+- [x] Syscall dispatch saves the latest EL0 register frame, PC, and PSTATE into the current PCB
+- [x] Current-process pointer for syscall dispatch
+- [x] Fixed-size process table with allocate/release helpers
+- [x] Round-robin READY process selection and ZOMBIE PCB reclamation helpers
+- [x] User memory region metadata for validating syscall buffers
+- [x] Embedded EL0 demos are allocated from the process table and reclaimed after returning to EL1
+- [x] Two EL0 demo processes can run in one kernel boot path
 
 ### 2.2 Context Switch (ASM)
 - Save/restore all AArch64 registers
 - Switch page tables via `TTBR0_EL1`
 - Implemented in ASM for correctness and speed
 
+Implemented so far:
+- [x] Lower-EL synchronous syscall frames save/restore full x0-x30 plus ELR/SPSR
+- [x] IRQ entry now preserves ELR/SPSR and exposes an `exception_frame_t` to C
+- [x] Timer IRQ path can save the interrupted current process frame into its PCB
+- [x] EL1-to-EL0 entry loads PSTATE from the PCB instead of hardcoding it
+
 ### 2.3 Preemptive Scheduler
 - ARM Generic Timer (CNTV_EL0) as tick source
 - Round-robin scheduler as baseline
 - Priority levels (0–7) in later iteration
 
+Implemented so far:
+- [x] `sys_yield` can cooperatively switch from the current EL0 process to the next READY process
+- [x] `sys_exit` switches to the next READY process before returning to EL1 when possible
+- [x] Timer IRQ can preempt an EL0 process and switch to the next READY process
+
 ### 2.4 System Calls
 - `svc #0` entry point
 - Function number in `x8`
-- First 6 syscalls:
+- Implemented so far:
 
 | x8 | Name           | Description               |
 |----|----------------|---------------------------|
 | 1  | `sys_exit`     | Terminate current process |
 | 2  | `sys_yield`    | Voluntarily yield CPU     |
 | 3  | `sys_getpid`   | Return current PID        |
-| 4  | `sys_write`    | Write to UART (debug)     |
-| 5  | `sys_alloc`    | Allocate userland pages   |
-| 6  | `sys_free`     | Free userland pages       |
+| 20 | `sys_mmap`     | Map anonymous user pages |
+| 21 | `sys_munmap`   | Unmap owned anonymous user pages |
+| 43 | `sys_write`    | Write to UART-backed stdout/stderr |
+
+`sys_mmap` / `sys_munmap` now create and remove PTE-backed anonymous mappings for the current process. Image and stack regions still use process-owned metadata for syscall pointer validation.
 
 **Exit criteria:**
-- [ ] Two concurrent processes run without corrupting each other's memory
-- [ ] Timer interrupt fires and switches context
-- [ ] `sys_exit` cleanly reclaims process resources
-- [ ] All registers correctly saved/restored across context switches
+- [x] Two EL0 processes run without corrupting each other's memory
+- [x] Timer interrupt fires and switches context
+- [x] `sys_exit` cleanly reclaims process resources
+- [x] All registers correctly saved/restored across context switches
 
 **Estimated effort:** 4–6 weeks
 
 ---
 
-## Phase 3 — Drivers and Interrupts
+## Phase 2.5 — Real Process Address Spaces [done]
+
+**Goal:** Move from EL0 demos running in the kernel identity map to real per-process user address spaces.
+
+### 2.5.1 Per-process Page Tables
+- Create each process page table from a minimal kernel/device mapping template
+- Map the user image into a process-owned virtual address range with read/execute user permissions
+- Map each user stack into a process-owned virtual address range with read/write user permissions
+- Keep kernel-only mappings inaccessible from EL0
+
+### 2.5.2 User Memory Syscalls
+- Make `sys_mmap` allocate physical pages and install user PTEs
+- Make `sys_munmap` tear down exact user mappings and release backing pages
+- Keep process-owned user-region metadata as the validation source for syscalls
+
+### 2.5.3 Loader Integration
+- Keep the flat user-image format from Phase 2.0.1
+- Load a flat image into process-owned mappings instead of directly executable kernel identity slots
+- Switch `TTBR0_EL1` on context switches using each PCB's `page_table`
+
+Implemented so far:
+- [x] EL0 demo processes now get distinct `TTBR0_EL1` page-table roots
+- [x] Each demo table maps RAM/MMIO for EL1 and remaps that process's image RX user and stack RW user
+- [x] Syscall and IRQ process switches install the next process's `page_table` before returning to EL0
+- [x] The kernel page table is restored after the EL0 demo returns to EL1
+- [x] Host VMM test covers replacing a kernel-only page with a user executable mapping
+- [x] `sys_mmap` now allocates physical pages and installs user PTEs in the current process table
+- [x] `sys_munmap` tears down exact owned anonymous mappings and frees backing pages
+- [x] The EL0 demo writes and reads a byte through `sys_mmap` memory before unmapping it
+- [x] `user_vm` helper centralizes anonymous user mapping logic outside syscall dispatch
+- [x] EL0 demo images and stacks now use user VAs mapped to loader-owned physical slots
+- [x] Kernel page table no longer exposes demo image/stack slots with user permissions
+- [x] Host user-vm test verifies physical-backed mappings stay per-process
+- [x] Lower-EL memory faults are converted into process exit without crashing the kernel
+- [x] Faulting EL0 demo intentionally touches an unmapped pointer and the scheduler continues
+
+**Exit criteria:**
+- [x] Two EL0 processes have distinct user image and stack mappings
+- [x] User writes cannot modify another process's stack or image
+- [x] `sys_mmap` / `sys_munmap` create and remove actual PTEs
+- [x] Invalid user pointers are rejected or faulted without corrupting kernel state
+- [x] Host VMM/process/user-vm tests cover the new mapping behavior
+- [x] QEMU smoke test still runs the two EL0 demos with timer preemption
+
+**Estimated effort:** 2–4 weeks
+
+---
+
+## Phase 3 — Drivers and Interrupts [core criteria met]
 
 **Goal:** Real hardware drivers with interrupt-driven I/O.
 
@@ -145,15 +233,37 @@ typedef struct process {
 - Route UART RX interrupt
 - IRQ handler table in C
 
+Implemented so far:
+- [x] GICv2 distributor and CPU interface initialize on QEMU `virt`
+- [x] QEMU `virt` board layer owns GIC base addresses and MMIO mapping
+- [x] Timer PPI is enabled through GIC
+- [x] IRQ handler table in C with register/unregister helpers
+- [x] Timer IRQ is dispatched through the handler table
+- [x] UART RX IRQ is registered through the same handler table
+
 ### 3.2 UART (interrupt-driven)
 - Replace polling UART with interrupt-driven RX
 - Circular ring buffer for received characters
 - Foundation for a keyboard input abstraction
 
-### 3.3 USB HID (keyboard)
-- QEMU `virt` exposes USB via EHCI/OHCI
-- Basic HID boot protocol (no full USB stack yet)
-- Translate HID keycodes to ASCII
+Implemented so far:
+- [x] QEMU `virt` board layer owns PL011 base address and UART0 IRQ number
+- [x] PL011 RX/timeout interrupt handler
+- [x] Circular RX ring buffer
+- [x] Non-blocking `uart_getc_nonblock()` and `uart_rx_available()`
+- [x] UART0 RX interrupt enabled on QEMU `virt`
+- [x] QEMU `-nographic` console input is echoed by a kernel console thread
+
+### 3.3 Early Input Path
+- Use UART console input as the temporary keyboard path in QEMU
+- Keep USB HID out of the Phase 3 exit criteria until GUI/user input needs it
+- Translate real keyboard input to ASCII when a USB HID path is added later
+
+Implemented so far:
+- [x] Early keyboard path via UART console input in QEMU
+
+Deferred:
+- [ ] USB HID keyboard driver
 
 ### 3.4 Framebuffer Display
 - Query framebuffer address and dimensions from DTB
@@ -162,24 +272,81 @@ typedef struct process {
 - `fb_fillrect(x, y, w, h, color)`
 - `fb_blit(dst_x, dst_y, src, w, h)` — copy bitmap region
 
+Implemented so far:
+- [x] Linear framebuffer descriptor
+- [x] `fb_putpixel()`
+- [x] `fb_fillrect()` with clipping
+- [x] `fb_blit()` with clipping
+- [x] Host tests for framebuffer primitives
+- [x] `simple-framebuffer` DTB parser with host tests
+- [x] Minimal `virtio-gpu` modern MMIO control queue
+- [x] 640x480 framebuffer test pattern flushed to scanout
+- [x] Headless QEMU `screendump` verified nonblank rectangle colors
+
+Note: QEMU does not expose a `simple-framebuffer` node by default, and local `ramfb` is missing its option ROM. The visible smoke path currently uses `virtio-gpu-device` through `make qemu-fb`; the `simple-framebuffer` parser remains host-tested for future firmware-provided framebuffers.
+
 ### 3.5 SD Card / Storage (QEMU virtio-blk)
 - virtio-blk driver (simpler than real SD for emulation)
 - Read/write 512-byte sectors
 - Foundation for filesystem layer
 
+Implemented so far:
+- [x] QEMU `virt` board layer maps the virtio-mmio transport range
+- [x] `virtio-blk` MMIO scan finds the block transport exposed by QEMU
+- [x] `virtio-blk` probe validates magic/version/device ID
+- [x] `virtio-blk` capacity read from config space
+- [x] `virtio-blk` modern MMIO queue initialization
+- [x] Synchronous sector read path for sector 0 smoke testing
+- [x] Host tests for present and non-block-device probe paths
+- [x] `make qemu-blk` target creates a tiny raw disk image and attaches it with modern virtio-mmio
+
 **Exit criteria:**
-- [ ] Timer interrupt drives the scheduler (no polling)
-- [ ] Keyboard input works in QEMU
-- [ ] Solid colored rectangle visible on framebuffer
-- [ ] Can read a sector from virtio-blk
+- [x] Timer interrupt drives the scheduler (no polling)
+- [x] Keyboard input works in QEMU through the UART console path
+- [x] Solid colored rectangle visible on framebuffer
+- [x] Can read a sector from virtio-blk
 
 **Estimated effort:** 6–8 weeks
+
+---
+
+## Phase 3.6 — Board Abstraction Cleanup [done]
+
+**Goal:** Keep QEMU moving fast while making the next ARM64 board port a contained driver/platform change.
+
+**Scope:**
+- Add a generic `drivers/board.h` interface used by kernel code
+- Make `BOARD ?= qemu_virt` selectable in the Makefile
+- Remove direct `boards/qemu_virt/board.h` includes from `kernel/`
+- Keep MMIO ranges, IRQ numbers, UART setup, and virtio discovery behind board helpers
+- Keep QEMU-specific devices useful, but avoid designing generic APIs around QEMU-only details
+
+Implemented so far:
+- [x] Added a generic `drivers/board.h` board contract
+- [x] Makefile selects `drivers/boards/$(BOARD)/board.o` with `BOARD ?= qemu_virt`
+- [x] Kernel init code uses the generic board interface instead of QEMU headers
+- [x] IRQ ack/end/spurious handling is routed through board helpers
+- [x] QEMU constants stay in `drivers/boards/qemu_virt/`
+
+**Exit criteria:**
+- [x] `make BOARD=qemu_virt` builds the current system
+- [x] Kernel code includes only the generic board interface
+- [x] QEMU virt still boots, receives UART input, draws the framebuffer pattern, and probes virtio-blk
+- [x] `PORTING.md` matches the real board interface
+
+**Estimated effort:** 1–2 weeks
 
 ---
 
 ## Phase 4 — Filesystem and IPC
 
 **Goal:** Persistent storage and inter-process communication.
+
+### 4.0 Boot Program Store / tmpfs Seed
+- Register embedded flat user images by name
+- Expose a tiny read-only bootfs or tmpfs seed for loader tests
+- Spawn a program by name before FAT32 exists
+- Keep FAT32 as the next storage-backed source for the same loader path
 
 ### 4.1 Virtual Filesystem (VFS)
 - Minimal VFS layer with mount points
@@ -197,6 +364,7 @@ typedef struct process {
 - Inspired by KolibriOS's IPC model: simple, no sockets needed initially
 
 **Exit criteria:**
+- [ ] Can spawn a named flat user image through bootfs/tmpfs
 - [ ] Can load and execute a binary from FAT32 image
 - [ ] Two processes exchange messages without kernel crash
 - [ ] tmpfs supports create/read/write/delete
@@ -222,19 +390,20 @@ typedef struct process {
 - Clipping to window bounds
 
 ### 5.3 Font Rendering
-- FreeType 2 (static lib, compiled with `-ffreestanding` patches)
-  OR a custom bitmap font renderer for the first iteration
-- UTF-8 text rendering
-- Basic glyph cache
+- Built-in bitmap font renderer for the first iteration
+- ASCII text rendering first, then UTF-8 once the terminal path is stable
+- Optional later: FreeType 2 as a static freestanding library
+- Basic glyph cache after the bitmap text path is reliable
 
 ### 5.4 GUI Event System
 - Keyboard and mouse events routed from drivers to focused window
 - Simple message-passing: driver → kernel event queue → target process
+- USB HID keyboard/mouse drivers can land here if UART input is no longer enough
 
 **Exit criteria:**
 - [ ] Two overlapping windows visible, correct z-order
 - [ ] Window can be "moved" (redrawn at new position)
-- [ ] Text renders with a TTF font
+- [ ] Text renders with a built-in bitmap font
 - [ ] Keyboard input reaches the focused window
 
 **Estimated effort:** 8–12 weeks
@@ -245,10 +414,15 @@ typedef struct process {
 
 **Goal:** A usable system with a shell, text editor, and file manager.
 
-### 6.1 Shell
+### 6.0 Developer Kernel Console
+- UART-backed monitor for debug commands while the GUI shell is not ready
+- Built-in commands such as `help`, `mem`, `ps`, `ticks`, `storage`, and `fb`
+- Not a POSIX shell and not the final user-facing terminal
+
+### 6.1 User Shell
 - Minimal command interpreter
 - Built-in commands: `ls`, `cd`, `cat`, `run`, `kill`, `mem`
-- Runs in a terminal window (GUI)
+- Runs in a terminal window once VFS, loader, and GUI text output exist
 
 ### 6.2 Text Editor
 - Single-file editor (inspired by KolibriOS's Tinypad)
@@ -303,7 +477,7 @@ typedef struct process {
 - [ ] UART output visible on serial adapter
 - [ ] Framebuffer shows boot screen on HDMI
 
-**Estimated effort:** 4–6 weeks (assuming clean driver abstraction from Phase 3)
+**Estimated effort:** 4–6 weeks (assuming clean driver abstraction from Phase 3.6)
 
 ---
 
@@ -325,7 +499,9 @@ typedef struct process {
 | v0.1    | Boots, UART output                     | 0        |
 | v0.2    | Memory management working              | 0–1      |
 | v0.3    | Preemptive multitasking                | 0–2      |
+| v0.4    | Real process address spaces            | 0–2.5    |
 | v0.5    | Drivers + framebuffer                  | 0–3      |
+| v0.6    | Board abstraction cleanup              | 0–3.6    |
 | v0.7    | Filesystem + GUI basics                | 0–5      |
 | v1.0    | Usable on QEMU: shell + editor + net   | 0–7      |
 | v1.5    | Running on real RPi 4/5 hardware       | 0–8      |

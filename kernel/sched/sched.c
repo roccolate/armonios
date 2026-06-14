@@ -52,15 +52,6 @@ static uint32_t g_next_pid = 1;
 void switch_context(sched_context_t *old_context, sched_context_t *new_context);
 void sched_thread_trampoline(void);
 
-static void print_hex64(uint64_t value) {
-    static const char digits[] = "0123456789abcdef";
-
-    uart_puts("0x");
-    for (int shift = 60; shift >= 0; shift -= 4) {
-        uart_putc(digits[(value >> shift) & 0xf]);
-    }
-}
-
 void sched_init(uint32_t quantum_ticks) {
     if (quantum_ticks == 0) {
         quantum_ticks = 1;
@@ -163,12 +154,16 @@ void sched_yield(void) {
     kernel_thread_t *old_thread;
     kernel_thread_t *next_thread;
 
+    old_thread = g_current_thread;
+    if (old_thread == 0) {
+        return;
+    }
+
     irq_disable();
 
-    old_thread = g_current_thread;
     next_thread = next_runnable_thread();
 
-    if (old_thread == 0 || next_thread == 0 || next_thread == old_thread) {
+    if (next_thread == 0 || next_thread == old_thread) {
         irq_enable();
         return;
     }
@@ -223,12 +218,6 @@ void sched_on_timer_tick(void) {
     if (g_ticks_left == 0) {
         g_sched_quantums++;
         g_ticks_left = g_quantum_ticks;
-
-        if (g_sched_quantums <= 3) {
-            uart_puts("SCHED quantum: ");
-            print_hex64(g_sched_quantums);
-            uart_puts("\n");
-        }
     }
 }
 

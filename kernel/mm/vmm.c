@@ -12,6 +12,7 @@
 #define DESC_AF             (1ULL << 10)
 #define DESC_SH_INNER       (3ULL << 8)
 #define DESC_AP_RO          (1ULL << 7)
+#define DESC_AP_USER        (1ULL << 6)
 #define DESC_UXN            (1ULL << 54)
 #define DESC_PXN            (1ULL << 53)
 #define DESC_ATTR_NORMAL    (0ULL << 2)
@@ -83,8 +84,14 @@ static uint64_t page_descriptor(uint64_t paddr, uint64_t flags) {
         descriptor |= DESC_AP_RO;
     }
 
+    if ((flags & VMM_FLAG_USER) != 0) {
+        descriptor |= DESC_AP_USER;
+    }
+
     if ((flags & VMM_FLAG_EXEC) == 0) {
         descriptor |= DESC_UXN | DESC_PXN;
+    } else if ((flags & VMM_FLAG_USER) != 0) {
+        descriptor |= 0;
     } else {
         descriptor |= DESC_UXN;
     }
@@ -157,7 +164,7 @@ int vmm_map_range(uint64_t *pgd, uint64_t vaddr, uint64_t paddr,
     return 0;
 }
 
-uint64_t vmm_leaf_entry(uint64_t *pgd, uint64_t vaddr) {
+static uint64_t *leaf_table(uint64_t *pgd, uint64_t vaddr) {
     uint64_t *table = pgd;
 
     if (table == 0) {
@@ -172,6 +179,65 @@ uint64_t vmm_leaf_entry(uint64_t *pgd, uint64_t vaddr) {
         }
 
         table = (uint64_t *)(uintptr_t)(entry & DESC_ADDR_MASK);
+    }
+
+    return table;
+}
+
+int vmm_unmap_page(uint64_t *pgd, uint64_t vaddr) {
+    uint64_t *level3;
+    uint64_t index3;
+
+    if (pgd == 0 || (vaddr & (PAGE_SIZE - 1ULL)) != 0) {
+        return -1;
+    }
+
+    level3 = leaf_table(pgd, vaddr);
+    if (level3 == 0) {
+        return -1;
+    }
+
+    index3 = table_index(vaddr, 3);
+    if ((level3[index3] & DESC_VALID) == 0) {
+        return -1;
+    }
+
+    level3[index3] = 0;
+
+    return 0;
+}
+
+int vmm_unmap_range(uint64_t *pgd, uint64_t vaddr, uint64_t size) {
+    uint64_t aligned_vaddr;
+    uint64_t offset;
+    uint64_t end;
+
+    if (pgd == 0) {
+        return -1;
+    }
+
+    if (size == 0) {
+        return 0;
+    }
+
+    aligned_vaddr = page_align_down(vaddr);
+    offset = vaddr - aligned_vaddr;
+    end = page_align_up(offset + size);
+
+    for (uint64_t unmapped = 0; unmapped < end; unmapped += PAGE_SIZE) {
+        if (vmm_unmap_page(pgd, aligned_vaddr + unmapped) != 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+uint64_t vmm_leaf_entry(uint64_t *pgd, uint64_t vaddr) {
+    uint64_t *table = leaf_table(pgd, vaddr);
+
+    if (table == 0) {
+        return 0;
     }
 
     return table[table_index(vaddr, 3)];
