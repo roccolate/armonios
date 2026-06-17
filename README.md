@@ -24,7 +24,7 @@ KolibriARM is a bare-metal operating system for ARM64 (AArch64) processors, writ
 
 ## Current Status
 
-> **Pre-alpha.** The kernel boots on QEMU `virt`, brings up memory management, enables an identity-mapped MMU, runs three embedded EL0 demo processes with syscall and timer-IRQ context switches, and runs a small kernel-thread scheduler demo. One EL0 demo intentionally faults to verify that the kernel can terminate a bad user process and continue scheduling.
+> **Pre-alpha.** The kernel boots on QEMU `virt`, brings up memory management, enables an identity-mapped MMU, runs EL0 demo processes with syscall and timer-IRQ context switches, and drops into a minimal EL0 shell. One EL0 demo intentionally faults to verify that the kernel can terminate a bad user process and continue scheduling. With `make qemu-blk`, QEMU boots with a generated FAT32 virtio-blk image and reloads the EL0 demo through the VFS path.
 
 | Component         | Status       | Notes                                  |
 |-------------------|-------------|----------------------------------------|
@@ -34,17 +34,17 @@ KolibriARM is a bare-metal operating system for ARM64 (AArch64) processors, writ
 | Scheduler         | Early        | Kernel threads plus EL0 timer preemption |
 | IRQ dispatch      | Early        | GICv2, timer PPI, C handler table      |
 | UART driver       | Working      | PL011 TX polling, RX IRQ ring, QEMU console input echo |
-| Syscalls          | Early        | `svc #0`, `sys_exit`, `sys_yield`, `sys_getpid`, `sys_mmap`/`sys_munmap` metadata, `sys_write` |
-| Userland          | Early        | Three embedded EL0 demos, including one fault-path test |
-| Framebuffer       | Early        | Linear primitives plus virtio-gpu test pattern |
-| Storage           | Early        | virtio-blk MMIO probe and sector-0 read smoke |
-| Filesystem        | Planned      | FAT32 read-only first                  |
-| GUI               | Planned      | Custom compositor, no X11              |
+| Syscalls          | Early        | `svc #0`, process, memory, UART/stdin, VFS read/write/seek, and fixed-message IPC calls |
+| Userland          | Early        | EL0 demos plus a shell, line editor for `/fat/edit.txt`, and process monitor |
+| Framebuffer       | Early        | Linear primitives plus virtio-gpu demo windows |
+| Storage           | Early        | virtio-blk MMIO probe and FAT32 image smoke |
+| Filesystem        | Early        | Fixed VFS, bootfs seed, tmpfs foundation, FAT32 root 8.3 lookup/listing plus limited overwrite of existing files |
+| GUI               | Early        | Kernel-managed demo windows, bitmap text, focused key delivery |
 | Networking        | Planned      | lwIP integration                       |
 
 ## Current Milestone
 
-The current milestone is moving from embedded EL0 demos toward loader-owned user images.
+The current milestone is the Phase 5 GUI foundation.
 
 Initial scope:
 - [x] Add a syscall path for `svc #0` with syscall number in `x8`.
@@ -60,13 +60,17 @@ Initial scope:
 - [x] Move the EL0 demo payload into `programs/` while keeping the kernel EL0 transition code separate.
 - [x] Add a tiny flat user-image header with image size and entry offsets.
 - [x] Build the EL0 demo as `build/programs/user_demo.bin` and embed that serialized image as a kernel blob.
-- [ ] Move from an embedded demo image to a tiny loader-owned program image.
+- [x] Add bootfs and VFS paths for named loader-owned program images.
+- [x] Load and execute the demo from a generated FAT32 virtio-blk image.
+- [x] Exchange a fixed-size IPC message between two EL0 processes.
+- [x] Render two overlapping GUI windows through `virtio-gpu`.
+- [x] Render built-in bitmap text in GUI windows.
+- [x] Route early UART keyboard characters to the focused demo window.
 
 Out of scope for this milestone:
-- Filesystem loading.
-- GUI.
 - Porting KolibriOS applications directly.
-- Multi-process userland.
+- Full POSIX-like process/userland APIs.
+- Per-process userland GUI ownership and full application windows.
 
 ---
 
@@ -115,10 +119,28 @@ make BOARD=qemu_virt
 # Run in QEMU
 make qemu
 
-# Run in QEMU with a tiny virtio-blk disk image
+# At the EL0 shell prompt, try:
+# help
+# ls
+# ls /fat
+# ps
+# ticks
+# pwd
+# cd /
+# mem
+# cat /tmp/note
+# cat /fat/edit.txt
+# run hello
+# run loop
+# edit /fat/edit.txt
+# monitor
+# kill last
+# exit
+
+# Run in QEMU with a generated FAT32 virtio-blk image
 make qemu-blk
 
-# Run in QEMU with virtio-gpu headless and draw the framebuffer test pattern
+# Run in QEMU with virtio-gpu headless and draw the GUI window demo
 make qemu-fb
 
 # Run in QEMU with a visible virtio-gpu window
@@ -152,7 +174,8 @@ kolibriarm/
 │   ├── kernel.c        # kernel_main, early init
 │   ├── mm/             # Memory management
 │   ├── sched/          # Scheduler
-│   └── ipc/            # System calls and IPC (planned)
+│   ├── ipc.c           # Fixed-message IPC queue
+│   └── gui.c           # Early kernel-managed window compositor
 ├── drivers/            # Hardware drivers (C + minimal ASM)
 │   ├── board.h         # Generic board/platform interface
 │   ├── boards/         # Board/platform glue, starting with qemu_virt

@@ -6,8 +6,10 @@
 typedef int (*user_demo_map_mmio_fn_t)(uint64_t *pgd);
 
 int user_demo_prepare_images(void);
+int user_demo_prepare_vfs_images(const char *path);
 uint64_t user_demo_run(uint64_t memory_base, uint64_t memory_size,
                        user_demo_map_mmio_fn_t map_mmio);
+int user_demo_spawn_vfs(const char *path, uint32_t entry_index);
 uint64_t user_demo_return_address(void);
 
 #endif

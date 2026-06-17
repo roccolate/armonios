@@ -2,8 +2,41 @@
 
 #include "unity/unity.h"
 #include "../kernel/user_image.h"
+#include "../kernel/vfs.h"
 
 extern char __user_demo_start[];
+
+typedef struct {
+    const uint8_t *data;
+    uint64_t size;
+} user_image_test_file_t;
+
+static int user_image_test_read(void *context, uint64_t offset,
+                                uint8_t *buffer, uint64_t capacity,
+                                uint64_t *bytes_read) {
+    user_image_test_file_t *file = (user_image_test_file_t *)context;
+    uint64_t count;
+
+    if (bytes_read != 0) {
+        *bytes_read = 0;
+    }
+
+    if (file == 0 || buffer == 0 || bytes_read == 0 || offset > file->size) {
+        return -1;
+    }
+
+    count = capacity;
+    if (count > file->size - offset) {
+        count = file->size - offset;
+    }
+
+    for (uint64_t i = 0; i < count; i++) {
+        buffer[i] = file->data[offset + i];
+    }
+
+    *bytes_read = count;
+    return 0;
+}
 
 void test_user_image_entry_uses_base_plus_offset(void) {
     user_image_t image = {
@@ -83,6 +116,8 @@ void test_user_image_load_flat_uses_header_entry_table(void) {
     source.header.entry_offsets[1] = sizeof(source.header) + 8;
     source.header.entry_offsets[2] = 0;
     source.header.entry_offsets[3] = 0;
+    source.header.entry_offsets[4] = 0;
+    source.header.entry_offsets[5] = 0;
     for (uint32_t i = 0; i < sizeof(source.code); i++) {
         source.code[i] = (uint8_t)(0x80U + i);
     }
@@ -119,6 +154,52 @@ void test_user_image_load_bootfs_flat_uses_named_boot_file(void) {
     TEST_ASSERT_EQUAL_UINT64((uint8_t)__user_demo_start[1], loaded[1]);
     TEST_ASSERT_EQUAL_UINT64((uint8_t)__user_demo_start[2], loaded[2]);
     TEST_ASSERT_EQUAL_UINT64((uint8_t)__user_demo_start[3], loaded[3]);
+}
+
+void test_user_image_load_vfs_flat_uses_mounted_file(void) {
+    struct {
+        user_flat_image_header_t header;
+        uint8_t code[16];
+    } source;
+    uint8_t loaded[sizeof(source)] = { 0 };
+    user_image_t image;
+    user_image_test_file_t file = {
+        .data = (const uint8_t *)(const void *)&source,
+        .size = sizeof(source),
+    };
+    vfs_node_t node = {
+        .path = "/fat/user_demo.bin",
+        .size = sizeof(source),
+        .read = user_image_test_read,
+        .context = &file,
+    };
+
+    source.header.magic = USER_IMAGE_MAGIC;
+    source.header.header_size = sizeof(source.header);
+    source.header.entry_count = 1;
+    source.header.image_size = sizeof(source);
+    source.header.entry_offsets[0] = sizeof(source.header) + 4;
+    source.header.entry_offsets[1] = 0;
+    source.header.entry_offsets[2] = 0;
+    source.header.entry_offsets[3] = 0;
+    source.header.entry_offsets[4] = 0;
+    source.header.entry_offsets[5] = 0;
+    for (uint32_t i = 0; i < sizeof(source.code); i++) {
+        source.code[i] = (uint8_t)(0xa0U + i);
+    }
+
+    vfs_reset();
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_mount_static(&node, 1));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)user_image_load_vfs_flat(
+                                 &image, "vfs-flat", "/fat/user_demo.bin",
+                                 (uint64_t)(uintptr_t)loaded, sizeof(loaded),
+                                 0));
+    TEST_ASSERT_TRUE(image.name == (const char *)"vfs-flat");
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(uintptr_t)loaded, image.base);
+    TEST_ASSERT_EQUAL_UINT64(sizeof(source), image.size);
+    TEST_ASSERT_EQUAL_UINT64(sizeof(source.header) + 4, image.entry_offset);
+    TEST_ASSERT_EQUAL_UINT64(source.code[0], loaded[sizeof(source.header)]);
 }
 
 void test_user_image_prepare_process_rejects_invalid_inputs(void) {
@@ -196,6 +277,8 @@ void test_user_image_load_flat_rejects_invalid_headers(void) {
     source.entry_offsets[1] = 0;
     source.entry_offsets[2] = 0;
     source.entry_offsets[3] = 0;
+    source.entry_offsets[4] = 0;
+    source.entry_offsets[5] = 0;
 
     TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
                              (uint64_t)user_image_load_flat(
@@ -229,6 +312,36 @@ void test_user_image_load_bootfs_flat_rejects_missing_file(void) {
     TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
                              (uint64_t)user_image_load_bootfs_flat(
                                  &image, "missing", "missing",
+                                 (uint64_t)(uintptr_t)loaded, sizeof(loaded),
+                                 0));
+}
+
+void test_user_image_load_vfs_flat_rejects_missing_or_oversized_file(void) {
+    uint8_t loaded[16] = { 0 };
+    user_image_t image;
+    uint8_t data[32] = { 0 };
+    user_image_test_file_t file = {
+        .data = data,
+        .size = sizeof(data),
+    };
+    vfs_node_t node = {
+        .path = "/too-large",
+        .size = sizeof(data),
+        .read = user_image_test_read,
+        .context = &file,
+    };
+
+    vfs_reset();
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)user_image_load_vfs_flat(
+                                 &image, "missing", "/missing",
+                                 (uint64_t)(uintptr_t)loaded, sizeof(loaded),
+                                 0));
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_mount_static(&node, 1));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)user_image_load_vfs_flat(
+                                 &image, "large", "/too-large",
                                  (uint64_t)(uintptr_t)loaded, sizeof(loaded),
                                  0));
 }

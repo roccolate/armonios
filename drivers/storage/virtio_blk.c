@@ -33,6 +33,7 @@
 #define VIRTQ_DESC_F_NEXT       1U
 #define VIRTQ_DESC_F_WRITE      2U
 #define VIRTIO_BLK_T_IN         0U
+#define VIRTIO_BLK_T_OUT        1U
 #define VIRTIO_BLK_S_OK         0U
 #define VIRTIO_BLK_QUEUE_SIZE   8U
 #define VIRTIO_BLK_SECTOR_SIZE  512U
@@ -233,6 +234,53 @@ int virtio_blk_read_sector(virtio_blk_device_t *device, uint64_t sector,
     g_desc[1].addr = (uint64_t)(uintptr_t)buffer;
     g_desc[1].len = VIRTIO_BLK_SECTOR_SIZE;
     g_desc[1].flags = VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE;
+    g_desc[1].next = 2;
+
+    g_desc[2].addr = (uint64_t)(uintptr_t)&g_status;
+    g_desc[2].len = sizeof(g_status);
+    g_desc[2].flags = VIRTQ_DESC_F_WRITE;
+    g_desc[2].next = 0;
+
+    avail_idx = g_avail.idx;
+    g_avail.ring[avail_idx % device->queue_size] = 0;
+    virtio_barrier();
+    g_avail.idx = avail_idx + 1U;
+    virtio_barrier();
+
+    *virtio_reg(device->base, VIRTIO_MMIO_QUEUE_NOTIFY) = 0;
+
+    for (uint32_t spins = 0; spins < VIRTIO_BLK_POLL_LIMIT; spins++) {
+        virtio_barrier();
+        if (g_used.idx != device->last_used_idx) {
+            device->last_used_idx = g_used.idx;
+            return g_status == VIRTIO_BLK_S_OK ? 0 : -3;
+        }
+    }
+
+    return -2;
+}
+
+int virtio_blk_write_sector(virtio_blk_device_t *device, uint64_t sector,
+                            const void *buffer) {
+    uint16_t avail_idx;
+
+    if (device == NULL || device->ready == 0 || buffer == NULL) {
+        return -1;
+    }
+
+    g_request.type = VIRTIO_BLK_T_OUT;
+    g_request.reserved = 0;
+    g_request.sector = sector;
+    g_status = 0xffU;
+
+    g_desc[0].addr = (uint64_t)(uintptr_t)&g_request;
+    g_desc[0].len = sizeof(g_request);
+    g_desc[0].flags = VIRTQ_DESC_F_NEXT;
+    g_desc[0].next = 1;
+
+    g_desc[1].addr = (uint64_t)(uintptr_t)buffer;
+    g_desc[1].len = VIRTIO_BLK_SECTOR_SIZE;
+    g_desc[1].flags = VIRTQ_DESC_F_NEXT;
     g_desc[1].next = 2;
 
     g_desc[2].addr = (uint64_t)(uintptr_t)&g_status;

@@ -95,6 +95,39 @@ uint32_t process_count(void) {
     return g_process_count;
 }
 
+const process_t *process_at(uint32_t index) {
+    if (index >= PROCESS_MAX_PROCESSES ||
+        g_processes[index].state == PROCESS_UNUSED) {
+        return 0;
+    }
+
+    return &g_processes[index];
+}
+
+int process_index(const process_t *process, uint32_t *index) {
+    if (process == 0 || index == 0 || !process_in_table(process)) {
+        return -1;
+    }
+
+    *index = (uint32_t)(process - g_processes);
+    return 0;
+}
+
+process_t *process_find(uint32_t pid) {
+    if (pid == 0) {
+        return 0;
+    }
+
+    for (uint32_t i = 0; i < PROCESS_MAX_PROCESSES; i++) {
+        if (g_processes[i].state != PROCESS_UNUSED &&
+            g_processes[i].pid == pid) {
+            return &g_processes[i];
+        }
+    }
+
+    return 0;
+}
+
 process_t *process_next_runnable(process_t *after) {
     uint32_t start = 0;
     uint32_t count = PROCESS_MAX_PROCESSES;
@@ -112,6 +145,32 @@ process_t *process_next_runnable(process_t *after) {
         }
     }
 
+    return 0;
+}
+
+int process_wait_zombie(uint32_t pid, uint64_t *exit_code) {
+    process_t *process = process_find(pid);
+
+    if (process == 0 || exit_code == 0 ||
+        process == g_current_process ||
+        process->state != PROCESS_ZOMBIE) {
+        return -1;
+    }
+
+    *exit_code = process->exit_code;
+    process_release(process);
+    return 0;
+}
+
+int process_kill(uint32_t pid, uint64_t exit_code) {
+    process_t *process = process_find(pid);
+
+    if (process == 0 || process == g_current_process ||
+        process->state == PROCESS_ZOMBIE) {
+        return -1;
+    }
+
+    process_mark_exited(process, exit_code);
     return 0;
 }
 

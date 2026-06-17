@@ -2,40 +2,99 @@
 
 #include <stdint.h>
 
+#include "kernel/ipc.h"
+#include "kernel/mm/pmm.h"
 #include "kernel/process.h"
 #include "kernel/sched/sched.h"
+#include "kernel/timer/timer.h"
 #include "kernel/user_demo.h"
 #include "kernel/user_vm.h"
+#include "kernel/vfs.h"
 #include "uart/pl011.h"
 
 #define SYS_EXIT  1ULL
 #define SYS_YIELD 2ULL
 #define SYS_GETPID 3ULL
+#define SYS_SPAWN 4ULL
+#define SYS_WAIT  6ULL
+#define SYS_KILL  7ULL
+#define SYS_OPEN  40ULL
+#define SYS_CLOSE 41ULL
+#define SYS_READ  42ULL
 #define SYS_MMAP 20ULL
 #define SYS_MUNMAP 21ULL
 #define SYS_WRITE 43ULL
+#define SYS_SEEK  44ULL
+#define SYS_STAT  45ULL
+#define SYS_READDIR 46ULL
+#define SYS_IPC_SEND 60ULL
+#define SYS_IPC_RECV 61ULL
+#define SYS_TIMEINFO 100ULL
+#define SYS_MEMINFO 101ULL
+#define SYS_PROCLIST 102ULL
 
 #define FD_STDOUT 1ULL
 #define FD_STDERR 2ULL
+#define FD_STDIN  0ULL
+#define FD_FILE_BASE 3LL
 
+#define ERR_NOENT (-3LL)
 #define ERR_BADF  (-5LL)
 #define ERR_INVAL (-7LL)
+#define ERR_AGAIN (-11LL)
 
 #define SPSR_EL1H_MASKED 0x3c5ULL
+
+typedef struct {
+    uint32_t pid;
+    uint32_t state;
+    char name[16];
+} syscall_proc_entry_t;
 
 static int user_range_contains(uint64_t ptr, uint64_t len) {
     return process_user_range_contains(process_current(), ptr, len);
 }
 
+static int copy_user_cstr(uint64_t ptr, char *out, uint64_t capacity) {
+    const char *src = (const char *)(uintptr_t)ptr;
+
+    if (ptr == 0 || out == 0 || capacity == 0) {
+        return -1;
+    }
+
+    for (uint64_t i = 0; i < capacity; i++) {
+        if (!user_range_contains(ptr + i, 1)) {
+            return -1;
+        }
+
+        out[i] = src[i];
+        if (out[i] == '\0') {
+            return 0;
+        }
+    }
+
+    return -1;
+}
+
 static int64_t sys_write(uint64_t fd, uint64_t buf, uint64_t len) {
     const char *text = (const char *)(uintptr_t)buf;
-
-    if (fd != FD_STDOUT && fd != FD_STDERR) {
-        return ERR_BADF;
-    }
+    uint64_t bytes_written = 0;
 
     if (!user_range_contains(buf, len)) {
         return ERR_INVAL;
+    }
+
+    if (fd >= (uint64_t)FD_FILE_BASE) {
+        if (vfs_write_fd((int64_t)fd - FD_FILE_BASE,
+                         (const uint8_t *)(uintptr_t)buf, len,
+                         &bytes_written) != 0) {
+            return ERR_BADF;
+        }
+        return (int64_t)bytes_written;
+    }
+
+    if (fd != FD_STDOUT && fd != FD_STDERR) {
+        return ERR_BADF;
     }
 
     for (uint64_t i = 0; i < len; i++) {
@@ -45,12 +104,293 @@ static int64_t sys_write(uint64_t fd, uint64_t buf, uint64_t len) {
     return (int64_t)len;
 }
 
+static int64_t sys_open(uint64_t path_ptr, uint64_t flags) {
+    char path[VFS_MAX_PATH];
+    int fd;
+
+    if (flags > VFS_O_RDWR ||
+        copy_user_cstr(path_ptr, path, sizeof(path)) != 0) {
+        return ERR_INVAL;
+    }
+
+    fd = vfs_open_flags(path, (uint32_t)flags);
+    if (fd < 0) {
+        return ERR_NOENT;
+    }
+
+    return (int64_t)fd + FD_FILE_BASE;
+}
+
+static int64_t sys_spawn(uint64_t path_ptr, uint64_t entry_index) {
+    char path[VFS_MAX_PATH];
+    int pid;
+
+    if (entry_index > 0xffffffffULL ||
+        copy_user_cstr(path_ptr, path, sizeof(path)) != 0) {
+        return ERR_INVAL;
+    }
+
+    pid = user_demo_spawn_vfs(path, (uint32_t)entry_index);
+    if (pid < 0) {
+        return ERR_NOENT;
+    }
+
+    return pid;
+}
+
+static int64_t sys_wait(uint64_t pid) {
+    uint64_t exit_code = 0;
+    process_t *process;
+
+    if (pid == 0 || pid > 0xffffffffULL) {
+        return ERR_INVAL;
+    }
+
+    process = process_find((uint32_t)pid);
+    if (process == 0) {
+        return ERR_NOENT;
+    }
+
+    if (process->state != PROCESS_ZOMBIE) {
+        return ERR_AGAIN;
+    }
+
+    if (process_wait_zombie((uint32_t)pid, &exit_code) != 0) {
+        return ERR_INVAL;
+    }
+
+    return (int64_t)exit_code;
+}
+
+static int64_t sys_kill(uint64_t pid) {
+    if (pid == 0 || pid > 0xffffffffULL) {
+        return ERR_INVAL;
+    }
+
+    if (process_find((uint32_t)pid) == 0) {
+        return ERR_NOENT;
+    }
+
+    if (process_kill((uint32_t)pid, 0x80ULL) != 0) {
+        return ERR_INVAL;
+    }
+
+    return 0;
+}
+
+static int64_t sys_close(uint64_t fd) {
+    if (fd < (uint64_t)FD_FILE_BASE) {
+        return ERR_BADF;
+    }
+
+    if (vfs_close((int64_t)fd - FD_FILE_BASE) != 0) {
+        return ERR_BADF;
+    }
+
+    return 0;
+}
+
+static int64_t sys_seek(uint64_t fd, uint64_t offset, uint64_t whence) {
+    if (fd < (uint64_t)FD_FILE_BASE || whence != 0) {
+        return ERR_INVAL;
+    }
+
+    if (vfs_seek((int64_t)fd - FD_FILE_BASE, offset) != 0) {
+        return ERR_BADF;
+    }
+
+    return (int64_t)offset;
+}
+
+static int64_t sys_read(uint64_t fd, uint64_t buf, uint64_t len) {
+    uint64_t bytes_read = 0;
+
+    if (fd == FD_STDIN) {
+        uint8_t *out = (uint8_t *)(uintptr_t)buf;
+        int c;
+
+        if (!user_range_contains(buf, len)) {
+            return ERR_INVAL;
+        }
+
+        if (len == 0) {
+            return 0;
+        }
+
+        c = uart_getc_nonblock();
+        if (c < 0) {
+            return ERR_AGAIN;
+        }
+
+        out[0] = (uint8_t)c;
+        return 1;
+    }
+
+    if (fd < (uint64_t)FD_FILE_BASE) {
+        return ERR_BADF;
+    }
+
+    if (!user_range_contains(buf, len)) {
+        return ERR_INVAL;
+    }
+
+    if (vfs_read_fd((int64_t)fd - FD_FILE_BASE, (uint8_t *)(uintptr_t)buf,
+                    len, &bytes_read) != 0) {
+        return ERR_BADF;
+    }
+
+    return (int64_t)bytes_read;
+}
+
+static int64_t sys_stat(uint64_t path_ptr, uint64_t stat_ptr) {
+    char path[VFS_MAX_PATH];
+    vfs_stat_t stat;
+
+    if (copy_user_cstr(path_ptr, path, sizeof(path)) != 0 ||
+        !user_range_contains(stat_ptr, sizeof(stat))) {
+        return ERR_INVAL;
+    }
+
+    if (vfs_stat(path, &stat) != 0) {
+        return ERR_NOENT;
+    }
+
+    *(vfs_stat_t *)(uintptr_t)stat_ptr = stat;
+    return 0;
+}
+
+static int64_t sys_readdir(uint64_t path_ptr, uint64_t buf, uint64_t len) {
+    char path[VFS_MAX_PATH];
+    uint64_t bytes_written = 0;
+
+    if (copy_user_cstr(path_ptr, path, sizeof(path)) != 0 ||
+        !user_range_contains(buf, len)) {
+        return ERR_INVAL;
+    }
+
+    if (vfs_list(path, (uint8_t *)(uintptr_t)buf, len, &bytes_written) != 0) {
+        return ERR_NOENT;
+    }
+
+    return (int64_t)bytes_written;
+}
+
+static int64_t sys_meminfo(uint64_t info_ptr) {
+    uint64_t *info = (uint64_t *)(uintptr_t)info_ptr;
+
+    if (!user_range_contains(info_ptr, 2U * sizeof(uint64_t))) {
+        return ERR_INVAL;
+    }
+
+    info[0] = pmm_total_count();
+    info[1] = pmm_free_count();
+    return 0;
+}
+
+static int64_t sys_timeinfo(uint64_t info_ptr) {
+    uint64_t *info = (uint64_t *)(uintptr_t)info_ptr;
+
+    if (!user_range_contains(info_ptr, 3U * sizeof(uint64_t))) {
+        return ERR_INVAL;
+    }
+
+    info[0] = timer_ticks();
+    info[1] = sched_ticks();
+    info[2] = sched_quantums();
+    return 0;
+}
+
+static int64_t sys_proclist(uint64_t entries_ptr, uint64_t max_entries) {
+    syscall_proc_entry_t *entries =
+        (syscall_proc_entry_t *)(uintptr_t)entries_ptr;
+    uint64_t written = 0;
+
+    if (max_entries == 0) {
+        return 0;
+    }
+
+    if (max_entries > PROCESS_MAX_PROCESSES ||
+        !user_range_contains(entries_ptr,
+                             max_entries * sizeof(syscall_proc_entry_t))) {
+        return ERR_INVAL;
+    }
+
+    for (uint32_t i = 0; i < PROCESS_MAX_PROCESSES && written < max_entries; i++) {
+        const process_t *process = process_at(i);
+        syscall_proc_entry_t *entry;
+        const char *name;
+        uint32_t j;
+
+        if (process == 0) {
+            continue;
+        }
+
+        entry = &entries[written];
+        entry->pid = process->pid;
+        entry->state = (uint32_t)process->state;
+        name = process->name != 0 ? process->name : "";
+
+        for (j = 0; j + 1U < sizeof(entry->name) && name[j] != '\0'; j++) {
+            entry->name[j] = name[j];
+        }
+        entry->name[j] = '\0';
+        for (j++; j < sizeof(entry->name); j++) {
+            entry->name[j] = '\0';
+        }
+
+        written++;
+    }
+
+    return (int64_t)written;
+}
+
 static int64_t sys_munmap(process_t *process, uint64_t addr, uint64_t size) {
     return user_vm_unmap_anonymous(process, addr, size);
 }
 
 static int64_t sys_mmap(process_t *process, uint64_t hint, uint64_t size, uint64_t flags) {
     return user_vm_map_anonymous(process, hint, size, flags);
+}
+
+static int64_t sys_ipc_send(process_t *process, uint64_t target_pid,
+                            uint64_t buf, uint64_t len) {
+    if (process == 0 || target_pid == 0 || len == 0 ||
+        target_pid > 0xffffffffULL || len > IPC_MAX_MESSAGE_SIZE ||
+        !user_range_contains(buf, len)) {
+        return ERR_INVAL;
+    }
+
+    if (ipc_send(process->pid, (uint32_t)target_pid,
+                 (const uint8_t *)(uintptr_t)buf, (uint32_t)len) != 0) {
+        return ERR_AGAIN;
+    }
+
+    return (int64_t)len;
+}
+
+static int64_t sys_ipc_recv(process_t *process, uint64_t buf,
+                            uint64_t capacity) {
+    ipc_message_t message;
+    uint8_t *out = (uint8_t *)(uintptr_t)buf;
+
+    if (process == 0 || buf == 0 || capacity != IPC_MAX_MESSAGE_SIZE ||
+        !user_range_contains(buf, capacity)) {
+        return ERR_INVAL;
+    }
+
+    if (ipc_recv(process->pid, &message) != 0) {
+        return ERR_AGAIN;
+    }
+
+    if (message.size > capacity) {
+        return ERR_INVAL;
+    }
+
+    for (uint32_t i = 0; i < message.size; i++) {
+        out[i] = message.data[i];
+    }
+
+    return (int64_t)message.size;
 }
 
 static int sys_yield_process(exception_frame_t *frame) {
@@ -124,6 +464,24 @@ void syscall_dispatch(exception_frame_t *frame) {
             frame->x[0] = current->pid;
         }
         break;
+    case SYS_SPAWN:
+        frame->x[0] = (uint64_t)sys_spawn(frame->x[0], frame->x[1]);
+        break;
+    case SYS_WAIT:
+        frame->x[0] = (uint64_t)sys_wait(frame->x[0]);
+        break;
+    case SYS_KILL:
+        frame->x[0] = (uint64_t)sys_kill(frame->x[0]);
+        break;
+    case SYS_OPEN:
+        frame->x[0] = (uint64_t)sys_open(frame->x[0], frame->x[1]);
+        break;
+    case SYS_CLOSE:
+        frame->x[0] = (uint64_t)sys_close(frame->x[0]);
+        break;
+    case SYS_READ:
+        frame->x[0] = (uint64_t)sys_read(frame->x[0], frame->x[1], frame->x[2]);
+        break;
     case SYS_MMAP:
         frame->x[0] = (uint64_t)sys_mmap(current, frame->x[0], frame->x[1], frame->x[2]);
         break;
@@ -132,6 +490,33 @@ void syscall_dispatch(exception_frame_t *frame) {
         break;
     case SYS_WRITE:
         frame->x[0] = (uint64_t)sys_write(frame->x[0], frame->x[1], frame->x[2]);
+        break;
+    case SYS_SEEK:
+        frame->x[0] = (uint64_t)sys_seek(frame->x[0], frame->x[1], frame->x[2]);
+        break;
+    case SYS_STAT:
+        frame->x[0] = (uint64_t)sys_stat(frame->x[0], frame->x[1]);
+        break;
+    case SYS_READDIR:
+        frame->x[0] = (uint64_t)sys_readdir(frame->x[0], frame->x[1],
+                                            frame->x[2]);
+        break;
+    case SYS_IPC_SEND:
+        frame->x[0] = (uint64_t)sys_ipc_send(current, frame->x[0],
+                                             frame->x[1], frame->x[2]);
+        break;
+    case SYS_IPC_RECV:
+        frame->x[0] = (uint64_t)sys_ipc_recv(current, frame->x[0],
+                                             frame->x[1]);
+        break;
+    case SYS_TIMEINFO:
+        frame->x[0] = (uint64_t)sys_timeinfo(frame->x[0]);
+        break;
+    case SYS_MEMINFO:
+        frame->x[0] = (uint64_t)sys_meminfo(frame->x[0]);
+        break;
+    case SYS_PROCLIST:
+        frame->x[0] = (uint64_t)sys_proclist(frame->x[0], frame->x[1]);
         break;
     default:
         frame->x[0] = (uint64_t)ERR_INVAL;

@@ -11,5 +11,6 @@ uint64_t pmm_alloc_page(void);
 uint64_t pmm_alloc_pages(uint64_t count);
 void pmm_free_page(uint64_t paddr);
 uint64_t pmm_free_count(void);
+uint64_t pmm_total_count(void);
 
 #endif

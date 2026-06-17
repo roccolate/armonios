@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "kernel/bootfs.h"
+#include "kernel/vfs.h"
 
 uint64_t user_image_entry(const user_image_t *image) {
     if (image == 0 || image->base == 0 || image->size == 0 ||
@@ -84,6 +85,28 @@ int user_image_load_bootfs_flat(user_image_t *image, const char *image_name,
     return user_image_load_flat(image, image_name, load_base, load_capacity,
                                 (uint64_t)(uintptr_t)file->data, file->size,
                                 entry_index);
+}
+
+int user_image_load_vfs_flat(user_image_t *image, const char *image_name,
+                             const char *path, uint64_t load_base,
+                             uint64_t load_capacity, uint32_t entry_index) {
+    vfs_stat_t stat;
+    uint64_t bytes_read = 0;
+
+    if (path == 0 || load_base == 0 || load_capacity == 0 ||
+        vfs_stat(path, &stat) != 0 || stat.size == 0 ||
+        stat.size > load_capacity) {
+        return -1;
+    }
+
+    if (vfs_read(path, 0, (uint8_t *)(uintptr_t)load_base, stat.size,
+                 &bytes_read) != 0 ||
+        bytes_read != stat.size) {
+        return -1;
+    }
+
+    return user_image_load_flat(image, image_name, load_base, load_capacity,
+                                load_base, stat.size, entry_index);
 }
 
 int user_image_prepare_process(process_t *process, const user_image_t *image,

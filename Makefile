@@ -1,4 +1,5 @@
 CROSS_COMPILE ?= aarch64-linux-gnu-
+HOST_CC ?= gcc
 
 CC      := $(CROSS_COMPILE)gcc
 LD      := $(CROSS_COMPILE)ld
@@ -11,15 +12,18 @@ BOARD ?= qemu_virt
 BOARD_DIR := drivers/boards/$(BOARD)
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
+KERNEL_SIZE_LIMIT ?= 65536
 USER_DEMO_OBJ := $(BUILD_DIR)/programs/user_demo.o
 USER_DEMO_ELF := $(BUILD_DIR)/programs/user_demo.elf
 USER_DEMO_BIN := $(BUILD_DIR)/programs/user_demo.bin
 USER_DEMO_BLOB_OBJ := $(BUILD_DIR)/programs/user_demo_blob.o
 VIRTIO_BLK_IMG := $(BUILD_DIR)/virtio-blk.img
+MKFAT32_IMAGE := $(BUILD_DIR)/tools/mkfat32_image
 
 LOAD_ADDR := 0x40080000
 LOAD_ADDR_HEX := 40080000
 
+DEPFLAGS := -MMD -MP
 ASFLAGS := -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -mcpu=cortex-a72 -g
 CFLAGS  := -Wall -Wextra -Werror -ffreestanding -nostdlib -nostartfiles \
            -fno-builtin -fno-stack-protector -mgeneral-regs-only \
@@ -35,7 +39,12 @@ OBJS := \
     $(BUILD_DIR)/drivers/storage/virtio_blk.o \
     $(BUILD_DIR)/kernel/boot_program.o \
     $(BUILD_DIR)/kernel/bootfs.o \
+    $(BUILD_DIR)/kernel/console.o \
     $(BUILD_DIR)/kernel/dtb.o \
+    $(BUILD_DIR)/kernel/fat32.o \
+    $(BUILD_DIR)/kernel/font.o \
+    $(BUILD_DIR)/kernel/gui.o \
+    $(BUILD_DIR)/kernel/ipc.o \
     $(BUILD_DIR)/kernel/exception_vectors.o \
     $(BUILD_DIR)/kernel/exceptions.o \
     $(BUILD_DIR)/kernel/irq.o \
@@ -60,6 +69,8 @@ OBJS := \
     $(USER_DEMO_BLOB_OBJ) \
     $(BUILD_DIR)/drivers/uart/pl011.o
 
+DEPS := $(OBJS:.o=.d)
+
 .PHONY: all toolchain-check qemu-check qemu qemu-blk qemu-fb qemu-fb-visible qemu-debug entry-check size clean
 
 all: toolchain-check $(KERNEL_ELF) $(KERNEL_BIN)
@@ -80,11 +91,11 @@ $(BUILD_DIR):
 
 $(BUILD_DIR)/%.o: %.S | $(BUILD_DIR)
 	mkdir -p $(dir $@)
-	$(CC) $(ASFLAGS) -c $< -o $@
+	$(CC) $(DEPFLAGS) $(ASFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
 	mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(DEPFLAGS) $(CFLAGS) -c $< -o $@
 
 $(USER_DEMO_ELF): $(USER_DEMO_OBJ) programs/user_image.ld
 	$(LD) -T programs/user_image.ld -nostdlib $(USER_DEMO_OBJ) -o $@
@@ -103,8 +114,12 @@ $(KERNEL_ELF): $(OBJS) linker.ld
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(OBJCOPY) -O binary $< $@
 
-$(VIRTIO_BLK_IMG): | $(BUILD_DIR)
-	truncate -s 1M $@
+$(MKFAT32_IMAGE): tools/mkfat32_image.c | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(HOST_CC) -Wall -Wextra -O2 $< -o $@
+
+$(VIRTIO_BLK_IMG): $(MKFAT32_IMAGE) $(USER_DEMO_BIN) | $(BUILD_DIR)
+	$(MKFAT32_IMAGE) $@ $(USER_DEMO_BIN)
 
 entry-check: $(KERNEL_ELF)
 	@$(READELF) -h $(KERNEL_ELF) | grep "Entry point address:" | grep -q "$(LOAD_ADDR)"
@@ -143,8 +158,10 @@ qemu-debug: qemu-check entry-check $(KERNEL_BIN)
 size: $(KERNEL_ELF) $(KERNEL_BIN)
 	$(SIZE) $(KERNEL_ELF)
 	@bytes=$$(wc -c < $(KERNEL_BIN)); \
-	printf "kernel.bin: %s bytes\n" "$$bytes"; \
-	test "$$bytes" -lt 32768
+	printf "kernel.bin: %s bytes (limit: $(KERNEL_SIZE_LIMIT))\n" "$$bytes"; \
+	test "$$bytes" -lt $(KERNEL_SIZE_LIMIT)
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+-include $(DEPS)

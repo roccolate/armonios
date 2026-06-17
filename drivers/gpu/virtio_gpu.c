@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include "fb/fb.h"
+
 #define VIRTIO_MMIO_MAGIC_VALUE 0x000
 #define VIRTIO_MMIO_VERSION     0x004
 #define VIRTIO_MMIO_DEVICE_ID   0x008
@@ -264,36 +266,31 @@ static int gpu_submit(uint64_t base, const void *request, uint32_t request_len,
     return -1;
 }
 
-static void fill_pattern(void) {
-    for (uint32_t y = 0; y < VIRTIO_GPU_HEIGHT; y++) {
-        for (uint32_t x = 0; x < VIRTIO_GPU_WIDTH; x++) {
-            uint32_t color = 0xff202020U;
+static void fill_pattern(fb_t *fb, void *context) {
+    (void)context;
 
-            if (x >= 80U && x < 560U && y >= 80U && y < 400U) {
-                color = 0xff00b050U;
-            }
-            if (x >= 180U && x < 460U && y >= 180U && y < 300U) {
-                color = 0xfff0d040U;
-            }
-
-            g_pixels[y * VIRTIO_GPU_WIDTH + x] = color;
-        }
-    }
+    fb_fillrect(fb, 0, 0, fb->width, fb->height, 0xff202020U);
+    fb_fillrect(fb, 80, 80, 480, 320, 0xff00b050U);
+    fb_fillrect(fb, 180, 180, 280, 120, 0xfff0d040U);
 }
 
-int virtio_gpu_draw_test_pattern(uint64_t base) {
+int virtio_gpu_draw(uint64_t base, virtio_gpu_render_fn_t render,
+                    void *context) {
     gpu_ctrl_hdr_t response;
     gpu_resource_create_2d_t create;
     gpu_resource_attach_backing_t attach;
     gpu_set_scanout_t scanout;
     gpu_transfer_to_host_2d_t transfer;
     gpu_resource_flush_t flush;
+    fb_t fb;
 
-    if (gpu_init_queue(base) != 0) {
+    if (render == 0 || gpu_init_queue(base) != 0 ||
+        fb_init(&fb, g_pixels, VIRTIO_GPU_WIDTH, VIRTIO_GPU_HEIGHT,
+                VIRTIO_GPU_WIDTH) != 0) {
         return -1;
     }
 
-    fill_pattern();
+    render(&fb, context);
 
     create.hdr.type = VIRTIO_GPU_CMD_RESOURCE_CREATE_2D;
     create.hdr.flags = 0;
@@ -356,4 +353,8 @@ int virtio_gpu_draw_test_pattern(uint64_t base) {
     }
 
     return 0;
+}
+
+int virtio_gpu_draw_test_pattern(uint64_t base) {
+    return virtio_gpu_draw(base, fill_pattern, 0);
 }

@@ -2,6 +2,7 @@
 
 #include "unity/unity.h"
 #include "../kernel/tmpfs.h"
+#include "../kernel/vfs.h"
 
 void test_tmpfs_create_write_read_stat_and_delete(void) {
     uint8_t input[] = { 0x41, 0x42, 0x43, 0x44 };
@@ -122,4 +123,59 @@ void test_tmpfs_respects_file_limit_and_reuses_deleted_slot(void) {
     TEST_ASSERT_EQUAL_UINT64((uint64_t)-1, (uint64_t)tmpfs_create("extra"));
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)tmpfs_delete("3"));
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)tmpfs_create("extra"));
+}
+
+void test_tmpfs_mount_vfs_read_write_and_stat(void) {
+    uint8_t input[] = { 0x31, 0x32, 0x33 };
+    uint8_t output[4] = { 0 };
+    uint64_t count = 0;
+    vfs_stat_t stat;
+    int fd;
+
+    vfs_reset();
+    tmpfs_reset();
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)tmpfs_create("note"));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)tmpfs_mount_vfs("/tmp/note",
+                                                          "note"));
+
+    fd = vfs_open_flags("/tmp/note", VFS_O_RDWR);
+    TEST_ASSERT_TRUE(fd >= 0);
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)vfs_write_fd(fd, input,
+                                                    sizeof(input), &count));
+    TEST_ASSERT_EQUAL_UINT64(sizeof(input), count);
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_stat("/tmp/note", &stat));
+    TEST_ASSERT_EQUAL_UINT64(sizeof(input), stat.size);
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_seek(fd, 0));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)vfs_read_fd(fd, output,
+                                                   sizeof(output), &count));
+    TEST_ASSERT_EQUAL_UINT64(sizeof(input), count);
+    TEST_ASSERT_EQUAL_UINT64(0x31, output[0]);
+    TEST_ASSERT_EQUAL_UINT64(0x32, output[1]);
+    TEST_ASSERT_EQUAL_UINT64(0x33, output[2]);
+    TEST_ASSERT_EQUAL_UINT64(0, output[3]);
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_close(fd));
+}
+
+void test_tmpfs_mount_vfs_rejects_missing_and_invalid_inputs(void) {
+    vfs_reset();
+    tmpfs_reset();
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)tmpfs_mount_vfs("/tmp/missing",
+                                                       "missing"));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)tmpfs_create("note"));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)tmpfs_mount_vfs(0, "note"));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)tmpfs_mount_vfs("tmp/note", "note"));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)tmpfs_mount_vfs("/tmp/note", 0));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)tmpfs_mount_vfs("/tmp/note",
+                                                          "note"));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)tmpfs_mount_vfs("/tmp/note",
+                                                       "note"));
 }

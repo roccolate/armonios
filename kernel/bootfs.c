@@ -10,8 +10,8 @@ static vfs_node_t g_bootfs_vfs_nodes[1];
 
 static int bootfs_vfs_read(void *context, uint64_t offset, uint8_t *buffer,
                            uint64_t capacity, uint64_t *bytes_read) {
-    return bootfs_read((const char *)context, offset, buffer, capacity,
-                       bytes_read);
+    (void)context;
+    return bootfs_read("user_demo", offset, buffer, capacity, bytes_read);
 }
 
 const bootfs_file_t *bootfs_find(const char *name) {

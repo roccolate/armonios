@@ -31,11 +31,21 @@ return `ERR_INVAL`.
 | 1 | `sys_exit` | `x0=code` | — | Terminate current process |
 | 2 | `sys_yield` | — | — | Voluntarily yield CPU slice |
 | 3 | `sys_getpid` | — | PID | Return current process ID |
+| 4 | `sys_spawn` | `x0=path_ptr, x1=entry_index` | PID / error | Spawn a flat image entry from VFS |
+| 6 | `sys_wait` | `x0=pid` | exit code / error | Reclaim an exited process |
+| 7 | `sys_kill` | `x0=pid` | 0 / error | Terminate another process |
 
 Notes:
 - `sys_exit` marks the process as exited and switches to the next runnable EL0
   process when one exists.
 - `sys_yield` switches to the next runnable EL0 process when one exists.
+- `sys_spawn` is the first loader hook exposed to EL0. It currently loads a
+  flat image through VFS, starts the selected entry as a READY process, and
+  reclaims exited demo processes before allocating a slot.
+- `sys_wait` is non-blocking today: it succeeds only when the target process is
+  already `ZOMBIE`; otherwise it returns `ERR_AGAIN`.
+- `sys_kill` marks another process exited with code `0x80`. It currently
+  rejects killing the calling process and already-exited processes.
 
 ### Memory
 
@@ -67,26 +77,83 @@ Current limitations:
 
 | # | Name | Args | Returns | Description |
 |---|------|------|---------|-------------|
-| 43 | `sys_write` | `x0=fd, x1=buf, x2=len` | bytes written / error | Write to UART-backed stdout/stderr |
+| 40 | `sys_open` | `x0=path, x1=flags` | fd / error | Open a VFS file |
+| 41 | `sys_close` | `x0=fd` | 0 / error | Close a VFS file descriptor |
+| 42 | `sys_read` | `x0=fd, x1=buf, x2=len` | bytes read / error | Read from stdin or a VFS file |
+| 43 | `sys_write` | `x0=fd, x1=buf, x2=len` | bytes written / error | Write to UART-backed stdout/stderr or a VFS file |
+| 44 | `sys_seek` | `x0=fd, x1=offset, x2=whence` | new offset / error | Seek within a VFS file |
+| 45 | `sys_stat` | `x0=path, x1=stat_ptr` | 0 / error | Get VFS file metadata |
+| 46 | `sys_readdir` | `x0=path, x1=buf, x2=len` | bytes written / error | List mounted VFS paths or supported VFS directories |
 
 Current file descriptors:
 ```
+0  stdin   UART, non-blocking
 1  stdout  UART
 2  stderr  UART
+3+ VFS files
 ```
 
 Notes:
-- `sys_write` returns `ERR_BADF` for any fd other than `1` or `2`.
+- `sys_read(0, buf, len)` reads at most one UART byte. It returns `ERR_AGAIN`
+  when no byte is available.
+- `sys_open` accepts `flags=0` (`O_RDONLY`), `flags=1` (`O_WRONLY`), and
+  `flags=2` (`O_RDWR`).
+- `sys_read`, `sys_write`, `sys_seek`, and `sys_close` on VFS file descriptors
+  are backed by the fixed kernel VFS descriptor table.
+- `sys_seek` currently supports only `whence=0` (`SEEK_SET`).
+- `sys_stat` writes the current `vfs_stat_t` layout: one `uint64_t size`.
+- `sys_readdir("/")` writes newline-separated mounted VFS paths. When FAT32 is
+  present, `sys_readdir("/fat")` writes newline-separated root 8.3 directory
+  entries.
+- `sys_write` returns `ERR_BADF` for unsupported descriptors or descriptors
+  not opened for writing.
 - `sys_write` validates that `buf..buf+len` is inside the current process's
   registered user regions before reading from it.
+- FAT32 writes are limited to existing root 8.3 files with already allocated
+  cluster chains. The current driver can overwrite or grow within that chain
+  and updates the directory entry size; it does not allocate new clusters.
 
 ### Error Codes Implemented Today
 
 | Code | Name | Meaning |
 |------|------|---------|
+| -3 | `ERR_NOENT` | File or resource not found |
 | -2 | `ERR_NOMEM` | Out of memory |
 | -5 | `ERR_BADF` | Bad file descriptor |
 | -7 | `ERR_INVAL` | Invalid argument |
+| -11 | `ERR_AGAIN` | Try again later |
+
+### System Info
+
+| # | Name | Args | Returns | Description |
+|---|------|------|---------|-------------|
+| 100 | `sys_timeinfo` | `x0=info_ptr` | 0 / error | Fill timer/scheduler counters |
+| 101 | `sys_meminfo` | `x0=info_ptr` | 0 / error | Fill memory page counters |
+| 102 | `sys_proclist` | `x0=entries, x1=max_entries` | entry count / error | Fill a process snapshot |
+
+`sys_timeinfo` writes three `uint64_t` values:
+```
+info[0]  ARM generic timer IRQ ticks
+info[1]  scheduler timer ticks
+info[2]  completed scheduler quantums
+```
+
+`sys_meminfo` writes two `uint64_t` values:
+```
+info[0]  total physical pages tracked by PMM
+info[1]  free physical pages
+```
+
+`sys_proclist` writes up to `max_entries` fixed-size entries:
+```c
+typedef struct {
+    uint32_t pid;
+    uint32_t state;
+    char name[16];
+} syscall_proc_entry_t;
+```
+
+`max_entries` is currently capped at `PROCESS_MAX_PROCESSES`.
 
 ---
 
@@ -99,11 +166,9 @@ yet unless also listed in "Implemented Now".
 
 | # | Name | Args | Returns | Description |
 |---|------|------|---------|-------------|
-| 4 | `sys_fork` | — | PID / 0 | Clone current process |
 | 5 | `sys_exec` | `x0=path_ptr, x1=argv_ptr` | — | Replace process image |
-| 6 | `sys_wait` | `x0=pid` | exit code | Wait for child process |
-| 7 | `sys_kill` | `x0=pid, x1=signal` | 0 / error | Send signal or termination request |
 | 8 | `sys_sleep` | `x0=ms` | 0 / error | Sleep for N milliseconds |
+| 9 | `sys_fork` | — | PID / 0 | Clone current process |
 
 ### Planned Memory
 
@@ -115,12 +180,6 @@ yet unless also listed in "Implemented Now".
 
 | # | Name | Args | Returns | Description |
 |---|------|------|---------|-------------|
-| 40 | `sys_open` | `x0=path, x1=flags` | fd / error | Open file |
-| 41 | `sys_close` | `x0=fd` | 0 / error | Close file descriptor |
-| 42 | `sys_read` | `x0=fd, x1=buf, x2=len` | bytes read / error | Read from file or input device |
-| 44 | `sys_seek` | `x0=fd, x1=offset, x2=whence` | new pos / error | Seek within file |
-| 45 | `sys_stat` | `x0=path, x1=stat_ptr` | 0 / error | Get file metadata |
-| 46 | `sys_readdir` | `x0=path, x1=buf, x2=len` | count / error | List directory |
 | 47 | `sys_mkdir` | `x0=path` | 0 / error | Create directory |
 | 48 | `sys_unlink` | `x0=path` | 0 / error | Delete file |
 | 49 | `sys_rename` | `x0=old, x1=new` | 0 / error | Rename/move file |
@@ -184,7 +243,6 @@ typedef struct {
 | # | Name | Args | Returns | Description |
 |---|------|------|---------|-------------|
 | 100 | `sys_uptime` | — | ms | Milliseconds since boot |
-| 101 | `sys_meminfo` | `x0=info_ptr` | — | Fill memory stats struct |
 | 102 | `sys_cpuinfo` | `x0=info_ptr` | — | Fill CPU info struct |
 | 103 | `sys_proclist` | `x0=buf, x1=maxcount` | count | List running processes |
 

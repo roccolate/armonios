@@ -6,7 +6,7 @@
 #include "kernel/process.h"
 
 #define USER_IMAGE_MAGIC       0x31494c4bU
-#define USER_IMAGE_MAX_ENTRIES 4U
+#define USER_IMAGE_MAX_ENTRIES 8U
 
 typedef struct {
     uint32_t magic;
@@ -36,6 +36,9 @@ int user_image_load_bootfs_flat(user_image_t *image, const char *image_name,
                                 const char *bootfs_name, uint64_t load_base,
                                 uint64_t load_capacity,
                                 uint32_t entry_index);
+int user_image_load_vfs_flat(user_image_t *image, const char *image_name,
+                             const char *path, uint64_t load_base,
+                             uint64_t load_capacity, uint32_t entry_index);
 int user_image_prepare_process(process_t *process, const user_image_t *image,
                                uint64_t stack_start, uint64_t stack_size,
                                uint64_t pstate);

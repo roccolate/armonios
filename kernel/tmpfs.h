@@ -19,5 +19,6 @@ int tmpfs_write(const char *name, uint64_t offset, const uint8_t *buffer,
 int tmpfs_read(const char *name, uint64_t offset, uint8_t *buffer,
                uint64_t capacity, uint64_t *bytes_read);
 int tmpfs_stat(const char *name, tmpfs_stat_t *stat);
+int tmpfs_mount_vfs(const char *path, const char *name);
 
 #endif

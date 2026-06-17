@@ -148,3 +148,7 @@ void pmm_free_page(uint64_t paddr) {
 uint64_t pmm_free_count(void) {
     return g_free_pages;
 }
+
+uint64_t pmm_total_count(void) {
+    return g_total_pages;
+}

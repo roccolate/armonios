@@ -302,6 +302,72 @@ void test_process_table_alloc_release_and_limits(void) {
     TEST_ASSERT_EQUAL_UINT64(PROCESS_MAX_PROCESSES, process_count());
 }
 
+void test_process_at_returns_active_slots_only(void) {
+    process_t *first;
+    process_t *second;
+
+    process_table_init();
+    TEST_ASSERT_NULL(process_at(0));
+    TEST_ASSERT_NULL(process_at(PROCESS_MAX_PROCESSES));
+
+    first = process_alloc(7, "first");
+    second = process_alloc(8, "second");
+
+    TEST_ASSERT_NOT_NULL(first);
+    TEST_ASSERT_NOT_NULL(second);
+    uint32_t index = 99;
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)process_index(first, &index));
+    TEST_ASSERT_EQUAL_UINT64(0, index);
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)process_index(second, &index));
+    TEST_ASSERT_EQUAL_UINT64(1, index);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(uintptr_t)first,
+                             (uint64_t)(uintptr_t)process_at(0));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(uintptr_t)second,
+                             (uint64_t)(uintptr_t)process_at(1));
+
+    process_release(first);
+    TEST_ASSERT_NULL(process_at(0));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(uintptr_t)second,
+                             (uint64_t)(uintptr_t)process_at(1));
+}
+
+void test_process_wait_zombie_returns_exit_and_releases_slot(void) {
+    process_t *process;
+    uint64_t exit_code = 0;
+
+    process_table_init();
+    process = process_alloc(9, "wait-me");
+
+    TEST_ASSERT_NOT_NULL(process);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(uintptr_t)process,
+                             (uint64_t)(uintptr_t)process_find(9));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)process_wait_zombie(9, &exit_code));
+
+    process_mark_exited(process, 0x44);
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)process_wait_zombie(9, &exit_code));
+    TEST_ASSERT_EQUAL_UINT64(0x44, exit_code);
+    TEST_ASSERT_NULL(process_find(9));
+    TEST_ASSERT_EQUAL_UINT64(0, process_count());
+}
+
+void test_process_kill_marks_target_zombie(void) {
+    process_t *process;
+    uint64_t exit_code = 0;
+
+    process_table_init();
+    process = process_alloc(10, "kill-me");
+
+    TEST_ASSERT_NOT_NULL(process);
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)process_kill(10, 0x80));
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_ZOMBIE, process->state);
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)process_wait_zombie(10, &exit_code));
+    TEST_ASSERT_EQUAL_UINT64(0x80, exit_code);
+    TEST_ASSERT_NULL(process_find(10));
+}
+
 void test_process_next_runnable_round_robin_and_reclaim_zombies(void) {
     process_t *a;
     process_t *b;

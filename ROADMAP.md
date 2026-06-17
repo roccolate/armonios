@@ -159,9 +159,23 @@ Implemented so far:
 | 1  | `sys_exit`     | Terminate current process |
 | 2  | `sys_yield`    | Voluntarily yield CPU     |
 | 3  | `sys_getpid`   | Return current PID        |
+| 4  | `sys_spawn`    | Spawn a flat image entry from VFS |
+| 6  | `sys_wait`     | Reclaim a zombie process and return its exit code |
+| 7  | `sys_kill`     | Terminate another process |
 | 20 | `sys_mmap`     | Map anonymous user pages |
 | 21 | `sys_munmap`   | Unmap owned anonymous user pages |
+| 40 | `sys_open`     | Open a VFS file with read/write mode flags |
+| 41 | `sys_close`    | Close a VFS file descriptor |
+| 42 | `sys_read`     | Read from a VFS file |
 | 43 | `sys_write`    | Write to UART-backed stdout/stderr |
+| 44 | `sys_seek`     | Seek within a VFS file |
+| 45 | `sys_stat`     | Read VFS file metadata |
+| 46 | `sys_readdir`  | List mounted VFS paths or supported VFS directories |
+| 60 | `sys_ipc_send` | Send a fixed-size kernel IPC message |
+| 61 | `sys_ipc_recv` | Receive a fixed-size kernel IPC message |
+| 100 | `sys_timeinfo` | Read timer and scheduler counters |
+| 101 | `sys_meminfo` | Read PMM page counters |
+| 102 | `sys_proclist` | Read process table snapshot |
 
 `sys_mmap` / `sys_munmap` now create and remove PTE-backed anonymous mappings for the current process. Image and stack regions still use process-owned metadata for syscall pointer validation.
 
@@ -223,7 +237,7 @@ Implemented so far:
 
 ---
 
-## Phase 3 — Drivers and Interrupts [core criteria met]
+## Phase 3 — Drivers and Interrupts [done]
 
 **Goal:** Real hardware drivers with interrupt-driven I/O.
 
@@ -256,14 +270,10 @@ Implemented so far:
 
 ### 3.3 Early Input Path
 - Use UART console input as the temporary keyboard path in QEMU
-- Keep USB HID out of the Phase 3 exit criteria until GUI/user input needs it
-- Translate real keyboard input to ASCII when a USB HID path is added later
+- Keep the Phase 3 input path focused on UART-backed ASCII in QEMU
 
 Implemented so far:
 - [x] Early keyboard path via UART console input in QEMU
-
-Deferred:
-- [ ] USB HID keyboard driver
 
 ### 3.4 Framebuffer Display
 - Query framebuffer address and dimensions from DTB
@@ -297,6 +307,7 @@ Implemented so far:
 - [x] `virtio-blk` capacity read from config space
 - [x] `virtio-blk` modern MMIO queue initialization
 - [x] Synchronous sector read path for sector 0 smoke testing
+- [x] Synchronous sector write path for FAT32 file save smoke testing
 - [x] Host tests for present and non-block-device probe paths
 - [x] `make qemu-blk` target creates a tiny raw disk image and attaches it with modern virtio-mmio
 
@@ -338,7 +349,7 @@ Implemented so far:
 
 ---
 
-## Phase 4 — Filesystem and IPC
+## Phase 4 — Filesystem and IPC [done]
 
 **Goal:** Persistent storage and inter-process communication.
 
@@ -357,74 +368,89 @@ Implemented so far:
 - [x] Fixed-size VFS descriptor table with `open`, sequential `read`, and `close`
 - [x] Descriptor `seek` and path `stat`
 - [x] Fixed-size in-memory tmpfs create/read/write/delete foundation
-- Minimal VFS layer with mount points
-- File operations: `write`
-- In-memory tmpfs VFS mount for early userland
+- [x] File operations: `write`
+- [x] In-memory tmpfs VFS mount for early userland
+- [x] Minimal VFS layer with explicit fixed mount nodes
 
 ### 4.2 FAT32 Driver
-- Read-only FAT32 on top of virtio-blk
-- Directory traversal, file read
-- Write support in second iteration
+- [x] FAT32 BPB mount parser over a sector-read callback
+- [x] Root-directory 8.3 file lookup
+- [x] Cluster-chain file reads with host tests
+- [x] FAT32 files can mount as read-only VFS nodes
+- [x] FAT32 root 8.3 directory traversal exposed through `/fat`
+- [x] FAT32 mount attempt on top of virtio-blk
+- [x] `make qemu-blk` generates a tiny FAT32 image containing the flat demo binary
+- [x] Boot-time EL0 demo can reload from the FAT32-backed VFS path when present
+- [x] Limited FAT32 write support for existing root 8.3 files with preallocated cluster chains
+- [x] FAT32 write updates the directory entry file size after save
 
 ### 4.3 IPC — Shared Memory and Messages
-- Shared memory regions (mapped into two process address spaces)
-- Message queue (fixed-size messages, kernel-managed)
+- [x] Message queue (fixed-size messages, kernel-managed)
+- [x] `sys_ipc_send` / `sys_ipc_recv` copy messages between EL0 processes
+- [x] EL0 demo sends a message from pid 1 to pid 2 without crashing
 - Inspired by KolibriOS's IPC model: simple, no sockets needed initially
 
 **Exit criteria:**
 - [x] Can spawn a named flat user image through bootfs/tmpfs
-- [ ] Can load and execute a binary from FAT32 image
-- [ ] Two processes exchange messages without kernel crash
+- [x] Can load and execute a binary from FAT32 image
+- [x] Two processes exchange messages without kernel crash
 - [x] tmpfs supports create/read/write/delete
 
 **Estimated effort:** 4–6 weeks
 
 ---
 
-## Phase 5 — GUI Subsystem
+## Phase 5 — GUI Subsystem [done]
 
 **Goal:** A working windowed GUI without X11, Wayland, or any external display server.
 
 ### 5.1 Window Manager / Compositor
 - Each process owns one or more windows (regions of the framebuffer)
-- Z-order stack (front/back)
-- Dirty region tracking — only redraw changed areas
+- [x] Fixed-size early kernel window list
+- [x] Creation-order z-stack for overlapping windows
+- [x] Window move updates redraw position in host tests
+- [x] QEMU `virtio-gpu` smoke path renders two overlapping demo windows
+- [x] Focused demo window can receive UART-backed keyboard characters
 - No compositor process: kernel manages the window list directly (KolibriOS model)
 
 ### 5.2 2D Rendering Primitives
-- All in C, hand-optimized inner loops with NEON intrinsics
-- `draw_line`, `draw_rect`, `draw_circle`
-- Alpha blending (ARGB8888)
-- Clipping to window bounds
+- [x] Scalar C primitives first, with host tests
+- [x] `draw_line`, `draw_rect`, `draw_circle`
+- [x] Alpha blending (ARGB8888)
+- [x] Framebuffer clipping for current primitives
+- Clipping to per-window bounds
 
 ### 5.3 Font Rendering
-- Built-in bitmap font renderer for the first iteration
+- [x] Built-in 5x7 bitmap font renderer for the first iteration
+- [x] GUI demo renders ASCII labels through the font path
 - ASCII text rendering first, then UTF-8 once the terminal path is stable
 - Optional later: FreeType 2 as a static freestanding library
 - Basic glyph cache after the bitmap text path is reliable
 
 ### 5.4 GUI Event System
+- [x] Early UART keyboard characters route to the focused demo window
 - Keyboard and mouse events routed from drivers to focused window
 - Simple message-passing: driver → kernel event queue → target process
 - USB HID keyboard/mouse drivers can land here if UART input is no longer enough
 
 **Exit criteria:**
-- [ ] Two overlapping windows visible, correct z-order
-- [ ] Window can be "moved" (redrawn at new position)
-- [ ] Text renders with a built-in bitmap font
-- [ ] Keyboard input reaches the focused window
+- [x] Two overlapping windows visible, correct z-order
+- [x] Window can be "moved" (redrawn at new position)
+- [x] Text renders with a built-in bitmap font
+- [x] Keyboard input reaches the focused window
 
 **Estimated effort:** 8–12 weeks
 
 ---
 
-## Phase 6 — Userland and Applications
+## Phase 6 — Userland and Applications [done]
 
-**Goal:** A usable system with a shell, text editor, and file manager.
+**Goal:** A usable QEMU bootstrap userland with a shell, text editor, and system monitor.
 
 ### 6.0 Developer Kernel Console
-- UART-backed monitor for debug commands while the GUI shell is not ready
-- Built-in commands such as `help`, `mem`, `ps`, `ticks`, `storage`, and `fb`
+- [x] UART-backed monitor for debug commands while the GUI shell is not ready
+- [x] Built-in commands: `help`, `mem`, `ps`, `ticks`, `storage`, and `fb`
+- [x] Line editing for enter/backspace over the QEMU UART console
 - Not a POSIX shell and not the final user-facing terminal
 
 ### 6.1 User Shell
@@ -432,26 +458,62 @@ Implemented so far:
 - Built-in commands: `ls`, `cd`, `cat`, `run`, `kill`, `mem`
 - Runs in a terminal window once VFS, loader, and GUI text output exist
 
+Implemented so far:
+- [x] VFS is initialized during boot with `/boot/user_demo` and `/tmp/note`
+- [x] EL0 can call `sys_open`, `sys_read`, `sys_close`, `sys_stat`, and `sys_readdir`
+- [x] EL0 can call `sys_timeinfo` for timer and scheduler counters
+- [x] EL0 can call `sys_meminfo` for PMM page counters
+- [x] EL0 can call `sys_proclist` for a compact process table snapshot
+- [x] EL0 can call `sys_spawn` to create a READY process from a flat VFS image entry
+- [x] EL0 can call `sys_wait` to reclaim a completed spawned process
+- [x] EL0 can call `sys_kill` to terminate a spawned process
+- [x] EL0 demo verifies reading a file through VFS syscalls
+- [x] Minimal EL0 shell prompt accepts UART input through `sys_read(0, ...)`
+- [x] Shell built-ins: `help`, `ls`, `ls /fat`, `ps`, `ticks`, `pwd`, `cd /`, `mem`, `cat /tmp/note`, `cat /fat/edit.txt`, `run hello`, `run loop`, `run editor`, `monitor`, `kill last`, and `exit`
+- [x] EL0 can call `sys_write` on VFS descriptors opened for writing
+- [x] EL0 can call `sys_seek` with `SEEK_SET`
+
 ### 6.2 Text Editor
 - Single-file editor (inspired by KolibriOS's Tinypad)
 - Keyboard-driven, no mouse required
 - Saves to FAT32
 
-### 6.3 File Manager
-- List directories
-- Copy, move, delete files
-- Launch executables
+Implemented so far:
+- [x] Line-oriented EL0 editor entry opens `/fat/edit.txt`
+- [x] Editor supports appending lines, `.p` print, `.w` save, and `.q` quit
+- [x] FAT32 write path updates an existing root 8.3 file within its preallocated cluster chain
+
+### 6.3 File and Program Commands
+- [x] Shell can list mounted VFS paths with `ls`
+- [x] Shell can list FAT32 root 8.3 entries with `ls /fat`
+- [x] Shell can read files with `cat /tmp/note` and `cat /fat/edit.txt`
+- [x] Shell can launch built-in flat image entries with `run hello`, `run loop`, `run editor`, and `monitor`
+- [x] Shell can terminate the last loop demo with `kill last`
 
 ### 6.4 System Monitor
 - Running processes, CPU usage, memory usage
 - Updates every second via timer
 
+Implemented so far:
+- [x] EL0 monitor entry displays process snapshots, free pages, and timer ticks through existing syscalls
+
 **Exit criteria:**
-- [ ] Shell accepts input and runs programs
-- [ ] Editor opens, edits, and saves a file
-- [ ] System monitor shows live process list
+- [x] Shell accepts input and runs programs
+- [x] Editor opens, edits, and saves a file
+- [x] System monitor shows live process list
 
 **Estimated effort:** 6–10 weeks
+
+---
+
+## Post-Phase 6 Backlog
+
+These are real follow-up features, but they are not part of the completed Phase 1–6 criteria:
+- USB HID keyboard/mouse driver and input translation beyond UART-backed QEMU input
+- FAT32 file creation, deletion, rename, subdirectories, LFN, and cluster allocation
+- Shared memory IPC mapped into two process address spaces
+- GUI window ownership by process, explicit z-order operations, and dirty region tracking
+- Full file manager application with copy, move, delete, directory browsing, and executable launch UI
 
 ---
 
@@ -550,6 +612,7 @@ Planned phases:
 | v0.5    | Drivers + framebuffer                  | 0–3      |
 | v0.6    | Board abstraction cleanup              | 0–3.6    |
 | v0.7    | Filesystem + GUI basics                | 0–5      |
+| v0.8    | QEMU userland shell + editor + monitor | 0–6      |
 | v1.0    | Usable on QEMU: shell + editor + net   | 0–7      |
 | v1.5    | Running on real RPi 4/5 hardware       | 0–8      |
 | v2.0    | Engine and multimedia runtime          | 9–15     |

@@ -22,5 +22,7 @@ int virtio_blk_probe_range(uint64_t base, uint64_t size, uint64_t stride,
 int virtio_blk_init(virtio_blk_device_t *device, uint64_t base);
 int virtio_blk_read_sector(virtio_blk_device_t *device, uint64_t sector,
                            void *buffer);
+int virtio_blk_write_sector(virtio_blk_device_t *device, uint64_t sector,
+                            const void *buffer);
 
 #endif

@@ -10,8 +10,8 @@
 #include "uart/pl011.h"
 
 #define USER_STACK_SIZE 4096ULL
-#define USER_IMAGE_SLOT_SIZE 4096ULL
-#define USER_DEMO_PROCESS_COUNT 3U
+#define USER_IMAGE_SLOT_SIZE 8192ULL
+#define USER_DEMO_PROCESS_COUNT 4U
 #define USER_DEMO_PID_BASE 1U
 #define USER_DEMO_PSTATE 0x340ULL
 #define USER_DEMO_IMAGE_VA_BASE 0x0000000000400000ULL
@@ -27,6 +27,10 @@ static uint8_t g_user_stacks[USER_DEMO_PROCESS_COUNT][USER_STACK_SIZE]
 static uint8_t g_user_image_slots[USER_DEMO_PROCESS_COUNT][USER_IMAGE_SLOT_SIZE]
     __attribute__((aligned(4096)));
 static user_image_t g_user_demo_images[USER_DEMO_PROCESS_COUNT];
+static uint64_t g_spawn_memory_base;
+static uint64_t g_spawn_memory_size;
+static user_demo_map_mmio_fn_t g_spawn_map_mmio;
+static uint32_t g_next_spawn_pid = USER_DEMO_PID_BASE + USER_DEMO_PROCESS_COUNT;
 
 static uint64_t user_demo_image_vaddr(uint32_t index) {
     return USER_DEMO_IMAGE_VA_BASE + index * USER_DEMO_IMAGE_VA_STRIDE;
@@ -40,6 +44,13 @@ uint64_t user_demo_return_address(void) {
     return (uint64_t)(uintptr_t)user_enter_el0_return;
 }
 
+static void user_demo_set_image_vaddrs(
+    user_image_t images[USER_DEMO_PROCESS_COUNT]) {
+    for (uint32_t i = 0; i < USER_DEMO_PROCESS_COUNT; i++) {
+        images[i].base = user_demo_image_vaddr(i);
+    }
+}
+
 int user_demo_prepare_images(void) {
     if (user_image_load_bootfs_flat(&g_user_demo_images[0], "user-demo-a",
                                     "user_demo",
@@ -47,7 +58,6 @@ int user_demo_prepare_images(void) {
                                     USER_IMAGE_SLOT_SIZE, 0) != 0) {
         return -1;
     }
-    g_user_demo_images[0].base = user_demo_image_vaddr(0);
 
     if (user_image_load_bootfs_flat(&g_user_demo_images[1], "user-demo-b",
                                     "user_demo",
@@ -55,7 +65,6 @@ int user_demo_prepare_images(void) {
                                     USER_IMAGE_SLOT_SIZE, 1) != 0) {
         return -1;
     }
-    g_user_demo_images[1].base = user_demo_image_vaddr(1);
 
     if (user_image_load_bootfs_flat(&g_user_demo_images[2], "user-demo-fault",
                                     "user_demo",
@@ -63,7 +72,42 @@ int user_demo_prepare_images(void) {
                                     USER_IMAGE_SLOT_SIZE, 2) != 0) {
         return -1;
     }
-    g_user_demo_images[2].base = user_demo_image_vaddr(2);
+    if (user_image_load_bootfs_flat(&g_user_demo_images[3], "user-shell",
+                                    "user_demo",
+                                    (uint64_t)(uintptr_t)g_user_image_slots[3],
+                                    USER_IMAGE_SLOT_SIZE, 3) != 0) {
+        return -1;
+    }
+    user_demo_set_image_vaddrs(g_user_demo_images);
+
+    return 0;
+}
+
+int user_demo_prepare_vfs_images(const char *path) {
+    user_image_t images[USER_DEMO_PROCESS_COUNT];
+
+    if (user_image_load_vfs_flat(&images[0], "user-demo-a", path,
+                                 (uint64_t)(uintptr_t)g_user_image_slots[0],
+                                 USER_IMAGE_SLOT_SIZE, 0) != 0 ||
+        user_image_load_vfs_flat(&images[1], "user-demo-b", path,
+                                 (uint64_t)(uintptr_t)g_user_image_slots[1],
+                                 USER_IMAGE_SLOT_SIZE, 1) != 0 ||
+        user_image_load_vfs_flat(&images[2], "user-demo-fault", path,
+                                 (uint64_t)(uintptr_t)g_user_image_slots[2],
+                                 USER_IMAGE_SLOT_SIZE, 2) != 0 ||
+        user_image_load_vfs_flat(&images[3], "user-shell", path,
+                                 (uint64_t)(uintptr_t)g_user_image_slots[3],
+                                 USER_IMAGE_SLOT_SIZE, 3) != 0) {
+        return -1;
+    }
+
+    user_demo_set_image_vaddrs(images);
+    for (uint32_t i = 0; i < USER_DEMO_PROCESS_COUNT; i++) {
+        g_user_demo_images[i].name = images[i].name;
+        g_user_demo_images[i].base = images[i].base;
+        g_user_demo_images[i].size = images[i].size;
+        g_user_demo_images[i].entry_offset = images[i].entry_offset;
+    }
 
     return 0;
 }
@@ -147,6 +191,45 @@ static int init_user_demo_process(process_t *process, const user_image_t *image,
                                        memory_size, map_mmio);
 }
 
+int user_demo_spawn_vfs(const char *path, uint32_t entry_index) {
+    process_t *process;
+    user_image_t image;
+    uint32_t slot;
+
+    if (path == 0 || entry_index >= USER_IMAGE_MAX_ENTRIES ||
+        g_spawn_memory_size == 0) {
+        return -1;
+    }
+
+    (void)process_reclaim_zombies();
+    process = process_alloc(g_next_spawn_pid++, "spawned");
+    if (process == 0) {
+        return -1;
+    }
+
+    if (process_index(process, &slot) != 0 || slot >= USER_DEMO_PROCESS_COUNT) {
+        process_release(process);
+        return -1;
+    }
+
+    if (user_image_load_vfs_flat(&image, "spawned", path,
+                                 (uint64_t)(uintptr_t)g_user_image_slots[slot],
+                                 USER_IMAGE_SLOT_SIZE, entry_index) != 0) {
+        process_release(process);
+        return -1;
+    }
+    image.base = user_demo_image_vaddr(slot);
+
+    if (init_user_demo_process(process, &image, slot, g_spawn_memory_base,
+                               g_spawn_memory_size, g_spawn_map_mmio) != 0) {
+        process_release(process);
+        return -1;
+    }
+
+    process->state = PROCESS_READY;
+    return (int)process->pid;
+}
+
 uint64_t user_demo_run(uint64_t memory_base, uint64_t memory_size,
                        user_demo_map_mmio_fn_t map_mmio) {
     uint64_t *kernel_page_table =
@@ -158,23 +241,33 @@ uint64_t user_demo_run(uint64_t memory_base, uint64_t memory_size,
                                       g_user_demo_images[1].name);
     process_t *faulting = process_alloc(USER_DEMO_PID_BASE + 2U,
                                         g_user_demo_images[2].name);
+    process_t *shell = process_alloc(USER_DEMO_PID_BASE + 3U,
+                                     g_user_demo_images[3].name);
 
     if (init_user_demo_process(first, &g_user_demo_images[0], 0, memory_base,
                                memory_size, map_mmio) != 0 ||
         init_user_demo_process(second, &g_user_demo_images[1], 1, memory_base,
                                memory_size, map_mmio) != 0 ||
         init_user_demo_process(faulting, &g_user_demo_images[2], 2, memory_base,
+                               memory_size, map_mmio) != 0 ||
+        init_user_demo_process(shell, &g_user_demo_images[3], 3, memory_base,
                                memory_size, map_mmio) != 0) {
         uart_puts("USER demo: process setup failed\n");
         process_release(first);
         process_release(second);
         process_release(faulting);
+        process_release(shell);
         return 1;
     }
+
+    g_spawn_memory_base = memory_base;
+    g_spawn_memory_size = memory_size;
+    g_spawn_map_mmio = map_mmio;
 
     first->state = PROCESS_RUNNING;
     second->state = PROCESS_READY;
     faulting->state = PROCESS_READY;
+    shell->state = PROCESS_READY;
     process_set_current(first);
 
     uart_puts("USER demo: entering EL0\n");
@@ -191,6 +284,7 @@ uint64_t user_demo_run(uint64_t memory_base, uint64_t memory_size,
         process_release(first);
         process_release(second);
         process_release(faulting);
+        process_release(shell);
     }
 
     return exit_code;

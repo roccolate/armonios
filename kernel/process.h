@@ -48,8 +48,13 @@ void process_table_init(void);
 process_t *process_alloc(uint32_t pid, const char *name);
 void process_release(process_t *process);
 uint32_t process_count(void);
+const process_t *process_at(uint32_t index);
+int process_index(const process_t *process, uint32_t *index);
+process_t *process_find(uint32_t pid);
 process_t *process_next_runnable(process_t *after);
 uint32_t process_reclaim_zombies(void);
+int process_wait_zombie(uint32_t pid, uint64_t *exit_code);
+int process_kill(uint32_t pid, uint64_t exit_code);
 void process_init(process_t *process, uint32_t pid, const char *name);
 void process_set_entry(process_t *process, uint64_t pc, uint64_t sp, uint64_t pstate);
 void process_save_context(process_t *process, const uint64_t regs[31],

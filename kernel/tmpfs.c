@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include "kernel/vfs.h"
+
 typedef struct {
     char name[TMPFS_MAX_NAME];
     uint8_t data[TMPFS_MAX_FILE_SIZE];
@@ -10,6 +12,9 @@ typedef struct {
 } tmpfs_file_t;
 
 static tmpfs_file_t g_tmpfs_files[TMPFS_MAX_FILES];
+static vfs_node_t g_tmpfs_vfs_nodes[TMPFS_MAX_FILES];
+static char g_tmpfs_vfs_names[TMPFS_MAX_FILES][TMPFS_MAX_NAME];
+static uint32_t g_tmpfs_vfs_node_count;
 
 static int tmpfs_name_equals(const char *left, const char *right) {
     if (left == 0 || right == 0) {
@@ -62,17 +67,49 @@ static int tmpfs_copy_name(char dest[TMPFS_MAX_NAME], const char *name) {
     return 0;
 }
 
+static int tmpfs_vfs_read(void *context, uint64_t offset, uint8_t *buffer,
+                          uint64_t capacity, uint64_t *bytes_read) {
+    return tmpfs_read((const char *)context, offset, buffer, capacity,
+                      bytes_read);
+}
+
+static int tmpfs_vfs_write(void *context, uint64_t offset,
+                           const uint8_t *buffer, uint64_t size,
+                           uint64_t *bytes_written) {
+    return tmpfs_write((const char *)context, offset, buffer, size,
+                       bytes_written);
+}
+
+static int tmpfs_vfs_stat(void *context, vfs_stat_t *stat) {
+    tmpfs_stat_t tmp_stat;
+
+    if (stat == 0 || tmpfs_stat((const char *)context, &tmp_stat) != 0) {
+        return -1;
+    }
+
+    stat->size = tmp_stat.size;
+    return 0;
+}
+
 void tmpfs_reset(void) {
     for (uint32_t i = 0; i < TMPFS_MAX_FILES; i++) {
         g_tmpfs_files[i].size = 0;
         g_tmpfs_files[i].used = 0;
+        g_tmpfs_vfs_nodes[i].path = 0;
+        g_tmpfs_vfs_nodes[i].size = 0;
+        g_tmpfs_vfs_nodes[i].read = 0;
+        g_tmpfs_vfs_nodes[i].write = 0;
+        g_tmpfs_vfs_nodes[i].stat = 0;
+        g_tmpfs_vfs_nodes[i].context = 0;
         for (uint32_t j = 0; j < TMPFS_MAX_NAME; j++) {
             g_tmpfs_files[i].name[j] = '\0';
+            g_tmpfs_vfs_names[i][j] = '\0';
         }
         for (uint32_t j = 0; j < TMPFS_MAX_FILE_SIZE; j++) {
             g_tmpfs_files[i].data[j] = 0;
         }
     }
+    g_tmpfs_vfs_node_count = 0;
 }
 
 int tmpfs_create(const char *name) {
@@ -174,5 +211,39 @@ int tmpfs_stat(const char *name, tmpfs_stat_t *stat) {
     }
 
     stat->size = file->size;
+    return 0;
+}
+
+int tmpfs_mount_vfs(const char *path, const char *name) {
+    tmpfs_file_t *file = tmpfs_find_file(name);
+    uint32_t index = g_tmpfs_vfs_node_count;
+
+    if (path == 0 || path[0] != '/' || file == 0 ||
+        index >= TMPFS_MAX_FILES ||
+        tmpfs_copy_name(g_tmpfs_vfs_names[index], name) != 0) {
+        return -1;
+    }
+
+    g_tmpfs_vfs_nodes[index].path = path;
+    g_tmpfs_vfs_nodes[index].size = file->size;
+    g_tmpfs_vfs_nodes[index].read = tmpfs_vfs_read;
+    g_tmpfs_vfs_nodes[index].write = tmpfs_vfs_write;
+    g_tmpfs_vfs_nodes[index].stat = tmpfs_vfs_stat;
+    g_tmpfs_vfs_nodes[index].context = g_tmpfs_vfs_names[index];
+
+    if (vfs_mount_static(&g_tmpfs_vfs_nodes[index], 1) != 0) {
+        g_tmpfs_vfs_nodes[index].path = 0;
+        g_tmpfs_vfs_nodes[index].size = 0;
+        g_tmpfs_vfs_nodes[index].read = 0;
+        g_tmpfs_vfs_nodes[index].write = 0;
+        g_tmpfs_vfs_nodes[index].stat = 0;
+        g_tmpfs_vfs_nodes[index].context = 0;
+        for (uint32_t i = 0; i < TMPFS_MAX_NAME; i++) {
+            g_tmpfs_vfs_names[index][i] = '\0';
+        }
+        return -1;
+    }
+
+    g_tmpfs_vfs_node_count++;
     return 0;
 }

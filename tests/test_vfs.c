@@ -8,6 +8,12 @@ typedef struct {
     uint64_t size;
 } test_file_t;
 
+typedef struct {
+    uint8_t data[8];
+    uint64_t size;
+    uint64_t capacity;
+} test_rw_file_t;
+
 static int test_file_read(void *context, uint64_t offset, uint8_t *buffer,
                           uint64_t capacity, uint64_t *bytes_read) {
     test_file_t *file = (test_file_t *)context;
@@ -31,6 +37,75 @@ static int test_file_read(void *context, uint64_t offset, uint8_t *buffer,
     }
 
     *bytes_read = count;
+    return 0;
+}
+
+static int test_rw_file_read(void *context, uint64_t offset, uint8_t *buffer,
+                             uint64_t capacity, uint64_t *bytes_read) {
+    test_rw_file_t *file = (test_rw_file_t *)context;
+    uint64_t count;
+
+    if (bytes_read != 0) {
+        *bytes_read = 0;
+    }
+
+    if (file == 0 || buffer == 0 || bytes_read == 0 || offset > file->size) {
+        return -1;
+    }
+
+    count = capacity;
+    if (count > file->size - offset) {
+        count = file->size - offset;
+    }
+
+    for (uint64_t i = 0; i < count; i++) {
+        buffer[i] = file->data[offset + i];
+    }
+
+    *bytes_read = count;
+    return 0;
+}
+
+static int test_rw_file_write(void *context, uint64_t offset,
+                              const uint8_t *buffer, uint64_t size,
+                              uint64_t *bytes_written) {
+    test_rw_file_t *file = (test_rw_file_t *)context;
+    uint64_t count;
+
+    if (bytes_written != 0) {
+        *bytes_written = 0;
+    }
+
+    if (file == 0 || buffer == 0 || bytes_written == 0 ||
+        offset > file->size || offset > file->capacity) {
+        return -1;
+    }
+
+    count = size;
+    if (count > file->capacity - offset) {
+        count = file->capacity - offset;
+    }
+
+    for (uint64_t i = 0; i < count; i++) {
+        file->data[offset + i] = buffer[i];
+    }
+
+    if (offset + count > file->size) {
+        file->size = offset + count;
+    }
+
+    *bytes_written = count;
+    return 0;
+}
+
+static int test_rw_file_stat(void *context, vfs_stat_t *stat) {
+    test_rw_file_t *file = (test_rw_file_t *)context;
+
+    if (file == 0 || stat == 0) {
+        return -1;
+    }
+
+    stat->size = file->size;
     return 0;
 }
 
@@ -155,6 +230,10 @@ void test_vfs_rejects_invalid_mounts_and_reads(void) {
     TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
                              (uint64_t)vfs_read("/one", 0, buffer,
                                                 sizeof(buffer), 0));
+
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)vfs_write("/one", 0, data,
+                                                 sizeof(data), 0));
 }
 
 void test_vfs_mount_static_respects_node_limit(void) {
@@ -232,6 +311,59 @@ void test_vfs_open_read_fd_and_close(void) {
                              (uint64_t)vfs_read_fd(fd, second,
                                                    sizeof(second),
                                                    &bytes_read));
+}
+
+void test_vfs_open_flags_enforce_read_write_modes(void) {
+    uint8_t input[] = { 9 };
+    uint8_t output[2] = { 0 };
+    uint64_t count = 99;
+    int fd;
+    test_rw_file_t file = {
+        .data = { 1, 2 },
+        .size = 2,
+        .capacity = 8,
+    };
+    vfs_node_t node = {
+        .path = "/rw-mode",
+        .size = 2,
+        .read = test_rw_file_read,
+        .write = test_rw_file_write,
+        .stat = test_rw_file_stat,
+        .context = &file,
+    };
+
+    vfs_reset();
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_mount_static(&node, 1));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)vfs_open_flags("/rw-mode", 3));
+
+    fd = vfs_open_flags("/rw-mode", VFS_O_WRONLY);
+    TEST_ASSERT_TRUE(fd >= 0);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)vfs_read_fd(fd, output,
+                                                   sizeof(output), &count));
+    TEST_ASSERT_EQUAL_UINT64(0, count);
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)vfs_write_fd(fd, input,
+                                                    sizeof(input), &count));
+    TEST_ASSERT_EQUAL_UINT64(sizeof(input), count);
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_close(fd));
+
+    fd = vfs_open_flags("/rw-mode", VFS_O_RDONLY);
+    TEST_ASSERT_TRUE(fd >= 0);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)vfs_write_fd(fd, input,
+                                                    sizeof(input), &count));
+    TEST_ASSERT_EQUAL_UINT64(0, count);
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_close(fd));
+
+    fd = vfs_open_flags("/rw-mode", VFS_O_RDWR);
+    TEST_ASSERT_TRUE(fd >= 0);
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)vfs_read_fd(fd, output,
+                                                   sizeof(output), &count));
+    TEST_ASSERT_EQUAL_UINT64(2, count);
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_close(fd));
 }
 
 void test_vfs_open_rejects_missing_and_invalid_descriptors(void) {
@@ -334,6 +466,76 @@ void test_vfs_stat_reports_node_size(void) {
                              (uint64_t)vfs_stat("/stat", 0));
 }
 
+void test_vfs_list_root_returns_mounted_paths(void) {
+    uint8_t data[] = { 1 };
+    uint8_t buffer[64] = { 0 };
+    uint64_t bytes_written = 0;
+    test_file_t file = {
+        .data = data,
+        .size = sizeof(data),
+    };
+    vfs_node_t nodes[2] = {
+        {
+            .path = "/boot/user_demo",
+            .size = sizeof(data),
+            .read = test_file_read,
+            .context = &file,
+        },
+        {
+            .path = "/tmp/note",
+            .size = sizeof(data),
+            .read = test_file_read,
+            .context = &file,
+        },
+    };
+
+    vfs_reset();
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_mount_static(nodes, 2));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_list("/", buffer,
+                                                  sizeof(buffer),
+                                                  &bytes_written));
+    TEST_ASSERT_EQUAL_UINT64(26, bytes_written);
+    for (uint64_t i = 0; i < bytes_written; i++) {
+        TEST_ASSERT_EQUAL_UINT64(
+            (uint64_t)((const uint8_t *)"/boot/user_demo\n/tmp/note\n")[i],
+            buffer[i]);
+    }
+
+    bytes_written = 99;
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)vfs_list("/tmp", buffer,
+                                                sizeof(buffer),
+                                                &bytes_written));
+    TEST_ASSERT_EQUAL_UINT64(0, bytes_written);
+}
+
+void test_vfs_list_truncates_to_capacity(void) {
+    uint8_t data[] = { 1 };
+    uint8_t buffer[8] = { 0 };
+    uint64_t bytes_written = 0;
+    test_file_t file = {
+        .data = data,
+        .size = sizeof(data),
+    };
+    vfs_node_t node = {
+        .path = "/boot/user_demo",
+        .size = sizeof(data),
+        .read = test_file_read,
+        .context = &file,
+    };
+
+    vfs_reset();
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_mount_static(&node, 1));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_list("/", buffer,
+                                                  sizeof(buffer),
+                                                  &bytes_written));
+    TEST_ASSERT_EQUAL_UINT64(sizeof(buffer), bytes_written);
+    for (uint64_t i = 0; i < bytes_written; i++) {
+        TEST_ASSERT_EQUAL_UINT64((uint64_t)((const uint8_t *)"/boot/us")[i],
+                                 buffer[i]);
+    }
+}
+
 void test_vfs_seek_sets_descriptor_offset(void) {
     uint8_t data[] = { 0x11, 0x22, 0x33, 0x44 };
     uint8_t buffer[2] = { 0 };
@@ -367,4 +569,88 @@ void test_vfs_seek_sets_descriptor_offset(void) {
     TEST_ASSERT_EQUAL_UINT64((uint64_t)-1, (uint64_t)vfs_seek(fd, 5));
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_close(fd));
     TEST_ASSERT_EQUAL_UINT64((uint64_t)-1, (uint64_t)vfs_seek(fd, 0));
+}
+
+void test_vfs_write_dispatches_to_node_writer(void) {
+    uint8_t input[] = { 0x55, 0x66, 0x77 };
+    uint8_t output[4] = { 0 };
+    uint64_t count = 0;
+    vfs_stat_t stat;
+    test_rw_file_t file = {
+        .data = { 0 },
+        .size = 0,
+        .capacity = 8,
+    };
+    vfs_node_t node = {
+        .path = "/rw",
+        .size = 0,
+        .read = test_rw_file_read,
+        .write = test_rw_file_write,
+        .stat = test_rw_file_stat,
+        .context = &file,
+    };
+
+    vfs_reset();
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_mount_static(&node, 1));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)vfs_write("/rw", 0, input,
+                                                 sizeof(input), &count));
+    TEST_ASSERT_EQUAL_UINT64(sizeof(input), count);
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_stat("/rw", &stat));
+    TEST_ASSERT_EQUAL_UINT64(sizeof(input), stat.size);
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)vfs_read("/rw", 0, output,
+                                                sizeof(output), &count));
+    TEST_ASSERT_EQUAL_UINT64(sizeof(input), count);
+    TEST_ASSERT_EQUAL_UINT64(0x55, output[0]);
+    TEST_ASSERT_EQUAL_UINT64(0x66, output[1]);
+    TEST_ASSERT_EQUAL_UINT64(0x77, output[2]);
+    TEST_ASSERT_EQUAL_UINT64(0, output[3]);
+}
+
+void test_vfs_open_write_fd_updates_offset_and_size(void) {
+    uint8_t first[] = { 1, 2 };
+    uint8_t second[] = { 3, 4 };
+    uint8_t output[4] = { 0 };
+    uint64_t count = 0;
+    int fd;
+    test_rw_file_t file = {
+        .data = { 0 },
+        .size = 0,
+        .capacity = 8,
+    };
+    vfs_node_t node = {
+        .path = "/fd-rw",
+        .size = 0,
+        .read = test_rw_file_read,
+        .write = test_rw_file_write,
+        .stat = test_rw_file_stat,
+        .context = &file,
+    };
+
+    vfs_reset();
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_mount_static(&node, 1));
+    fd = vfs_open_flags("/fd-rw", VFS_O_RDWR);
+    TEST_ASSERT_TRUE(fd >= 0);
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)vfs_write_fd(fd, first, sizeof(first),
+                                                    &count));
+    TEST_ASSERT_EQUAL_UINT64(sizeof(first), count);
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)vfs_write_fd(fd, second,
+                                                    sizeof(second), &count));
+    TEST_ASSERT_EQUAL_UINT64(sizeof(second), count);
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_seek(fd, 0));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)vfs_read_fd(fd, output,
+                                                   sizeof(output), &count));
+    TEST_ASSERT_EQUAL_UINT64(sizeof(output), count);
+    TEST_ASSERT_EQUAL_UINT64(1, output[0]);
+    TEST_ASSERT_EQUAL_UINT64(2, output[1]);
+    TEST_ASSERT_EQUAL_UINT64(3, output[2]);
+    TEST_ASSERT_EQUAL_UINT64(4, output[3]);
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_close(fd));
 }
