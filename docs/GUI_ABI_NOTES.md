@@ -17,9 +17,14 @@ already used by fixed-message IPC.
 | 74 | `sys_window_event` | `x0=window_id, x1=buf_ptr, x2=event_capacity` | event count / error |
 | 75 | `sys_window_set_title` | `x0=window_id, x1=title_ptr, x2=title_h` | 0 / error |
 | 76 | `sys_window_redraw` | `x0=window_id` | 0 / error |
+| 77 | `sys_window_focus` | `x0=window_id` | 0 / error |
+| 78 | `sys_window_for_pid` | `x0=owner_pid, x1=index` | window id / `ERR_NOENT` |
 
-All current window syscalls require the caller to own the target window. The
-kernel checks `gui_window_t.owner_pid` against the current process pid.
+All draw / destroy / set-title window syscalls require the caller to own the
+target window. The kernel checks `gui_window_t.owner_pid` against the current
+process pid. The two new syscalls `sys_window_focus` and `sys_window_for_pid`
+are deliberately callable from any pid so the desktop taskbar (which does not
+own app windows) can raise and enumerate them.
 
 ## Event Buffer
 
@@ -70,7 +75,8 @@ Window management still needs:
 - `sys_window_get_bounds`
 - `sys_window_set_bounds` or separate move/resize calls
 - `sys_window_show` and `sys_window_hide`
-- `sys_window_focus`
+- `sys_window_focus` (implemented as syscall 77, raises a window by id)
+- `sys_window_for_pid` (implemented as syscall 78, enumerates owner windows)
 - `sys_window_flush` with an explicit dirty rectangle
 - close/minimize/maximize decoration events
 - process-exit cleanup or orphan-window policy

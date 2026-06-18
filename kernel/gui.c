@@ -570,6 +570,30 @@ int gui_focus_window_ensure(gui_desktop_t *desktop) {
     return -1;
 }
 
+uint32_t gui_window_for_pid(gui_desktop_t *desktop, uint32_t owner_pid,
+                            uint32_t index) {
+    if (desktop == 0) {
+        return GUI_NO_WINDOW;
+    }
+    /* GUI_NO_OWNER is the sentinel for "no pid"; never enumerate
+     * owner-less demo windows under it. */
+    if (owner_pid == GUI_NO_OWNER) {
+        return GUI_NO_WINDOW;
+    }
+    uint32_t found = 0;
+    for (uint32_t i = 0; i < GUI_MAX_WINDOWS; i++) {
+        const gui_window_t *window = &desktop->windows[i];
+        if (window->used == 0 || window->owner_pid != owner_pid) {
+            continue;
+        }
+        if (found == index) {
+            return i;
+        }
+        found++;
+    }
+    return GUI_NO_WINDOW;
+}
+
 int gui_send_key(gui_desktop_t *desktop, char key) {
     gui_window_t *window;
 

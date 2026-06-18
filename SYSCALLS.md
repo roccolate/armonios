@@ -137,10 +137,15 @@ Current limitations:
 | 74 | `sys_window_event` | `x0=window_id, x1=buf, x2=max_events` | event count / error | Read queued window events |
 | 75 | `sys_window_set_title` | `x0=window_id, x1=title_ptr, x2=title_h` | 0 / error | Replace a window title and optional kernel-drawn title bar height |
 | 76 | `sys_window_redraw` | `x0=window_id` | 0 / error | Mark the demo GUI desktop dirty |
+| 77 | `sys_window_focus` | `x0=window_id` | 0 / error | Raise/focus a window by id (callable from any pid, not just the owner) |
+| 78 | `sys_window_for_pid` | `x0=owner_pid, x1=index` | window id / `ERR_NOENT` | Return the index-th window owned by the given pid, or `ERR_NOENT` when none |
 
 Current limitations:
 - These syscalls are the early desktop ABI, not a stable long-term ABI.
-- Window ownership is enforced with the current process pid.
+- Window ownership is enforced with the current process pid for draw,
+  destroy, and set-title. `sys_window_focus` and `sys_window_for_pid`
+  are deliberately callable from any pid so the desktop taskbar (a
+  different pid from the apps it tracks) can raise their windows.
 - `sys_window_event` writes packed `gui_event_t` triples:
   `uint32_t type, int32_t data1, int32_t data2`.
 - `sys_window_event` yields for a bounded number of scheduler turns and returns
@@ -152,6 +157,12 @@ Current limitations:
   `title_h >= window->h` with `ERR_INVAL`. Owner drawing through
   `SYS_WINDOW_DRAW_RECT/TEXT` is shifted down by `title_h` so apps keep a
   0-based content coordinate space below the bar.
+- `sys_window_focus` only updates the focus border; it does not change the
+  existing z-order (windows are drawn in creation order). Raising a
+  partially obscured window requires a future z-order rearrangement API.
+- `sys_window_for_pid` skips owner-less demo windows (those whose
+  `owner_pid == GUI_NO_OWNER`); only windows actually owned by a process
+  are visible through it.
 - Drawing still writes through the current kernel framebuffer path; there is no
   per-window backing buffer or explicit flush rectangle yet.
 

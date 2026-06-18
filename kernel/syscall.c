@@ -38,6 +38,8 @@
 #define SYS_WINDOW_EVENT     74ULL
 #define SYS_WINDOW_SET_TITLE 75ULL
 #define SYS_WINDOW_REDRAW    76ULL
+#define SYS_WINDOW_FOCUS     77ULL
+#define SYS_WINDOW_FOR_PID   78ULL
 #define SYS_TIMEINFO 100ULL
 #define SYS_MEMINFO 101ULL
 #define SYS_PROCLIST 102ULL
@@ -566,6 +568,40 @@ static int64_t sys_window_redraw(process_t *process, uint64_t window_id) {
     return 0;
 }
 
+static int64_t sys_window_focus(process_t *process, uint64_t window_id) {
+    if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
+        return ERR_INVAL;
+    }
+    gui_window_t *window = &gui_demo_desktop()->windows[window_id];
+    if (window->used == 0) {
+        return ERR_NOENT;
+    }
+    /* Unlike the owner-only draw/destroy syscalls, sys_window_focus is
+     * deliberately callable by any process. The desktop taskbar (a
+     * different pid from the app owners) needs to raise windows it did
+     * not create when the user clicks a running-app entry. */
+    if (gui_focus_window(gui_demo_desktop(), (uint32_t)window_id) != 0) {
+        return ERR_INVAL;
+    }
+    extern void gui_demo_request_redraw(void);
+    gui_demo_request_redraw();
+    return 0;
+}
+
+static int64_t sys_window_for_pid(process_t *process, uint64_t owner_pid,
+                                  uint64_t index) {
+    if (process == 0 || owner_pid > UINT32_MAX || index > GUI_MAX_WINDOWS) {
+        return ERR_INVAL;
+    }
+    uint32_t window_id = gui_window_for_pid(gui_demo_desktop(),
+                                            (uint32_t)owner_pid,
+                                            (uint32_t)index);
+    if (window_id == GUI_NO_WINDOW) {
+        return ERR_NOENT;
+    }
+    return (int64_t)window_id;
+}
+
 static int64_t sys_window_event(process_t *process, exception_frame_t *frame,
                                uint64_t window_id, uint64_t buf_ptr,
                                uint64_t buf_count) {
@@ -735,6 +771,13 @@ void syscall_dispatch(exception_frame_t *frame) {
         break;
     case SYS_WINDOW_REDRAW:
         frame->x[0] = (uint64_t)sys_window_redraw(current, frame->x[0]);
+        break;
+    case SYS_WINDOW_FOCUS:
+        frame->x[0] = (uint64_t)sys_window_focus(current, frame->x[0]);
+        break;
+    case SYS_WINDOW_FOR_PID:
+        frame->x[0] = (uint64_t)sys_window_for_pid(current, frame->x[0],
+                                                   frame->x[1]);
         break;
     case SYS_TIMEINFO:
         frame->x[0] = (uint64_t)sys_timeinfo(frame->x[0]);

@@ -104,6 +104,8 @@ void test_gui_title_bar_shifts_owner_draw_below_bar(void);
 void test_gui_title_bar_paints_bar_and_text(void);
 void test_gui_set_title_bar_rejects_height_larger_than_window(void);
 void test_gui_set_title_bar_zero_disables_bar(void);
+void test_gui_focus_window_switches_to_target(void);
+void test_gui_window_for_pid_returns_owner_windows(void);
 void test_gui_draw_fills_vertical_gradient(void);
 void test_fb_init_rejects_invalid_geometry(void);
 void test_fb_putpixel_and_fillrect_clip_to_bounds(void);
@@ -223,6 +225,8 @@ int main(void) {
     RUN_TEST(test_gui_title_bar_paints_bar_and_text);
     RUN_TEST(test_gui_set_title_bar_rejects_height_larger_than_window);
     RUN_TEST(test_gui_set_title_bar_zero_disables_bar);
+    RUN_TEST(test_gui_focus_window_switches_to_target);
+    RUN_TEST(test_gui_window_for_pid_returns_owner_windows);
     RUN_TEST(test_fb_init_rejects_invalid_geometry);
     RUN_TEST(test_fb_putpixel_and_fillrect_clip_to_bounds);
     RUN_TEST(test_fb_blit_copies_and_clips_source_pixels);

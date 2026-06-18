@@ -539,12 +539,107 @@ void test_gui_set_title_bar_zero_disables_bar(void) {
                                  &desktop, 7U, 0, 0, 8, 8, 0xff0000aaU,
                                  0xffffffffU, "abc", &window_id));
     TEST_ASSERT_EQUAL_UINT64(0,
-                            (uint64_t)gui_set_window_title_bar(
-                                &desktop, window_id, 0U));
+                             (uint64_t)gui_set_window_title_bar(
+                                 &desktop, window_id, 0U));
 
     gui_draw(&desktop);
 
     /* With title_h=0 the bg_color (0xff0000aa) shows at the interior
      * (1, 1) and there is no kernel title bar overlay. */
     TEST_ASSERT_EQUAL_UINT64(0xff0000aaU, pixels[1 * 8 + 1]);
+}
+
+void test_gui_focus_window_switches_to_target(void) {
+    uint32_t pixels[80] = { 0 };
+    fb_t fb;
+    gui_desktop_t desktop;
+    uint32_t first;
+    uint32_t second;
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 8, 10, 8));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_init(&desktop, &fb, 0xff101010U));
+    desktop.cursor.visible = 0;
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window_for_pid(
+                                 &desktop, 11U, 0, 0, 8, 10, 0xff0000aaU,
+                                 0xff101010U, "first", &first));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window_for_pid(
+                                 &desktop, 22U, 0, 0, 8, 10, 0xff00aa00U,
+                                 0xff202020U, "second", &second));
+    /* First window starts focused. */
+    TEST_ASSERT_EQUAL_UINT64(first, desktop.focused_window_id);
+
+    /* gui_focus_window must be callable from outside the owner pid; the
+     * panel taskbar will do this. */
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_focus_window(&desktop, second));
+    TEST_ASSERT_EQUAL_UINT64(second, desktop.focused_window_id);
+
+    /* Re-focusing an unknown window must fail without changing state. */
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)gui_focus_window(
+                                 &desktop, GUI_MAX_WINDOWS));
+    TEST_ASSERT_EQUAL_UINT64(second, desktop.focused_window_id);
+}
+
+void test_gui_window_for_pid_returns_owner_windows(void) {
+    uint32_t pixels[64] = { 0 };
+    fb_t fb;
+    gui_desktop_t desktop;
+    uint32_t first;
+    uint32_t second;
+    uint32_t third;
+    uint32_t orphan;
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 8, 8, 8));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_init(&desktop, &fb, 0xff101010U));
+    desktop.cursor.visible = 0;
+    /* pid 42 owns first and second; pid 99 owns third; the demo window
+     * (orphan) has no owner. */
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window_for_pid(
+                                 &desktop, 42U, 0, 0, 4, 4, 0xff0000aaU,
+                                 0xff101010U, "a", &first));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window_for_pid(
+                                 &desktop, 42U, 4, 0, 4, 4, 0xff0000aaU,
+                                 0xff101010U, "b", &second));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window_for_pid(
+                                 &desktop, 99U, 0, 4, 4, 4, 0xff0000aaU,
+                                 0xff101010U, "c", &third));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window(
+                                 &desktop, 4, 4, 4, 4, 0xff0000aaU,
+                                 0xff101010U, &orphan));
+
+    /* pid 42 enumerates two windows, in creation order. */
+    TEST_ASSERT_EQUAL_UINT64(first,
+                             (uint64_t)gui_window_for_pid(
+                                 &desktop, 42U, 0U));
+    TEST_ASSERT_EQUAL_UINT64(second,
+                             (uint64_t)gui_window_for_pid(
+                                 &desktop, 42U, 1U));
+    /* Past the end returns NO_WINDOW. */
+    TEST_ASSERT_EQUAL_UINT64(GUI_NO_WINDOW,
+                             (uint64_t)gui_window_for_pid(
+                                 &desktop, 42U, 2U));
+    /* pid 99 owns exactly one window. */
+    TEST_ASSERT_EQUAL_UINT64(third,
+                             (uint64_t)gui_window_for_pid(
+                                 &desktop, 99U, 0U));
+    TEST_ASSERT_EQUAL_UINT64(GUI_NO_WINDOW,
+                             (uint64_t)gui_window_for_pid(
+                                 &desktop, 99U, 1U));
+    /* The owner-less demo window does not appear under any pid. */
+    TEST_ASSERT_EQUAL_UINT64(GUI_NO_WINDOW,
+                             (uint64_t)gui_window_for_pid(
+                                 &desktop, GUI_NO_OWNER, 0U));
+    /* A pid that owns nothing also returns NO_WINDOW. */
+    TEST_ASSERT_EQUAL_UINT64(GUI_NO_WINDOW,
+                             (uint64_t)gui_window_for_pid(
+                                 &desktop, 12345U, 0U));
 }

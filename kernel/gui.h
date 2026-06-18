@@ -120,6 +120,12 @@ int gui_move_window(gui_desktop_t *desktop, uint32_t window_id, uint32_t x,
                     uint32_t y);
 int gui_focus_window(gui_desktop_t *desktop, uint32_t window_id);
 int gui_focus_window_ensure(gui_desktop_t *desktop);
+/* Find the index-th used window owned by owner_pid. Returns the window
+ * id on success or GUI_NO_WINDOW when no more windows exist for that
+ * pid. Lets the desktop taskbar raise a window without knowing the
+ * id in advance. */
+uint32_t gui_window_for_pid(gui_desktop_t *desktop, uint32_t owner_pid,
+                            uint32_t index);
 int gui_send_key(gui_desktop_t *desktop, char key);
 int gui_hit_test(gui_desktop_t *desktop, int32_t x, int32_t y);
 int gui_window_contains(gui_window_t *window, int32_t x, int32_t y);
