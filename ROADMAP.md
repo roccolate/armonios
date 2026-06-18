@@ -174,6 +174,10 @@ Exit criteria:
 
 Exit criteria:
 - [ ] Visible title bars with text on every app window.
+- [x] Visible title bars with text on every app window that opts in via
+      `sys_window_set_title(window_id, title_ptr, title_h)`. The clock app
+      is the first opt-in. The panel stays a bar without a title text so
+      its 32 px height can keep all eight launcher buttons.
 - [ ] Cursor changes shape over clickable decorations (hand on icon, arrow
       on text).
 - [ ] Building from a KolibriOS `.kos` demo file works for at least hello.

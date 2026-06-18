@@ -516,7 +516,7 @@ static int64_t sys_window_draw_rect(process_t *process, uint64_t window_id,
 }
 
 static int64_t sys_window_set_title(process_t *process, uint64_t window_id,
-                                    uint64_t title_ptr) {
+                                    uint64_t title_ptr, uint64_t title_h) {
     char title[GUI_TITLE_LEN];
     if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
         return ERR_INVAL;
@@ -531,6 +531,15 @@ static int64_t sys_window_set_title(process_t *process, uint64_t window_id,
     if (gui_set_window_title(gui_demo_desktop(), (uint32_t)window_id,
                              title) != 0) {
         return ERR_BADF;
+    }
+    /* title_h is an optional fourth argument. Older apps leave x2 unset,
+     * so we keep the default of 0 (no kernel title bar) for ABI
+     * compatibility. The kernel validates title_h against the window
+     * height before applying. */
+    if (title_h > 0 &&
+        gui_set_window_title_bar(gui_demo_desktop(), (uint32_t)window_id,
+                                 (uint32_t)title_h) != 0) {
+        return ERR_INVAL;
     }
     return 0;
 }
@@ -721,7 +730,8 @@ void syscall_dispatch(exception_frame_t *frame) {
         break;
     case SYS_WINDOW_SET_TITLE:
         frame->x[0] = (uint64_t)sys_window_set_title(current, frame->x[0],
-                                                     frame->x[1]);
+                                                     frame->x[1],
+                                                     frame->x[2]);
         break;
     case SYS_WINDOW_REDRAW:
         frame->x[0] = (uint64_t)sys_window_redraw(current, frame->x[0]);

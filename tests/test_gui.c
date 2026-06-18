@@ -415,3 +415,136 @@ void test_gui_draw_fills_vertical_gradient(void) {
         TEST_ASSERT_TRUE(pixels[row * 4] <= pixels[(row - 1) * 4]);
     }
 }
+
+void test_gui_title_bar_shifts_owner_draw_below_bar(void) {
+    uint32_t pixels[64] = { 0 };
+    fb_t fb;
+    gui_desktop_t desktop;
+    uint32_t window_id;
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 8, 8, 8));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_init(&desktop, &fb, 0xff101010U));
+    desktop.cursor.visible = 0;
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window(
+                                 &desktop, 0, 0, 8, 8, 0xff0000aaU,
+                                 0xffffffffU, &window_id));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_set_window_title_bar(
+                                 &desktop, window_id, 3U));
+
+    /* Owner draws a red rect at logical (0, 0, 4, 1). Without the shift
+     * the kernel would paint the bg_color into y=0 instead of the red.
+     * With the title_h=3 shift the red must appear at y=3. */
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_window_draw_rect(
+                                 &desktop, window_id, 0, 0, 4, 1, 0xffff0000U));
+
+    gui_draw(&desktop);
+
+    /* y=0..2 inside the window is occupied by the title bar, not the
+     * owner's red rect. */
+    for (uint32_t x = 1; x < 7; x++) {
+        TEST_ASSERT_TRUE(pixels[0 * 8 + x] != 0xffff0000U);
+        TEST_ASSERT_TRUE(pixels[1 * 8 + x] != 0xffff0000U);
+        TEST_ASSERT_TRUE(pixels[2 * 8 + x] != 0xffff0000U);
+    }
+    /* The owner's red rect must show up at y=3, x=1..3 (x=0 is owned by
+     * the kernel's left border which is painted after owner draws). */
+    TEST_ASSERT_EQUAL_UINT64(0xffff0000U, pixels[3 * 8 + 1]);
+    TEST_ASSERT_EQUAL_UINT64(0xffff0000U, pixels[3 * 8 + 2]);
+    TEST_ASSERT_EQUAL_UINT64(0xffff0000U, pixels[3 * 8 + 3]);
+    /* The kernel's left border remains visible at x=0 (brighter because
+     * the window is focused by default). */
+    TEST_ASSERT_TRUE(pixels[3 * 8 + 0] != 0xffff0000U);
+    /* y=4 must not contain red — the rect is only one row tall. */
+    TEST_ASSERT_TRUE(pixels[4 * 8 + 1] != 0xffff0000U);
+}
+
+void test_gui_title_bar_paints_bar_and_text(void) {
+    uint32_t pixels[64] = { 0 };
+    fb_t fb;
+    gui_desktop_t desktop;
+    uint32_t window_id;
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 8, 8, 8));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_init(&desktop, &fb, 0xff101010U));
+    desktop.cursor.visible = 0;
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window_for_pid(
+                                 &desktop, 7U, 0, 0, 8, 8, 0xff0000aaU,
+                                 0xff808080U, "abcd", &window_id));
+    /* Use a smaller title_h so the test window (8 px tall) still has
+     * content underneath the bar. */
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_set_window_title_bar(
+                                 &desktop, window_id, 3U));
+
+    gui_draw(&desktop);
+
+    /* The bar background must dominate the top 3 rows inside the
+     * window. Anything inside the bar is not the window bg_color
+     * 0xff0000aa because the kernel overpaints it with a darker shade
+     * of the border color. */
+    for (uint32_t y = 0; y < 3; y++) {
+        for (uint32_t x = 1; x < 7; x++) {
+            TEST_ASSERT_TRUE(pixels[y * 8 + x] != 0xff0000aaU);
+        }
+    }
+    /* Below the title bar the bg_color (0xff0000aa) shows because no
+     * owner draw has happened. The 4th row (index 3) is the separator
+     * line; the bg_color shows starting at y=4. The title text starts
+     * at x=2, so x=3 is a safe pixel that is neither text nor border. */
+    TEST_ASSERT_EQUAL_UINT64(0xff0000aaU, pixels[4 * 8 + 3]);
+    TEST_ASSERT_EQUAL_UINT64(0xff0000aaU, pixels[5 * 8 + 3]);
+}
+
+void test_gui_set_title_bar_rejects_height_larger_than_window(void) {
+    uint32_t pixels[16] = { 0 };
+    fb_t fb;
+    gui_desktop_t desktop;
+    uint32_t window_id;
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 4, 4, 4));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_init(&desktop, &fb, 0xff101010U));
+    desktop.cursor.visible = 0;
+    /* 2x2 window; title_h must leave at least one content row. */
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window(
+                                 &desktop, 0, 0, 2, 2, 0xff0000aaU,
+                                 0xffffffffU, &window_id));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                            (uint64_t)gui_set_window_title_bar(
+                                &desktop, window_id, 2U));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                            (uint64_t)gui_set_window_title_bar(
+                                &desktop, window_id, 1U));
+}
+
+void test_gui_set_title_bar_zero_disables_bar(void) {
+    uint32_t pixels[64] = { 0 };
+    fb_t fb;
+    gui_desktop_t desktop;
+    uint32_t window_id;
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 8, 8, 8));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_init(&desktop, &fb, 0xff101010U));
+    desktop.cursor.visible = 0;
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window_for_pid(
+                                 &desktop, 7U, 0, 0, 8, 8, 0xff0000aaU,
+                                 0xffffffffU, "abc", &window_id));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                            (uint64_t)gui_set_window_title_bar(
+                                &desktop, window_id, 0U));
+
+    gui_draw(&desktop);
+
+    /* With title_h=0 the bg_color (0xff0000aa) shows at the interior
+     * (1, 1) and there is no kernel title bar overlay. */
+    TEST_ASSERT_EQUAL_UINT64(0xff0000aaU, pixels[1 * 8 + 1]);
+}

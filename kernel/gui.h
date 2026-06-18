@@ -11,6 +11,9 @@
 #define GUI_CURSOR_W         12
 #define GUI_CURSOR_H         12
 #define GUI_TITLE_LEN        32U
+/* Default kernel-drawn title bar height when an app requests one. Fits
+ * the 5x7 bitmap font (7 px glyph) plus 5 px of vertical padding. */
+#define GUI_TITLE_BAR_H      12U
 #define GUI_EVENT_QUEUE_SIZE 32U
 #define GUI_NO_OWNER         0xffffffffU
 
@@ -37,6 +40,13 @@ typedef struct {
     uint32_t key_count;
     char last_key;
     uint32_t owner_pid;
+    /* Kernel-drawn title bar height in pixels. 0 means no title bar.
+     * When set, the kernel paints a solid bar at the top of the window
+     * and draws the title text inside it during gui_draw_window. Owner
+     * drawing via SYS_WINDOW_DRAW_RECT/TEXT has its y coordinate shifted
+     * down by title_h so apps keep a clean 0-based content coordinate
+     * space below the bar. */
+    uint32_t title_h;
     char title[GUI_TITLE_LEN];
     gui_event_t events[GUI_EVENT_QUEUE_SIZE];
     uint32_t event_head;
@@ -93,6 +103,8 @@ int gui_create_window_for_pid(gui_desktop_t *desktop, uint32_t owner_pid,
 int gui_destroy_window(gui_desktop_t *desktop, uint32_t window_id);
 int gui_set_window_title(gui_desktop_t *desktop, uint32_t window_id,
                          const char *title);
+int gui_set_window_title_bar(gui_desktop_t *desktop, uint32_t window_id,
+                             uint32_t title_h);
 int gui_window_draw_text(gui_desktop_t *desktop, uint32_t window_id,
                          int32_t x, int32_t y, const char *text,
                          uint32_t color);

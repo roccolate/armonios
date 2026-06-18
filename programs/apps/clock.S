@@ -14,11 +14,13 @@
 #define SYS_WINDOW_REDRAW    76
 #define SYS_WINDOW_EVENT     74
 #define SYS_WINDOW_DESTROY  71
+#define SYS_WINDOW_SET_TITLE 75
 
 .equ WIN_W, 200
 .equ WIN_H, 80
 .equ EVENT_CAP, 4
 .equ YIELDS_PER_SEC, 200
+.equ TITLE_BAR_H, 12
 
 .section .user.image.header, "a"
 .global clock_image_header
@@ -72,6 +74,14 @@ clock_start:
     cmp x0, #0
     b.lt clock_fail
     mov x19, x0                      // x19 = window handle
+
+    // Ask the kernel to paint a 12 px title bar with the "clock" title.
+    // x0 = window id, x1 = title ptr, x2 = title_h.
+    mov x0, x19
+    adr x1, clock_title
+    mov x2, #TITLE_BAR_H
+    mov x8, #SYS_WINDOW_SET_TITLE
+    svc #0
 
     bl clock_redraw
 

@@ -15,6 +15,9 @@ Current desktop/window functions:
 - `gui_create_window_for_pid` creates a window owned by a process pid.
 - `gui_destroy_window` clears a window slot.
 - `gui_set_window_title` stores a fixed-size title.
+- `gui_set_window_title_bar` enables a kernel-drawn title bar of a given
+  height. Owner drawing through `gui_window_draw_rect/text` is shifted
+  down by `title_h` so apps keep a 0-based content coordinate space.
 - `gui_move_window`, `gui_focus_window`, and `gui_focus_window_ensure` update
   window position and keyboard focus.
 - `gui_window_draw_rect`, `gui_window_draw_text`, and `gui_window_clear` draw

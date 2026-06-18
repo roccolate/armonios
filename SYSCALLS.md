@@ -135,7 +135,7 @@ Current limitations:
 | 72 | `sys_window_draw_text` | `x0=window_id, x1=x, x2=y, x3=color, x4=str_ptr` | 0 / error | Draw text inside a window |
 | 73 | `sys_window_draw_rect` | `x0=window_id, x1=x, x2=y, x3=w, x4=h, x5=color` | 0 / error | Draw a clipped filled rectangle inside a window |
 | 74 | `sys_window_event` | `x0=window_id, x1=buf, x2=max_events` | event count / error | Read queued window events |
-| 75 | `sys_window_set_title` | `x0=window_id, x1=title_ptr` | 0 / error | Replace a window title |
+| 75 | `sys_window_set_title` | `x0=window_id, x1=title_ptr, x2=title_h` | 0 / error | Replace a window title and optional kernel-drawn title bar height |
 | 76 | `sys_window_redraw` | `x0=window_id` | 0 / error | Mark the demo GUI desktop dirty |
 
 Current limitations:
@@ -145,6 +145,13 @@ Current limitations:
   `uint32_t type, int32_t data1, int32_t data2`.
 - `sys_window_event` yields for a bounded number of scheduler turns and returns
   `ERR_AGAIN` when no event arrives.
+- `sys_window_set_title` accepts an optional `x2=title_h`. `title_h` of 0 keeps
+  the legacy no-title-bar behaviour (default for apps that pre-date this
+  argument). Non-zero `title_h` asks the kernel to paint a solid bar at the top
+  of the window and draw the title text inside it. The kernel rejects
+  `title_h >= window->h` with `ERR_INVAL`. Owner drawing through
+  `SYS_WINDOW_DRAW_RECT/TEXT` is shifted down by `title_h` so apps keep a
+  0-based content coordinate space below the bar.
 - Drawing still writes through the current kernel framebuffer path; there is no
   per-window backing buffer or explicit flush rectangle yet.
 

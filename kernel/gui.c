@@ -201,6 +201,7 @@ int gui_init(gui_desktop_t *desktop, fb_t *fb, uint32_t background_color) {
         desktop->windows[i].key_count = 0;
         desktop->windows[i].last_key = '\0';
         desktop->windows[i].owner_pid = GUI_NO_OWNER;
+        desktop->windows[i].title_h = 0;
         desktop->windows[i].event_head = 0;
         desktop->windows[i].event_tail = 0;
         desktop->windows[i].event_count = 0;
@@ -242,6 +243,7 @@ int gui_create_window_for_pid(gui_desktop_t *desktop, uint32_t owner_pid,
             window->key_count = 0;
             window->last_key = '\0';
             window->owner_pid = owner_pid;
+            window->title_h = 0;
             window->event_head = 0;
             window->event_tail = 0;
             window->event_count = 0;
@@ -327,6 +329,24 @@ int gui_set_window_title(gui_desktop_t *desktop, uint32_t window_id,
     return 0;
 }
 
+int gui_set_window_title_bar(gui_desktop_t *desktop, uint32_t window_id,
+                             uint32_t title_h) {
+    if (desktop == 0 || window_id >= GUI_MAX_WINDOWS ||
+        desktop->windows[window_id].used == 0) {
+        return -1;
+    }
+    /* Refuse a title bar taller than the window itself. The bar must
+     * leave at least 1 px of content underneath it, otherwise owner
+     * drawing has nowhere to go and the bar would be a regression
+     * versus no-bar mode. */
+    gui_window_t *window = &desktop->windows[window_id];
+    if (title_h >= window->h) {
+        return -1;
+    }
+    window->title_h = title_h;
+    return 0;
+}
+
 int gui_window_draw_text(gui_desktop_t *desktop, uint32_t window_id,
                          int32_t x, int32_t y, const char *text,
                          uint32_t color) {
@@ -352,9 +372,10 @@ int gui_window_draw_text(gui_desktop_t *desktop, uint32_t window_id,
     if (x >= clip_x1 || y >= clip_y1) {
         return 0;
     }
-    /* We draw on the global framebuffer with the window's offset. */
+    /* Owner draws below the kernel title bar so apps keep a clean
+     * 0-based content coordinate space. */
     uint32_t abs_x = window->x + (uint32_t)x;
-    uint32_t abs_y = window->y + (uint32_t)y;
+    uint32_t abs_y = window->y + (uint32_t)y + window->title_h;
     if (abs_x >= desktop->fb->width || abs_y >= desktop->fb->height) {
         return 0;
     }
@@ -385,7 +406,7 @@ int gui_window_draw_rect(gui_desktop_t *desktop, uint32_t window_id,
     int32_t wx1 = wx0 + (int32_t)window->w;
     int32_t wy1 = wy0 + (int32_t)window->h;
     int32_t x0 = wx0 + x;
-    int32_t y0 = wy0 + y;
+    int32_t y0 = wy0 + y + (int32_t)window->title_h;
     int32_t x1 = x0 + (int32_t)w;
     int32_t y1 = y0 + (int32_t)h;
     if (x0 < wx0) {
@@ -563,6 +584,11 @@ int gui_send_key(gui_desktop_t *desktop, char key) {
     return 0;
 }
 
+/* Forward declare the color blender; it lives below gui_draw_window but
+ * the title-bar code path inside that function already needs it. */
+static uint32_t gui_blend_color(uint32_t top, uint32_t bottom,
+                                uint32_t num, uint32_t denom);
+
 static void gui_draw_window(fb_t *fb, const gui_desktop_t *desktop,
                             uint32_t index, const gui_window_t *window) {
     uint32_t border;
@@ -603,6 +629,28 @@ static void gui_draw_window(fb_t *fb, const gui_desktop_t *desktop,
                             window->y + 1U, 1U, window->h - 2U, border);
             }
         }
+    }
+
+    /* Title bar: drawn on top of the bg/border pass so the title text is
+     * always visible. When title_h is 0 (no bar requested) or the title
+     * string is empty, we leave the window alone and let the owner draw
+     * from y=0. When title_h > 0, the title bar replaces the top
+     * title_h pixels of the window content. */
+    if (window->title_h > 0U && window->title[0] != '\0') {
+        uint32_t bar_color = gui_blend_color(border, 0xff000000U, 2U, 3U);
+        fb_fillrect(fb, window->x, window->y, window->w, window->title_h,
+                    bar_color);
+        if (window->h > window->title_h + 1U) {
+            fb_fillrect(fb, window->x, window->y + window->title_h,
+                        window->w, 1U, border);
+        }
+        /* Center the 7 px tall font vertically inside the bar with 2 px
+         * left padding for the text. */
+        uint32_t text_y = window->y + (window->title_h > 7U
+                                       ? (window->title_h - 7U) / 2U
+                                       : 0U);
+        font_draw_text(fb, window->x + 2U, text_y, window->title,
+                       0xfff0f4f8U);
     }
 }
 

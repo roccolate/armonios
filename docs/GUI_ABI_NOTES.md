@@ -15,7 +15,7 @@ already used by fixed-message IPC.
 | 72 | `sys_window_draw_text` | `x0=window_id, x1=x, x2=y, x3=color, x4=str_ptr` | 0 / error |
 | 73 | `sys_window_draw_rect` | `x0=window_id, x1=x, x2=y, x3=w, x4=h, x5=color` | 0 / error |
 | 74 | `sys_window_event` | `x0=window_id, x1=buf_ptr, x2=event_capacity` | event count / error |
-| 75 | `sys_window_set_title` | `x0=window_id, x1=title_ptr` | 0 / error |
+| 75 | `sys_window_set_title` | `x0=window_id, x1=title_ptr, x2=title_h` | 0 / error |
 | 76 | `sys_window_redraw` | `x0=window_id` | 0 / error |
 
 All current window syscalls require the caller to own the target window. The
@@ -59,6 +59,9 @@ produce them from decorations.
   to window-local coordinates for apps.
 - Drawing syscalls operate immediately and directly; there is no draw-list
   submission or per-window back buffer yet.
+- The optional `title_h` argument of `sys_window_set_title` is silently
+  ignored (`title_h == 0`) by apps that pre-date the title bar feature; the
+  kernel still validates `title_h >= window->h`.
 
 ## Missing ABI Surface
 
