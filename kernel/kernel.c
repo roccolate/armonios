@@ -248,6 +248,13 @@ static void init_display(void) {
     }
 }
 
+static void flush_dirty_redraw(void) {
+    if (g_gpu_ready && gui_demo_is_dirty()) {
+        (void)virtio_gpu_draw(g_gpu_base, gui_draw_render, 0);
+        gui_demo_clear_dirty();
+    }
+}
+
 static void poll_input_events(void) {
     input_event_t event;
 
@@ -256,14 +263,13 @@ static void poll_input_events(void) {
             event.type == INPUT_EVENT_MOUSE_BUTTON ||
             event.type == INPUT_EVENT_KEY_PRESS ||
             event.type == INPUT_EVENT_KEY_RELEASE) {
-            if (gui_demo_handle_input(&event) == 0 && g_gpu_ready) {
-                if (gui_demo_is_dirty()) {
-                    (void)virtio_gpu_draw(g_gpu_base, gui_draw_render, 0);
-                    gui_demo_clear_dirty();
-                }
-            }
+            (void)gui_demo_handle_input(&event);
         }
     }
+    /* Flush any pending redraw regardless of whether events arrived. An
+     * EL0 app that called SYS_WINDOW_REDRAW without producing input must
+     * still see its drawing on screen by the next timer tick. */
+    flush_dirty_redraw();
 }
 
 void kernel_on_timer_tick(void) {

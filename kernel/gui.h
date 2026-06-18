@@ -43,6 +43,12 @@ typedef struct {
     uint32_t event_tail;
     uint32_t event_count;
     uint8_t used;
+    /* Set when an EL0 owner has drawn into this window via
+     * SYS_WINDOW_DRAW_RECT or SYS_WINDOW_DRAW_TEXT. When set, the kernel
+     * compositor skips the bg_color fillrect on redraw so the owner's
+     * drawing survives. The owner is responsible for painting its own
+     * background the first time. */
+    uint8_t owner_drawn;
 } gui_window_t;
 
 typedef struct {

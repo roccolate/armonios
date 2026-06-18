@@ -213,8 +213,8 @@ int main(void) {
     RUN_TEST(test_gui_focused_window_gets_brighter_border);
     RUN_TEST(test_gui_drag_moves_window_following_cursor);
     RUN_TEST(test_gui_drag_rejects_unknown_window);
-    RUN_TEST(test_gui_demo_drag_stays_active_until_left_release);
     RUN_TEST(test_gui_draw_fills_vertical_gradient);
+    RUN_TEST(test_gui_demo_drag_stays_active_until_left_release);
     RUN_TEST(test_fb_init_rejects_invalid_geometry);
     RUN_TEST(test_fb_putpixel_and_fillrect_clip_to_bounds);
     RUN_TEST(test_fb_blit_copies_and_clips_source_pixels);

@@ -257,6 +257,7 @@ int gui_create_window_for_pid(gui_desktop_t *desktop, uint32_t owner_pid,
                 }
             }
             window->used = 1;
+            window->owner_drawn = 0;
             if (desktop->focused_window_id == GUI_NO_WINDOW) {
                 desktop->focused_window_id = i;
             }
@@ -334,6 +335,7 @@ int gui_window_draw_text(gui_desktop_t *desktop, uint32_t window_id,
         return -1;
     }
     gui_window_t *window = &desktop->windows[window_id];
+    window->owner_drawn = 1;
     if (text == 0) {
         return -1;
     }
@@ -374,6 +376,7 @@ int gui_window_draw_rect(gui_desktop_t *desktop, uint32_t window_id,
         return -1;
     }
     gui_window_t *window = &desktop->windows[window_id];
+    window->owner_drawn = 1;
     if (w == 0 || h == 0) {
         return 0;
     }
@@ -575,10 +578,31 @@ static void gui_draw_window(fb_t *fb, const gui_desktop_t *desktop,
         border = 0xffe0e8f0U;
     }
 
-    fb_fillrect(fb, window->x, window->y, window->w, window->h, border);
-    if (window->w > 2U && window->h > 2U) {
-        fb_fillrect(fb, window->x + 1U, window->y + 1U,
-                    window->w - 2U, window->h - 2U, window->bg_color);
+    if (window->owner_drawn == 0) {
+        /* Default path: fill the window with border then paint bg_color
+         * over the interior. Used by windows that haven't received any
+         * drawing from their EL0 owner (the boot-time demo windows). */
+        fb_fillrect(fb, window->x, window->y, window->w, window->h, border);
+        if (window->w > 2U && window->h > 2U) {
+            fb_fillrect(fb, window->x + 1U, window->y + 1U,
+                        window->w - 2U, window->h - 2U, window->bg_color);
+        }
+    } else {
+        /* Owner has drawn content; only paint the 1px border so we don't
+         * overwrite its work. */
+        fb_fillrect(fb, window->x, window->y, window->w, 1U, border);
+        if (window->h > 1U) {
+            fb_fillrect(fb, window->x,
+                        window->y + window->h - 1U, window->w, 1U, border);
+        }
+        if (window->h > 2U) {
+            fb_fillrect(fb, window->x, window->y + 1U, 1U,
+                        window->h - 2U, border);
+            if (window->w > 1U) {
+                fb_fillrect(fb, window->x + window->w - 1U,
+                            window->y + 1U, 1U, window->h - 2U, border);
+            }
+        }
     }
 }
 
@@ -610,24 +634,69 @@ static uint32_t gui_blend_color(uint32_t top, uint32_t bottom,
     return (top & 0xff000000U) | (r << 16) | (g << 8) | b;
 }
 
+/* Find the next used window covering (x, row) whose left edge is at or
+ * after x. Returns the window index or GUI_MAX_WINDOWS if none. */
+static uint32_t gui_next_window_at_or_after(const gui_desktop_t *desktop,
+                                             uint32_t row, uint32_t x) {
+    uint32_t best = GUI_MAX_WINDOWS;
+    uint32_t best_x = UINT32_MAX;
+    for (uint32_t i = 0; i < GUI_MAX_WINDOWS; i++) {
+        const gui_window_t *w = &desktop->windows[i];
+        if (w->used == 0) {
+            continue;
+        }
+        if (w->y > row || (w->y + w->h) <= row) {
+            continue;
+        }
+        if (w->x + w->w <= x) {
+            continue;
+        }
+        if (w->x >= x && w->x < best_x) {
+            best = i;
+            best_x = w->x;
+        }
+    }
+    return best;
+}
+
 void gui_draw(gui_desktop_t *desktop) {
     uint32_t bottom_color;
     uint32_t height;
+    uint32_t row;
 
     if (desktop == 0 || desktop->fb == 0) {
         return;
     }
 
     /* Vertical gradient: top is background_color, bottom is a darker
-     * shade for visual depth. Cheap enough on QEMU at 640x480 because we
-     * issue one fillrect per row. */
+     * shade for visual depth. Skip the spans covered by windows so the
+     * window's own painting (kernel-drawn bg_color for the demo windows,
+     * EL0-drawn content for owner-drawn windows like the panel taskbar)
+     * survives every redraw. */
     height = desktop->fb->height;
     bottom_color = gui_blend_color(desktop->background_color, 0xff000000U,
                                    3U, 4U);
-    for (uint32_t row = 0; row < height; row++) {
-        uint32_t color = gui_blend_color(desktop->background_color,
-                                         bottom_color, row, height - 1U);
-        fb_fillrect(desktop->fb, 0, row, desktop->fb->width, 1U, color);
+    for (row = 0; row < height; row++) {
+        uint32_t x = 0;
+        while (x < desktop->fb->width) {
+            uint32_t w = gui_next_window_at_or_after(desktop, row, x);
+            uint32_t next;
+            if (w == GUI_MAX_WINDOWS) {
+                next = desktop->fb->width;
+            } else {
+                next = desktop->windows[w].x;
+            }
+            if (next > x) {
+                uint32_t color = gui_blend_color(desktop->background_color,
+                                                 bottom_color, row,
+                                                 height - 1U);
+                fb_fillrect(desktop->fb, x, row, next - x, 1U, color);
+            }
+            if (w == GUI_MAX_WINDOWS) {
+                break;
+            }
+            x = desktop->windows[w].x + desktop->windows[w].w;
+        }
     }
 
     for (uint32_t i = 0; i < GUI_MAX_WINDOWS; i++) {
@@ -767,15 +836,14 @@ void gui_draw_demo(fb_t *fb, void *context) {
         return;
     }
 
+    /* Two demo windows so the panel taskbar can be reached with the mouse
+     * and so the host tests have a window to drag. The registered apps
+     * (panel.S) create their own windows on top of these via syscalls. */
     (void)gui_create_window(&g_demo_desktop, 72, 64, 320, 220, 0xff2f6fedU,
                             0xffd8e4ffU, &first);
     (void)gui_create_window(&g_demo_desktop, 220, 150, 340, 230, 0xff38a169U,
                             0xfffff4c2U, &second);
-    (void)gui_focus_window(&g_demo_desktop, second);
     gui_draw(&g_demo_desktop);
-    font_draw_text(fb, 94, 86, "KOLIBRI ARM", 0xffffffffU);
-    font_draw_text(fb, 242, 172, "FAT32 IPC", 0xff101010U);
-    (void)first;
     g_demo_active = 1;
 }
 

@@ -25,7 +25,7 @@
 .equ BTN_Y,         (PANEL_Y + 4)               // 452
 .equ BTN_W,         80
 .equ BTN_GAP,       8
-.equ BTN_COUNT,     7
+.equ BTN_COUNT,     8
 
 // Colors (BGRA in little-endian: 0xAABBGGRR).
 .equ COL_BG,        0xff202428
@@ -366,4 +366,5 @@ panel_labels:
     .ascii "editor\0\0\0\0"
     .ascii "monitor\0\0\0\0"
     .ascii "win\0\0\0\0\0\0\0"
+    .ascii "clock\0\0\0\0\0"
 panel_image_end:
