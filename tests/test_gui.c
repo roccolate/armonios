@@ -4,7 +4,7 @@
 #include "unity/unity.h"
 #include "../kernel/gui.h"
 
-static uint32_t g_test_gui_demo_pixels[640U * 480U];
+static uint32_t g_test_gui_pixels[640U * 480U];
 
 void test_gui_create_draws_windows_in_creation_order(void) {
     uint32_t pixels[64] = { 0 };
@@ -104,6 +104,8 @@ void test_gui_delivers_key_to_focused_window(void) {
     gui_desktop_t desktop;
     uint32_t first;
     uint32_t second;
+    gui_event_t ev;
+    int32_t data1 = 0;
 
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 4, 4, 4));
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)gui_init(&desktop, &fb, 0));
@@ -116,11 +118,24 @@ void test_gui_delivers_key_to_focused_window(void) {
 
     TEST_ASSERT_EQUAL_UINT64(first, desktop.focused_window_id);
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)gui_focus_window(&desktop, second));
-    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)gui_send_key(&desktop, 'k'));
 
-    TEST_ASSERT_EQUAL_UINT64(0, desktop.windows[first].key_count);
-    TEST_ASSERT_EQUAL_UINT64(1, desktop.windows[second].key_count);
-    TEST_ASSERT_EQUAL_UINT64('k', desktop.windows[second].last_key);
+    /* The kernel's actual key flow is gui_window_push_event with
+     * GUI_EVENT_KEY_PRESS. The historical gui_send_key helper that
+     * bumped key_count/last_key was removed; cover the event path
+     * here instead. */
+    input_event_t input = { .type = INPUT_EVENT_KEY_PRESS,
+                            .data.key.key = 'k' };
+    (void)input;
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_window_push_event(
+                                 &desktop.windows[second],
+                                 GUI_EVENT_KEY_PRESS, 'k', 0));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_window_pop_event(
+                                 &desktop.windows[second], &ev));
+    TEST_ASSERT_EQUAL_UINT64(GUI_EVENT_KEY_PRESS, ev.type);
+    data1 = ev.data1;
+    TEST_ASSERT_EQUAL_UINT64('k', (uint32_t)data1);
 }
 
 void test_gui_cursor_move_clamps_to_bounds(void) {
@@ -179,7 +194,7 @@ void test_gui_left_click_raises_window_under_cursor(void) {
     TEST_ASSERT_EQUAL_UINT64(first, desktop.focused_window_id);
 
     /* Click inside the second window: it should become focused. The
-     * MOUSE_CLICK event is pushed by gui_demo_handle_input, not by the
+     * MOUSE_CLICK event is pushed by gui_handle_input, not by the
      * low-level gui_cursor_button, so this test only checks focus. */
     gui_set_cursor(&desktop, 5, 5);
     gui_cursor_button(&desktop, 0, 1);
@@ -355,7 +370,7 @@ void test_gui_drag_rejects_unknown_window(void) {
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)gui_drag_active(&desktop));
 }
 
-void test_gui_demo_drag_stays_active_until_left_release(void) {
+void test_gui_drag_stays_active_until_left_release(void) {
     fb_t fb;
     gui_desktop_t *desktop;
     input_event_t press = {
@@ -375,22 +390,22 @@ void test_gui_demo_drag_stays_active_until_left_release(void) {
     };
 
     TEST_ASSERT_EQUAL_UINT64(0,
-                             (uint64_t)fb_init(&fb, g_test_gui_demo_pixels,
+                             (uint64_t)fb_init(&fb, g_test_gui_pixels,
                                                640, 480, 640));
-    gui_draw_demo(&fb, 0);
-    desktop = gui_demo_desktop();
+    gui_init_for_framebuffer(&fb, 0);
+    desktop = gui_desktop();
     TEST_ASSERT_NOT_NULL(desktop);
 
     gui_set_cursor(desktop, 250, 160);
-    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)gui_demo_handle_input(&press));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)gui_handle_input(&press));
     TEST_ASSERT_EQUAL_UINT64(1, (uint64_t)gui_drag_active(desktop));
 
-    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)gui_demo_handle_input(&move));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)gui_handle_input(&move));
     TEST_ASSERT_EQUAL_UINT64(1, (uint64_t)gui_drag_active(desktop));
     TEST_ASSERT_EQUAL_UINT64(240, desktop->windows[1].x);
     TEST_ASSERT_EQUAL_UINT64(160, desktop->windows[1].y);
 
-    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)gui_demo_handle_input(&release));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)gui_handle_input(&release));
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)gui_drag_active(desktop));
 }
 

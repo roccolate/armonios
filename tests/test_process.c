@@ -14,7 +14,6 @@ void test_process_user_range_contains_registered_regions(void) {
     TEST_ASSERT_EQUAL_UINT64(0, process.pc);
     TEST_ASSERT_EQUAL_UINT64(0, process.pstate);
     TEST_ASSERT_NULL(process.page_table);
-    TEST_ASSERT_NULL(process.next);
     TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_MMAP_BASE, process.next_user_vaddr);
     TEST_ASSERT_EQUAL_UINT64(0, process.user_region_count);
 
@@ -394,7 +393,7 @@ void test_process_next_runnable_round_robin_and_reclaim_zombies(void) {
 
     process_mark_exited(a, 11);
     process_mark_exited(c, 33);
-    TEST_ASSERT_EQUAL_UINT64(2, process_reclaim_zombies());
+    process_reclaim_zombies();
     TEST_ASSERT_EQUAL_UINT64(1, process_count());
     TEST_ASSERT_EQUAL_UINT64(PROCESS_UNUSED, a->state);
     TEST_ASSERT_EQUAL_UINT64(PROCESS_UNUSED, c->state);

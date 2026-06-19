@@ -14,6 +14,7 @@
 #include "kernel/mm/mmu.h"
 #include "kernel/mm/pmm.h"
 #include "kernel/mm/vmm.h"
+#include "kernel/print.h"
 #include "kernel/process.h"
 #include "kernel/sched/sched.h"
 #include "kernel/timer/timer.h"
@@ -22,22 +23,13 @@
 #include "kernel/vfs.h"
 #include "uart/pl011.h"
 #include "input/input.h"
-#include "third_party/lwip_port/kolibri_net.h"
+#include "kernel/net/dhcp.h"
 
 extern char __kernel_end[];
 
 void kernel_main(uint64_t dtb_addr);
 
 static fat32_fs_t g_fat32_fs;
-
-static void print_hex64(uint64_t value) {
-    static const char digits[] = "0123456789abcdef";
-
-    uart_puts("0x");
-    for (int shift = 60; shift >= 0; shift -= 4) {
-        uart_putc(digits[(value >> shift) & 0xf]);
-    }
-}
 
 static void console_input_thread(void *arg) {
     (void)arg;
@@ -50,7 +42,6 @@ static void console_input_thread(void *arg) {
         while (input_queue_poll(&event) == 0) {
             if (event.type == INPUT_EVENT_KEY_PRESS) {
                 char c = (char)event.data.key.key;
-                (void)gui_demo_send_key(c);
                 console_poll_char(c);
             }
         }
@@ -59,7 +50,7 @@ static void console_input_thread(void *arg) {
             __asm__ volatile("wfe");
         }
 
-        kolibri_net_poll();
+        net_poll();
 
         sched_yield();
     }
@@ -238,7 +229,7 @@ static void init_display(void) {
 
     g_gpu_base = gpu_base;
 
-    if (virtio_gpu_draw(gpu_base, gui_draw_demo, 0) == 0) {
+    if (virtio_gpu_draw(gpu_base, gui_init_for_framebuffer, 0) == 0) {
         uart_puts("VIRTIO gpu: windows\n");
         console_set_framebuffer_ready(1);
         g_gpu_ready = 1;
@@ -249,9 +240,9 @@ static void init_display(void) {
 }
 
 static void flush_dirty_redraw(void) {
-    if (g_gpu_ready && gui_demo_is_dirty()) {
-        (void)virtio_gpu_draw(g_gpu_base, gui_draw_render, 0);
-        gui_demo_clear_dirty();
+    if (g_gpu_ready && gui_is_dirty()) {
+        (void)virtio_gpu_draw(g_gpu_base, gui_render, 0);
+        gui_clear_dirty();
     }
 }
 
@@ -263,7 +254,7 @@ static void poll_input_events(void) {
             event.type == INPUT_EVENT_MOUSE_BUTTON ||
             event.type == INPUT_EVENT_KEY_PRESS ||
             event.type == INPUT_EVENT_KEY_RELEASE) {
-            (void)gui_demo_handle_input(&event);
+            (void)gui_handle_input(&event);
         }
     }
     /* Flush any pending redraw regardless of whether events arrived. An
@@ -320,7 +311,7 @@ static void init_timer_irq_demo(void) {
 }
 
 static void init_network(void) {
-    if (kolibri_net_init() == 0) {
+    if (net_init() == 0) {
         uart_puts("network: initialized\n");
     } else {
         uart_puts("network: failed\n");
@@ -356,18 +347,14 @@ void kernel_main(uint64_t dtb_addr) {
         run_pmm_smoke();
         run_kheap_smoke();
 
-        if (user_demo_prepare_images() != 0) {
-            uart_puts("USER image load: failed\n");
-        } else if (enable_identity_mmu(&memory, dtb_addr) == 0) {
+        if (enable_identity_mmu(&memory, dtb_addr) == 0) {
             init_vfs();
             init_timer_irq_demo();
-            if (probe_storage() == 0 &&
-                user_demo_prepare_vfs_images("/fat/user_demo.bin") == 0) {
+            if (probe_storage() == 0) {
                 console_set_storage_ready(1);
                 uart_puts("USER image source: FAT32\n");
             } else {
                 console_set_storage_ready(0);
-                (void)user_demo_prepare_images();
                 uart_puts("USER image source: bootfs\n");
             }
             init_display();

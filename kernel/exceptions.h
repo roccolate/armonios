@@ -16,11 +16,6 @@ typedef struct {
 void exception_init(void);
 
 /**
- * exception_vector_base - Return the current VBAR_EL1 value.
- */
-uint64_t exception_vector_base(void);
-
-/**
  * exception_handler - Print exception diagnostics and halt.
  */
 void exception_handler(uint64_t esr, uint64_t far, uint64_t elr, uint64_t kind);

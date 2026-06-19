@@ -8,13 +8,6 @@ exception_init:
     isb
     ret
 
-.global exception_vector_base
-.type exception_vector_base, %function
-
-exception_vector_base:
-    mrs x0, vbar_el1
-    ret
-
 .macro VECTOR label, kind
 .align 7
 \label:

@@ -24,9 +24,8 @@ Current desktop/window functions:
   directly into the framebuffer, clipped to the window bounds for rectangles.
 - `gui_draw` redraws the desktop background, all windows, focus borders, and
   the cursor.
-- `gui_draw_demo`, `gui_draw_render`, `gui_demo_desktop`,
-  `gui_demo_handle_input`, and the `gui_demo_*dirty*` helpers expose the current
-  QEMU framebuffer demo surface.
+- `gui_init_for_framebuffer`, `gui_render`, `gui_desktop`, `gui_handle_input`,
+  and the `gui_*dirty*` helpers expose the current QEMU framebuffer surface.
 
 Current input/event functions:
 

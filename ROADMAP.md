@@ -41,7 +41,7 @@ to KolibriOS. The work below is what changes that.
 - Fixed-message IPC `sys_ipc_send` / `sys_ipc_recv`
 - Bitmap 5x7 font, scalar 2D primitives, alpha blending, clipping
 - Kernel debug console (`k>`) with help/mem/ps/ticks/storage/fb
-- LWIP-backed virtio-net + DHCP client, polled by the kernel console thread
+- From-scratch virtio-net + DHCP client, polled by the kernel console thread
 
 ### Things that look "done" in the code but are not real
 

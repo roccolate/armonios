@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "kernel/print.h"
 #include "kernel/process.h"
 #include "kernel/syscall.h"
 #include "kernel/user_demo.h"
@@ -12,15 +13,6 @@
 #define ESR_EC_SVC64 0x15ULL
 #define USER_FAULT_EXIT_CODE 0xfffffffffffffff0ULL
 #define SPSR_EL1H_MASKED 0x3c5ULL
-
-static void print_hex64(uint64_t value) {
-    static const char digits[] = "0123456789abcdef";
-
-    uart_puts("0x");
-    for (int shift = 60; shift >= 0; shift -= 4) {
-        uart_putc(digits[(value >> shift) & 0xf]);
-    }
-}
 
 static const char *exception_name(uint64_t kind) {
     switch (kind) {

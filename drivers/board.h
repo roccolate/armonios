@@ -30,8 +30,4 @@ uint32_t board_virtio_input_irq(void);
 int board_virtio_input_init(void);
 int board_virtio_input_poll(void);
 
-uint32_t board_virtio_snd_irq(void);
-int board_virtio_snd_init(void);
-int board_virtio_snd_write_samples(const int16_t *samples, uint32_t count);
-
 #endif

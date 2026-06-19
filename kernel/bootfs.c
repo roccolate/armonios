@@ -65,12 +65,12 @@ int bootfs_read(const char *name, uint64_t offset, uint8_t *buffer,
 int bootfs_mount_vfs(void) {
     static const char *app_names[] = {
         "hello", "loop", "fault", "shell", "editor", "monitor", "win",
-        "panel",
+        "panel", "clock",
     };
     static const char *app_paths[] = {
         "/kolibri/hello", "/kolibri/loop", "/kolibri/fault",
         "/kolibri/shell", "/kolibri/editor", "/kolibri/monitor",
-        "/kolibri/win", "/kolibri/panel",
+        "/kolibri/win", "/kolibri/panel", "/kolibri/clock",
     };
     uint32_t mounted = 0;
     uint32_t app_count = sizeof(app_names) / sizeof(app_names[0]);

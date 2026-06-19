@@ -39,7 +39,6 @@ typedef struct process {
     uint64_t next_user_vaddr;
     process_user_region_t user_regions[PROCESS_MAX_USER_REGIONS];
     uint32_t user_region_count;
-    struct process *next;
 } process_t;
 
 void process_set_current(process_t *process);
@@ -52,7 +51,7 @@ const process_t *process_at(uint32_t index);
 int process_index(const process_t *process, uint32_t *index);
 process_t *process_find(uint32_t pid);
 process_t *process_next_runnable(process_t *after);
-uint32_t process_reclaim_zombies(void);
+void process_reclaim_zombies(void);
 int process_wait_zombie(uint32_t pid, uint64_t *exit_code);
 int process_kill(uint32_t pid, uint64_t exit_code);
 void process_init(process_t *process, uint32_t pid, const char *name);
@@ -60,7 +59,18 @@ void process_set_entry(process_t *process, uint64_t pc, uint64_t sp, uint64_t ps
 void process_save_context(process_t *process, const uint64_t regs[31],
                           uint64_t pc, uint64_t pstate, uint64_t sp);
 void process_load_context(const process_t *process, exception_frame_t *frame);
-void process_activate_context(const process_t *process, exception_frame_t *frame);
+
+static inline void process_activate_context(const process_t *process,
+                                            exception_frame_t *frame) {
+    if (process == 0 || frame == 0) {
+        return;
+    }
+    if (process->page_table != 0) {
+        extern void mmu_set_ttbr0(uint64_t *table);
+        mmu_set_ttbr0(process->page_table);
+    }
+    process_load_context(process, frame);
+}
 void process_set_page_table(process_t *process, uint64_t *page_table);
 void process_mark_exited(process_t *process, uint64_t exit_code);
 int process_add_user_region(process_t *process, uint64_t start, uint64_t size);

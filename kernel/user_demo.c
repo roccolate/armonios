@@ -59,15 +59,6 @@ static int load_named_image(const char *name, user_image_t *image,
     return 0;
 }
 
-int user_demo_prepare_images(void) {
-    return 0;
-}
-
-int user_demo_prepare_vfs_images(const char *path) {
-    (void)path;
-    return 0;
-}
-
 static int map_kernel_identity(uint64_t *pgd, uint64_t memory_base,
                                uint64_t memory_size,
                                user_demo_map_mmio_fn_t map_mmio) {

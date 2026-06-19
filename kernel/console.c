@@ -5,6 +5,7 @@
 #include "drivers/input/input.h"
 #include "kernel/gui.h"
 #include "kernel/mm/pmm.h"
+#include "kernel/print.h"
 #include "kernel/process.h"
 #include "kernel/sched/sched.h"
 #include "kernel/timer/timer.h"
@@ -38,34 +39,6 @@ static int streq(const char *a, const char *b) {
     return *a == '\0' && *b == '\0';
 }
 
-static void print_hex64(uint64_t value) {
-    static const char digits[] = "0123456789abcdef";
-
-    uart_puts("0x");
-    for (int shift = 60; shift >= 0; shift -= 4) {
-        uart_putc(digits[(value >> shift) & 0xf]);
-    }
-}
-
-static void print_dec64(uint64_t value) {
-    char buf[20];
-    uint32_t i = 0;
-
-    if (value == 0) {
-        uart_putc('0');
-        return;
-    }
-
-    while (value > 0 && i < sizeof(buf)) {
-        buf[i++] = (char)('0' + (value % 10U));
-        value /= 10U;
-    }
-
-    while (i > 0) {
-        uart_putc(buf[--i]);
-    }
-}
-
 static void print_prompt(void) {
     uart_puts("k> ");
 }
@@ -94,7 +67,7 @@ static void run_mem(void) {
 
 static void run_ps(void) {
     process_t *current = process_current();
-    gui_desktop_t *desktop = gui_demo_desktop();
+    gui_desktop_t *desktop = gui_desktop();
     int32_t cx = 0;
     int32_t cy = 0;
 
@@ -134,7 +107,7 @@ static void run_status(const char *name, int ready) {
 // Read the current cursor position into *x/*y. Falls back to (0,0) if
 // the GUI desktop is not yet up.
 static void read_cursor(int32_t *x, int32_t *y) {
-    gui_desktop_t *desktop = gui_demo_desktop();
+    gui_desktop_t *desktop = gui_desktop();
     if (desktop != 0) {
         gui_get_cursor(desktop, x, y);
         return;
@@ -156,7 +129,7 @@ static void queue_mouse_move(int32_t to_x, int32_t to_y) {
     event.type = INPUT_EVENT_MOUSE_MOVE;
     event.data.mouse_move.dx = dx;
     event.data.mouse_move.dy = dy;
-    (void)gui_demo_handle_input(&event);
+    (void)input_queue_push(&event);
 }
 
 static void queue_mouse_button(uint32_t button, uint32_t pressed) {
@@ -164,15 +137,14 @@ static void queue_mouse_button(uint32_t button, uint32_t pressed) {
     event.type = INPUT_EVENT_MOUSE_BUTTON;
     event.data.mouse_button.button = button;
     event.data.mouse_button.pressed = pressed;
-    (void)gui_demo_handle_input(&event);
+    (void)input_queue_push(&event);
 }
 
 static void queue_key_press(uint32_t key) {
-    // Inject the key directly into the k> console's own line buffer
-    // rather than pushing it into the input_queue that the user
-    // shell is also reading from. Sharing that queue caused the drain
-    // to steal every byte the user typed at the u> prompt.
-    console_poll_char((char)key);
+    input_event_t event = {0};
+    event.type = INPUT_EVENT_KEY_PRESS;
+    event.data.key.key = key;
+    (void)input_queue_push(&event);
 }
 
 static int parse_signed(const char *s, int32_t *out) {
@@ -320,16 +292,6 @@ void console_set_framebuffer_ready(int ready) {
 }
 
 void console_poll_char(char ch) {
-    // Print the prompt the first time the console accepts input via
-    // the SVC drain path (console_start_interactive normally does this
-    // after the user demo returns, but the drain lets the user type
-    // earlier while EL0 processes are still alive).
-    static int prompt_pending = 1;
-    if (prompt_pending) {
-        prompt_pending = 0;
-        print_prompt();
-    }
-
     if (ch == '\r' || ch == '\n') {
         uart_puts("\n");
         g_line[g_line_len] = '\0';

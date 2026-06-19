@@ -198,8 +198,6 @@ int gui_init(gui_desktop_t *desktop, fb_t *fb, uint32_t background_color) {
         desktop->windows[i].h = 0;
         desktop->windows[i].bg_color = 0;
         desktop->windows[i].border_color = 0;
-        desktop->windows[i].key_count = 0;
-        desktop->windows[i].last_key = '\0';
         desktop->windows[i].owner_pid = GUI_NO_OWNER;
         desktop->windows[i].title_h = 0;
         desktop->windows[i].event_head = 0;
@@ -240,8 +238,6 @@ int gui_create_window_for_pid(gui_desktop_t *desktop, uint32_t owner_pid,
             window->h = h;
             window->bg_color = bg_color;
             window->border_color = border_color;
-            window->key_count = 0;
-            window->last_key = '\0';
             window->owner_pid = owner_pid;
             window->title_h = 0;
             window->event_head = 0;
@@ -285,8 +281,6 @@ int gui_destroy_window(gui_desktop_t *desktop, uint32_t window_id) {
     window->h = 0;
     window->bg_color = 0;
     window->border_color = 0;
-    window->key_count = 0;
-    window->last_key = '\0';
     window->owner_pid = GUI_NO_OWNER;
     window->event_head = 0;
     window->event_tail = 0;
@@ -594,20 +588,6 @@ uint32_t gui_window_for_pid(gui_desktop_t *desktop, uint32_t owner_pid,
     return GUI_NO_WINDOW;
 }
 
-int gui_send_key(gui_desktop_t *desktop, char key) {
-    gui_window_t *window;
-
-    if (desktop == 0 || desktop->focused_window_id >= GUI_MAX_WINDOWS ||
-        desktop->windows[desktop->focused_window_id].used == 0) {
-        return -1;
-    }
-
-    window = &desktop->windows[desktop->focused_window_id];
-    window->last_key = key;
-    window->key_count++;
-    return 0;
-}
-
 /* Forward declare the color blender; it lives below gui_draw_window but
  * the title-bar code path inside that function already needs it. */
 static uint32_t gui_blend_color(uint32_t top, uint32_t bottom,
@@ -779,150 +759,137 @@ void gui_draw(gui_desktop_t *desktop) {
     }
 }
 
-static fb_t g_demo_fb;
-static gui_desktop_t g_demo_desktop;
-static uint8_t g_demo_active;
-static uint8_t g_demo_dirty;
+static fb_t g_gui_fb;
+static gui_desktop_t g_gui_desktop;
+static uint8_t g_gui_active;
+static uint8_t g_gui_dirty;
 
-void gui_draw_render(fb_t *fb, void *context) {
+void gui_render(fb_t *fb, void *context) {
     (void)context;
-    if (g_demo_active == 0) {
+    if (g_gui_active == 0) {
         return;
     }
-    g_demo_fb = *fb;
-    g_demo_desktop.fb = &g_demo_fb;
-    gui_draw(&g_demo_desktop);
+    g_gui_fb = *fb;
+    g_gui_desktop.fb = &g_gui_fb;
+    gui_draw(&g_gui_desktop);
 }
 
-gui_desktop_t *gui_demo_desktop(void) {
-    if (g_demo_active == 0) {
+gui_desktop_t *gui_desktop(void) {
+    if (g_gui_active == 0) {
         return 0;
     }
-    return &g_demo_desktop;
+    return &g_gui_desktop;
 }
 
-int gui_demo_is_dirty(void) {
-    return g_demo_dirty != 0 ? 1 : 0;
+int gui_is_dirty(void) {
+    return g_gui_dirty != 0 ? 1 : 0;
 }
 
-void gui_demo_clear_dirty(void) {
-    g_demo_dirty = 0;
+void gui_clear_dirty(void) {
+    g_gui_dirty = 0;
 }
 
-void gui_demo_request_redraw(void) {
-    g_demo_dirty = 1;
+void gui_request_redraw(void) {
+    g_gui_dirty = 1;
 }
 
-#define GUI_BTN_LEFT  0x110U
-#define GUI_BTN_RIGHT 0x111U
-/* The above two macros are retained as documentation of the Linux codes
- * the virtio-input driver maps to INPUT_EVENT_MOUSE_BUTTON. The GUI layer
- * no longer inspects KEY_PRESS codes for buttons. */
-
-int gui_demo_handle_input(const input_event_t *event) {
-    if (g_demo_active == 0 || event == 0) {
+int gui_handle_input(const input_event_t *event) {
+    if (g_gui_active == 0 || event == 0) {
         return -1;
     }
 
     /* Mouse buttons and motion also affect the cursor itself. */
     switch (event->type) {
     case INPUT_EVENT_MOUSE_MOVE:
-        gui_cursor_move(&g_demo_desktop, event->data.mouse_move.dx,
+        gui_cursor_move(&g_gui_desktop, event->data.mouse_move.dx,
                          event->data.mouse_move.dy);
-        if (g_demo_desktop.drag_window_id != GUI_NO_WINDOW) {
-            gui_drag_update(&g_demo_desktop, g_demo_desktop.cursor.x,
-                            g_demo_desktop.cursor.y);
+        if (g_gui_desktop.drag_window_id != GUI_NO_WINDOW) {
+            gui_drag_update(&g_gui_desktop, g_gui_desktop.cursor.x,
+                            g_gui_desktop.cursor.y);
         }
-        gui_dispatch_input(&g_demo_desktop, event);
-        g_demo_dirty = 1;
+        gui_dispatch_input(&g_gui_desktop, event);
+        g_gui_dirty = 1;
         return 0;
     case INPUT_EVENT_MOUSE_BUTTON:
-        gui_cursor_button(&g_demo_desktop,
+        gui_cursor_button(&g_gui_desktop,
                           event->data.mouse_button.button,
                           event->data.mouse_button.pressed);
         if (event->data.mouse_button.button == 0U) {
             if (event->data.mouse_button.pressed != 0U) {
                 /* Left press: focus is already set by gui_cursor_button.
                  * Start a drag and deliver a click on the topmost window. */
-                int32_t hit = gui_hit_test(&g_demo_desktop,
-                                           g_demo_desktop.cursor.x,
-                                           g_demo_desktop.cursor.y);
+                int32_t hit = gui_hit_test(&g_gui_desktop,
+                                           g_gui_desktop.cursor.x,
+                                           g_gui_desktop.cursor.y);
                 if (hit != (int32_t)GUI_NO_WINDOW && hit >= 0) {
                     gui_window_t *window =
-                        &g_demo_desktop.windows[hit];
-                    gui_drag_start(&g_demo_desktop, (uint32_t)hit,
-                                   g_demo_desktop.cursor.x -
+                        &g_gui_desktop.windows[hit];
+                    gui_drag_start(&g_gui_desktop, (uint32_t)hit,
+                                   g_gui_desktop.cursor.x -
                                        (int32_t)window->x,
-                                   g_demo_desktop.cursor.y -
+                                   g_gui_desktop.cursor.y -
                                        (int32_t)window->y);
                     gui_window_push_event(window, GUI_EVENT_MOUSE_CLICK,
-                                          g_demo_desktop.cursor.x,
-                                          g_demo_desktop.cursor.y);
+                                          g_gui_desktop.cursor.x,
+                                          g_gui_desktop.cursor.y);
                 }
             }
             if (event->data.mouse_button.pressed == 0U) {
-                gui_drag_end(&g_demo_desktop);
+                gui_drag_end(&g_gui_desktop);
             }
         }
-        g_demo_dirty = 1;
+        g_gui_dirty = 1;
         return 0;
     case INPUT_EVENT_KEY_PRESS:
         /* Non-button key: route to focused window as KEY_PRESS. */
-        gui_focus_window_ensure(&g_demo_desktop);
-        if (g_demo_desktop.focused_window_id != GUI_NO_WINDOW) {
+        gui_focus_window_ensure(&g_gui_desktop);
+        if (g_gui_desktop.focused_window_id != GUI_NO_WINDOW) {
             gui_window_t *window =
-                &g_demo_desktop.windows[g_demo_desktop.focused_window_id];
+                &g_gui_desktop.windows[g_gui_desktop.focused_window_id];
             gui_window_push_event(window, GUI_EVENT_KEY_PRESS,
                                   (int32_t)event->data.key.key, 0);
         }
-        g_demo_dirty = 1;
+        g_gui_dirty = 1;
         return 0;
     case INPUT_EVENT_KEY_RELEASE:
-        if (g_demo_desktop.focused_window_id != GUI_NO_WINDOW) {
+        if (g_gui_desktop.focused_window_id != GUI_NO_WINDOW) {
             gui_window_t *window =
-                &g_demo_desktop.windows[g_demo_desktop.focused_window_id];
+                &g_gui_desktop.windows[g_gui_desktop.focused_window_id];
             gui_window_push_event(window, GUI_EVENT_KEY_RELEASE,
                                   (int32_t)event->data.key.key, 0);
         }
-        g_demo_dirty = 1;
+        g_gui_dirty = 1;
         return 0;
     default:
         return -1;
     }
 }
 
-void gui_draw_demo(fb_t *fb, void *context) {
+void gui_init_for_framebuffer(fb_t *fb, void *context) {
+    (void)context;
     uint32_t first = GUI_NO_WINDOW;
     uint32_t second = GUI_NO_WINDOW;
 
-    (void)context;
-    g_demo_active = 0;
-    g_demo_dirty = 0;
+    g_gui_active = 0;
+    g_gui_dirty = 0;
 
     if (fb == 0) {
         return;
     }
 
-    g_demo_fb = *fb;
-    if (gui_init(&g_demo_desktop, &g_demo_fb, 0xff202428U) != 0) {
+    g_gui_fb = *fb;
+    if (gui_init(&g_gui_desktop, &g_gui_fb, 0xff202428U) != 0) {
         return;
     }
 
-    /* Two demo windows so the panel taskbar can be reached with the mouse
-     * and so the host tests have a window to drag. The registered apps
-     * (panel.S) create their own windows on top of these via syscalls. */
-    (void)gui_create_window(&g_demo_desktop, 72, 64, 320, 220, 0xff2f6fedU,
+    /* Two desktop windows so the panel taskbar can be reached with the
+     * mouse and so the host tests have a window to drag. The registered
+     * apps (panel.S) create their own windows on top of these via
+     * syscalls. */
+    (void)gui_create_window(&g_gui_desktop, 72, 64, 320, 220, 0xff2f6fedU,
                             0xffd8e4ffU, &first);
-    (void)gui_create_window(&g_demo_desktop, 220, 150, 340, 230, 0xff38a169U,
+    (void)gui_create_window(&g_gui_desktop, 220, 150, 340, 230, 0xff38a169U,
                             0xfffff4c2U, &second);
-    gui_draw(&g_demo_desktop);
-    g_demo_active = 1;
-}
-
-int gui_demo_send_key(char key) {
-    if (g_demo_active == 0) {
-        return -1;
-    }
-
-    return gui_send_key(&g_demo_desktop, key);
+    gui_draw(&g_gui_desktop);
+    g_gui_active = 1;
 }

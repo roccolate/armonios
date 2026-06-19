@@ -174,17 +174,12 @@ int process_kill(uint32_t pid, uint64_t exit_code) {
     return 0;
 }
 
-uint32_t process_reclaim_zombies(void) {
-    uint32_t reclaimed = 0;
-
+void process_reclaim_zombies(void) {
     for (uint32_t i = 0; i < PROCESS_MAX_PROCESSES; i++) {
         if (g_processes[i].state == PROCESS_ZOMBIE) {
             process_release(&g_processes[i]);
-            reclaimed++;
         }
     }
-
-    return reclaimed;
 }
 
 void process_init(process_t *process, uint32_t pid, const char *name) {
@@ -202,7 +197,6 @@ void process_init(process_t *process, uint32_t pid, const char *name) {
     process->exit_code = 0;
     process->next_user_vaddr = PROCESS_USER_MMAP_BASE;
     process->user_region_count = 0;
-    process->next = 0;
 
     for (uint32_t i = 0; i < 31; i++) {
         process->regs[i] = 0;

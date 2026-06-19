@@ -40,18 +40,15 @@ DEPFLAGS := -MMD -MP
 ASFLAGS := -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -mcpu=cortex-a72 -g
 CFLAGS  := -Wall -Wextra -Werror -ffreestanding -nostdlib -nostartfiles \
            -fno-builtin -fno-stack-protector -mgeneral-regs-only \
-           -mcpu=cortex-a72 -std=c11 -Os -g -I . -I drivers -I third_party/lwip_port
+           -mcpu=cortex-a72 -std=c11 -Os -g -I . -I drivers
 
 OBJS := \
     $(BUILD_DIR)/boot/start.o \
     $(BUILD_DIR)/$(BOARD_DIR)/board.o \
-    $(BUILD_DIR)/drivers/display/display.o \
-    $(BUILD_DIR)/drivers/display/gfx.o \
     $(BUILD_DIR)/drivers/fb/fb.o \
     $(BUILD_DIR)/drivers/gpu/virtio_gpu.o \
     $(BUILD_DIR)/drivers/irq/gicv2.o \
     $(BUILD_DIR)/drivers/net/virtio_net.o \
-    $(BUILD_DIR)/third_party/lwip_port/lwip_port.o \
     $(STORAGE_DEV) \
     $(BUILD_DIR)/kernel/boot_program.o \
     $(BUILD_DIR)/kernel/bootfs.o \
@@ -70,8 +67,9 @@ OBJS := \
     $(BUILD_DIR)/kernel/mm/mmu.o \
     $(BUILD_DIR)/kernel/mm/pmm.o \
     $(BUILD_DIR)/kernel/mm/vmm.o \
+    $(BUILD_DIR)/kernel/net/dhcp.o \
+    $(BUILD_DIR)/kernel/print.o \
     $(BUILD_DIR)/kernel/process.o \
-    $(BUILD_DIR)/kernel/process_context.o \
     $(BUILD_DIR)/kernel/sched/sched.o \
     $(BUILD_DIR)/kernel/sched/switch.o \
     $(BUILD_DIR)/kernel/syscall.o \
@@ -85,9 +83,7 @@ OBJS := \
     $(APP_BLOBS) \
     $(BUILD_DIR)/drivers/uart/pl011.o \
     $(BUILD_DIR)/drivers/input/input.o \
-    $(BUILD_DIR)/drivers/input/virtio_input.o \
-    $(BUILD_DIR)/drivers/audio/audio.o \
-    $(BUILD_DIR)/drivers/audio/virtio_snd.o
+    $(BUILD_DIR)/drivers/input/virtio_input.o
 
 DEPS := $(OBJS:.o=.d)
 

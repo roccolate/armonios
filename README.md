@@ -53,7 +53,7 @@ KolibriARM is a bare-metal operating system for ARM64 (AArch64) processors, writ
 | Filesystem        | Working      | Fixed VFS, bootfs seed, tmpfs, FAT32 root 8.3 lookup |
 | GUI               | Experimental | Kernel compositor has window ownership, focus, cursor, drag, and early window syscalls |
 | Mouse / cursor    | Partial      | virtio-input events are routed to the GUI demo and window event queues |
-| Networking        | Working      | virtio-net + DHCP, polled by the console thread |
+| Networking        | Working      | from-scratch virtio-net + DHCP, polled by the console thread |
 | RPi 4 port        | Builds       | Not booted on real hardware yet |
 
 ## Current Milestone

@@ -8,11 +8,11 @@
 #include "kernel/gui.h"
 #include "kernel/ipc.h"
 #include "kernel/mm/pmm.h"
+#include "kernel/print.h"
 #include "kernel/process.h"
 #include "kernel/sched/sched.h"
 #include "kernel/timer/timer.h"
 #include "kernel/user_demo.h"
-#include "uart/pl011.h"
 #include "kernel/user_vm.h"
 #include "kernel/vfs.h"
 #include "uart/pl011.h"
@@ -447,11 +447,11 @@ static int64_t sys_window_create(process_t *process, uint64_t x, uint64_t y,
         }
     }
 
-    if (gui_demo_desktop() == 0) {
+    if (gui_desktop() == 0) {
         return ERR_AGAIN;
     }
 
-    if (gui_create_window_for_pid(gui_demo_desktop(), process->pid,
+    if (gui_create_window_for_pid(gui_desktop(), process->pid,
                                   (uint32_t)x, (uint32_t)y, (uint32_t)w,
                                   (uint32_t)h, (uint32_t)bg,
                                   (uint32_t)border, title,
@@ -465,14 +465,14 @@ static int64_t sys_window_destroy(process_t *process, uint64_t window_id) {
     if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
         return ERR_INVAL;
     }
-    gui_window_t *window = &gui_demo_desktop()->windows[window_id];
+    gui_window_t *window = &gui_desktop()->windows[window_id];
     if (window->used == 0) {
         return ERR_NOENT;
     }
     if (window->owner_pid != process->pid) {
         return ERR_BADF;
     }
-    if (gui_destroy_window(gui_demo_desktop(), (uint32_t)window_id) != 0) {
+    if (gui_destroy_window(gui_desktop(), (uint32_t)window_id) != 0) {
         return ERR_BADF;
     }
     return 0;
@@ -485,14 +485,14 @@ static int64_t sys_window_draw_text(process_t *process, uint64_t window_id,
     if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
         return ERR_INVAL;
     }
-    gui_window_t *window = &gui_demo_desktop()->windows[window_id];
+    gui_window_t *window = &gui_desktop()->windows[window_id];
     if (window->used == 0 || window->owner_pid != process->pid) {
         return ERR_BADF;
     }
     if (copy_user_cstr(str_ptr, text, sizeof(text)) != 0) {
         return ERR_INVAL;
     }
-    if (gui_window_draw_text(gui_demo_desktop(), (uint32_t)window_id,
+    if (gui_window_draw_text(gui_desktop(), (uint32_t)window_id,
                              (int32_t)x, (int32_t)y, text,
                              (uint32_t)color) != 0) {
         return ERR_BADF;
@@ -508,11 +508,11 @@ static int64_t sys_window_draw_rect(process_t *process, uint64_t window_id,
         w > 0xffffffffULL || h > 0xffffffffULL) {
         return ERR_INVAL;
     }
-    gui_window_t *window = &gui_demo_desktop()->windows[window_id];
+    gui_window_t *window = &gui_desktop()->windows[window_id];
     if (window->used == 0 || window->owner_pid != process->pid) {
         return ERR_BADF;
     }
-    if (gui_window_draw_rect(gui_demo_desktop(), (uint32_t)window_id,
+    if (gui_window_draw_rect(gui_desktop(), (uint32_t)window_id,
                              (int32_t)x, (int32_t)y, (uint32_t)w,
                              (uint32_t)h, (uint32_t)color) != 0) {
         return ERR_BADF;
@@ -526,14 +526,14 @@ static int64_t sys_window_set_title(process_t *process, uint64_t window_id,
     if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
         return ERR_INVAL;
     }
-    gui_window_t *window = &gui_demo_desktop()->windows[window_id];
+    gui_window_t *window = &gui_desktop()->windows[window_id];
     if (window->used == 0 || window->owner_pid != process->pid) {
         return ERR_BADF;
     }
     if (copy_user_cstr(title_ptr, title, GUI_TITLE_LEN) != 0) {
         return ERR_INVAL;
     }
-    if (gui_set_window_title(gui_demo_desktop(), (uint32_t)window_id,
+    if (gui_set_window_title(gui_desktop(), (uint32_t)window_id,
                              title) != 0) {
         return ERR_BADF;
     }
@@ -542,7 +542,7 @@ static int64_t sys_window_set_title(process_t *process, uint64_t window_id,
      * compatibility. The kernel validates title_h against the window
      * height before applying. */
     if (title_h > 0 &&
-        gui_set_window_title_bar(gui_demo_desktop(), (uint32_t)window_id,
+        gui_set_window_title_bar(gui_desktop(), (uint32_t)window_id,
                                  (uint32_t)title_h) != 0) {
         return ERR_INVAL;
     }
@@ -553,21 +553,13 @@ static int64_t sys_window_redraw(process_t *process, uint64_t window_id) {
     if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
         return ERR_INVAL;
     }
-    gui_window_t *window = &gui_demo_desktop()->windows[window_id];
+    gui_window_t *window = &gui_desktop()->windows[window_id];
     if (window->used == 0 || window->owner_pid != process->pid) {
         return ERR_BADF;
     }
     /* Mark the desktop dirty so the kernel redraws on next tick. */
-    gui_demo_clear_dirty();
-    /* Force a redraw by setting dirty to 1 via the demo's internal flag.
-     * Since that's not exposed, we mark through a harmless event push
-     * is overkill; instead, we'll set dirty from within gui.c.
-     * The simplest way is to use a small dedicated trigger: we redraw
-     * directly here is not possible without the framebuffer handle, so
-     * we just toggle by calling the demo's redraw trigger.
-     */
-    extern void gui_demo_request_redraw(void);
-    gui_demo_request_redraw();
+    gui_clear_dirty();
+    gui_request_redraw();
     return 0;
 }
 
@@ -575,7 +567,7 @@ static int64_t sys_window_focus(process_t *process, uint64_t window_id) {
     if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
         return ERR_INVAL;
     }
-    gui_window_t *window = &gui_demo_desktop()->windows[window_id];
+    gui_window_t *window = &gui_desktop()->windows[window_id];
     if (window->used == 0) {
         return ERR_NOENT;
     }
@@ -583,11 +575,10 @@ static int64_t sys_window_focus(process_t *process, uint64_t window_id) {
      * deliberately callable by any process. The desktop taskbar (a
      * different pid from the app owners) needs to raise windows it did
      * not create when the user clicks a running-app entry. */
-    if (gui_focus_window(gui_demo_desktop(), (uint32_t)window_id) != 0) {
+    if (gui_focus_window(gui_desktop(), (uint32_t)window_id) != 0) {
         return ERR_INVAL;
     }
-    extern void gui_demo_request_redraw(void);
-    gui_demo_request_redraw();
+    gui_request_redraw();
     return 0;
 }
 
@@ -596,7 +587,7 @@ static int64_t sys_window_for_pid(process_t *process, uint64_t owner_pid,
     if (process == 0 || owner_pid > UINT32_MAX || index > GUI_MAX_WINDOWS) {
         return ERR_INVAL;
     }
-    uint32_t window_id = gui_window_for_pid(gui_demo_desktop(),
+    uint32_t window_id = gui_window_for_pid(gui_desktop(),
                                             (uint32_t)owner_pid,
                                             (uint32_t)index);
     if (window_id == GUI_NO_WINDOW) {
@@ -616,7 +607,7 @@ static int64_t sys_window_event(process_t *process, exception_frame_t *frame,
     if (!user_range_contains(buf_ptr, buf_count * 3U * sizeof(uint32_t))) {
         return ERR_INVAL;
     }
-    gui_window_t *window = &gui_demo_desktop()->windows[window_id];
+    gui_window_t *window = &gui_desktop()->windows[window_id];
     if (window->used == 0 || window->owner_pid != process->pid) {
         return ERR_BADF;
     }
@@ -652,11 +643,7 @@ static void sys_exit(exception_frame_t *frame, uint64_t code) {
     process_mark_exited(current, code);
 
     uart_puts("USER exit: ");
-    static const char digits[] = "0123456789abcdef";
-    uart_puts("0x");
-    for (int shift = 60; shift >= 0; shift -= 4) {
-        uart_putc(digits[(code >> shift) & 0xf]);
-    }
+    print_hex64(code);
     uart_puts("\n");
 
     next = process_next_runnable(current);
@@ -674,6 +661,28 @@ static void sys_exit(exception_frame_t *frame, uint64_t code) {
 
 void syscall_dispatch(exception_frame_t *frame) {
     process_t *current = process_current();
+
+    // Drain any pending input before handling this SVC. This gives the
+    // kernel k> console a chance to process UART keystrokes (mouse
+    // x y, click x y, key c) even while an EL0 process holds the CPU.
+    // uart_pump_input drains the UART data register directly so piped
+    // QEMU input is captured even when the PL011 RX interrupt is
+    // masked or pending.
+    uart_pump_input();
+    input_uart_poll();
+    board_virtio_input_poll();
+    input_event_t drain_event;
+    while (input_queue_poll(&drain_event) == 0) {
+        if (drain_event.type == INPUT_EVENT_KEY_PRESS) {
+            char c = (char)drain_event.data.key.key;
+            console_poll_char(c);
+        } else {
+            // Mouse move and button events get dispatched straight to
+            // the GUI so the panel can react to 'mouse x y' and
+            // 'click x y' commands issued from the serial console.
+            (void)gui_handle_input(&drain_event);
+        }
+    }
 
     if (current != 0) {
         process_save_context(current, frame->x, frame->elr, frame->spsr,

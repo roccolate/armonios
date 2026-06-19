@@ -19,6 +19,7 @@ The first userland hello world is implemented as an embedded EL0 demo:
 - Keep QEMU-specific addresses out of generic kernel code when touching related areas.
 - Prefer a `drivers/boards/qemu_virt/` platform layer before adding Raspberry Pi support.
 - Avoid introducing libc, POSIX assumptions, hosted runtime behavior, or large abstractions.
+- No vendored third-party protocol stacks (lwIP, FreeRTOS, etc.). The kernel's net stack is hand-written in `kernel/net/`.
 - Keep the kernel readable enough to understand in one sitting.
 
 ## Build and Test

@@ -37,8 +37,6 @@ typedef struct {
     uint32_t h;
     uint32_t bg_color;
     uint32_t border_color;
-    uint32_t key_count;
-    char last_key;
     uint32_t owner_pid;
     /* Kernel-drawn title bar height in pixels. 0 means no title bar.
      * When set, the kernel paints a solid bar at the top of the window
@@ -126,7 +124,6 @@ int gui_focus_window_ensure(gui_desktop_t *desktop);
  * id in advance. */
 uint32_t gui_window_for_pid(gui_desktop_t *desktop, uint32_t owner_pid,
                             uint32_t index);
-int gui_send_key(gui_desktop_t *desktop, char key);
 int gui_hit_test(gui_desktop_t *desktop, int32_t x, int32_t y);
 int gui_window_contains(gui_window_t *window, int32_t x, int32_t y);
 int gui_dispatch_input(gui_desktop_t *desktop, const input_event_t *event);
@@ -144,15 +141,18 @@ static inline int gui_drag_active(const gui_desktop_t *desktop) {
     return (desktop != 0 && desktop->drag_window_id != GUI_NO_WINDOW) ? 1 : 0;
 }
 void gui_draw(gui_desktop_t *desktop);
-void gui_draw_demo(fb_t *fb, void *context);
-void gui_draw_render(fb_t *fb, void *context);
-int gui_demo_send_key(char key);
 
-gui_desktop_t *gui_demo_desktop(void);
-int gui_demo_handle_input(const input_event_t *event);
-int gui_demo_is_dirty(void);
-void gui_demo_clear_dirty(void);
-void gui_demo_request_redraw(void);
+/* The kernel has exactly one GUI: a single desktop with a fixed pool of
+ * windows, a single cursor, and a single dirty flag. These are the
+ * entry points the kernel uses from the timer tick and the input/svc
+ * paths; tests can also drive them directly. */
+void gui_render(fb_t *fb, void *context);
+void gui_init_for_framebuffer(fb_t *fb, void *context);
+gui_desktop_t *gui_desktop(void);
+int gui_handle_input(const input_event_t *event);
+int gui_is_dirty(void);
+void gui_clear_dirty(void);
+void gui_request_redraw(void);
 
 #endif
 
