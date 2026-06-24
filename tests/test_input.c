@@ -117,3 +117,37 @@ void test_input_poll_char_mask_strips_high_bits(void) {
     TEST_ASSERT_EQUAL_UINT64(0x1B, (uint64_t)input_queue_poll_char());
     TEST_ASSERT_EQUAL_UINT64(0x01, (uint64_t)input_queue_poll_char());
 }
+
+void test_input_peek_returns_event_without_removing(void) {
+    flush_all();
+    input_inject_byte('A');
+    input_event_t event;
+    /* Peek should see 'A' and leave it in the queue. */
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)input_queue_peek(&event));
+    TEST_ASSERT_EQUAL_UINT64('A', event.data.key.key);
+    /* A second peek returns the same event. */
+    input_event_t event2;
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)input_queue_peek(&event2));
+    TEST_ASSERT_EQUAL_UINT64('A', event2.data.key.key);
+    /* Available count is still 1. */
+    TEST_ASSERT_EQUAL_UINT64(1, (uint64_t)input_queue_available());
+}
+
+void test_input_peek_returns_minus_one_when_empty(void) {
+    flush_all();
+    input_event_t event;
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1, (uint64_t)input_queue_peek(&event));
+}
+
+void test_input_peek_then_poll_returns_same_event(void) {
+    flush_all();
+    input_inject_byte('B');
+    input_event_t peeked;
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)input_queue_peek(&peeked));
+    TEST_ASSERT_EQUAL_UINT64('B', peeked.data.key.key);
+    input_event_t popped;
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)input_queue_poll(&popped));
+    TEST_ASSERT_EQUAL_UINT64('B', popped.data.key.key);
+    /* Queue is now empty. */
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)input_queue_available());
+}
