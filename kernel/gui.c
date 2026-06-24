@@ -8,6 +8,18 @@
 #include "uart/pl011.h"
 
 /*
+ * The kernel has exactly one GUI desktop. The static globals below hold
+ * its state so the rest of the kernel can call into the GUI without
+ * threading a context pointer through every path. They are defined here
+ * (above every function that uses them) so the damage-tracking helpers
+ * in gui_request_redraw can read g_gui_dirty without a forward decl.
+ */
+static fb_t g_gui_fb;
+static gui_desktop_t g_gui_desktop;
+static uint8_t g_gui_active;
+static uint8_t g_gui_dirty;
+
+/*
  * 16x16 arrow cursor.
  * 0 = transparent, 1 = black outline, 2 = white fill.
  */
@@ -250,6 +262,8 @@ int gui_init(gui_desktop_t *desktop, fb_t *fb, uint32_t background_color) {
     desktop->cursor.buttons_mask = 0;
     desktop->cursor.visible = 1;
     desktop->cursor.shape = GUI_CURSOR_ARROW;
+    desktop->damage_count = 0;
+    desktop->damage_full = 0;
     for (uint32_t i = 0; i < GUI_MAX_WINDOWS; i++) {
         desktop->windows[i].x = 0;
         desktop->windows[i].y = 0;
@@ -1083,11 +1097,6 @@ void gui_draw(gui_desktop_t *desktop) {
     }
 }
 
-static fb_t g_gui_fb;
-static gui_desktop_t g_gui_desktop;
-static uint8_t g_gui_active;
-static uint8_t g_gui_dirty;
-
 void gui_render(fb_t *fb, void *context) {
     (void)context;
     if (g_gui_active == 0) {
@@ -1111,10 +1120,122 @@ int gui_is_dirty(void) {
 
 void gui_clear_dirty(void) {
     g_gui_dirty = 0;
+    if (g_gui_active) {
+        gui_damage_clear(&g_gui_desktop);
+    }
 }
 
 void gui_request_redraw(void) {
     g_gui_dirty = 1;
+    if (g_gui_active) {
+        gui_damage_add_full(&g_gui_desktop);
+    }
+}
+
+/*
+ * gui_damage_add: insert a framebuffer-coords rect into the desktop's damage
+ * list. The rect is clipped to the framebuffer; zero-area rects are dropped.
+ * Existing overlapping/adjacent entries are merged in place. When the list
+ * fills, we collapse everything to a single "full" sentinel so future adds
+ * become O(1) and the next gui_draw degrades to a full repaint.
+ */
+void gui_damage_add(gui_desktop_t *desktop, int32_t x, int32_t y,
+                    int32_t w, int32_t h) {
+    if (desktop == 0 || desktop->fb == 0) {
+        return;
+    }
+    if (desktop->damage_full) {
+        return;
+    }
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+    int32_t fb_w = (int32_t)desktop->fb->width;
+    int32_t fb_h = (int32_t)desktop->fb->height;
+    if (x < 0) {
+        w += x;
+        x = 0;
+    }
+    if (y < 0) {
+        h += y;
+        y = 0;
+    }
+    if (x >= fb_w || y >= fb_h) {
+        return;
+    }
+    if (x + w > fb_w) {
+        w = fb_w - x;
+    }
+    if (y + h > fb_h) {
+        h = fb_h - y;
+    }
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+    /* Fast path: a rect that covers the whole framebuffer collapses to
+     * the sentinel and short-circuits future adds. */
+    if (x == 0 && y == 0 && w == fb_w && h == fb_h) {
+        desktop->damage_full = 1;
+        desktop->damage_count = 0;
+        return;
+    }
+    /* Merge pass: scan existing rects, absorbing any that overlap or touch
+     * the new one and growing the new rect to cover them. Remove the
+     * absorbed entries so the list stays compact. */
+    for (uint32_t i = 0; i < desktop->damage_count; ) {
+        damage_rect_t *r = &desktop->damage_rects[i];
+        int32_t ax1 = x + w;
+        int32_t ay1 = y + h;
+        int32_t bx1 = r->x + r->w;
+        int32_t by1 = r->y + r->h;
+        if (x <= bx1 && ax1 >= r->x && y <= by1 && ay1 >= r->y) {
+            /* Overlap or touch: unify. */
+            int32_t nx0 = x < r->x ? x : r->x;
+            int32_t ny0 = y < r->y ? y : r->y;
+            int32_t nx1 = ax1 > bx1 ? ax1 : bx1;
+            int32_t ny1 = ay1 > by1 ? ay1 : by1;
+            x = nx0;
+            y = ny0;
+            w = nx1 - nx0;
+            h = ny1 - ny0;
+            /* Drop the absorbed entry by shifting the tail down. */
+            for (uint32_t k = i; k + 1U < desktop->damage_count; k++) {
+                desktop->damage_rects[k] = desktop->damage_rects[k + 1U];
+            }
+            desktop->damage_count--;
+            /* Do not advance i: re-check the new occupant at slot i. */
+            continue;
+        }
+        i++;
+    }
+    if (desktop->damage_count >= GUI_DAMAGE_MAX) {
+        desktop->damage_full = 1;
+        desktop->damage_count = 0;
+        return;
+    }
+    desktop->damage_rects[desktop->damage_count].x = x;
+    desktop->damage_rects[desktop->damage_count].y = y;
+    desktop->damage_rects[desktop->damage_count].w = w;
+    desktop->damage_rects[desktop->damage_count].h = h;
+    desktop->damage_count++;
+    g_gui_dirty = 1;
+}
+
+void gui_damage_add_full(gui_desktop_t *desktop) {
+    if (desktop == 0) {
+        return;
+    }
+    desktop->damage_full = 1;
+    desktop->damage_count = 0;
+    g_gui_dirty = 1;
+}
+
+void gui_damage_clear(gui_desktop_t *desktop) {
+    if (desktop == 0) {
+        return;
+    }
+    desktop->damage_full = 0;
+    desktop->damage_count = 0;
 }
 
 int gui_handle_input(const input_event_t *event) {

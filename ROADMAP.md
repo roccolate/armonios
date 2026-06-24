@@ -243,16 +243,21 @@ candidates, in rough order of return on effort:
   0x4010000000 and decodes BARs; `drivers/usb/hid.{c,h}` parses boot
   reports (8-byte keyboard, 3-byte mouse); `drivers/usb/usb_core.{c,h}`
   walks configuration descriptors and exposes standard requests;
-  `drivers/usb/uhci.{c,h}` defines the registers and a static
-  frame list / TD pool. The boot-protocol translator
-  (`usb_hid_keyboard_report`, `usb_hid_mouse_report`) converts
-  reports into `input_event_t` and feeds the same `input_queue` the
-  UART and virtio-input use. Live enumeration reaches "USB:
-  controller initialized" and "USB: device on port 0/1" on the
-  qemu-xhci path; full HID event delivery needs a UHCI controller
-  with MMIO BARs (QEMU virt's `piix3-usb-uhci` is I/O-only).
-- USB HID keyboard and mouse drivers, so the QEMU UART input is no longer the
-  primary path.
+  `drivers/usb/uhci.{c,h}` defines the registers, a static frame
+  list (4 KB) and 32-element TD pool, and runs real SETUP+DATA+STATUS
+  control transfers plus interrupt-in TD chains. The boot-protocol
+  translator (`usb_hid_keyboard_report`, `usb_hid_mouse_report`)
+  converts reports into `input_event_t` and feeds the same
+  `input_queue` the UART and virtio-input use. The kernel runs
+  `usb_enumerate_default_device` (SET_ADDRESS → GET_DESCRIPTOR →
+  GET_CONFIGURATION → SET_CONFIGURATION), registers each HID
+  interface with `usb_hid_init`, switches it to boot protocol via
+  HID SET_PROTOCOL, and the input thread calls `usb_hid_poll_all`
+  every tick. Live `make qemu-usb` reaches "USB: controller
+  initialized" and "USB: device on port 0/1" on the qemu-xhci path;
+  full HID event delivery needs a UHCI controller with MMIO BARs
+  (QEMU virt's `piix3-usb-uhci` is I/O-only, which is the next gap
+  to close).
 - SMP: enable the secondary cores after the uniprocessor desktop is stable.
 - A minimal TCP/HTTP client for `wget` style apps.
 - Real hardware boot on RPi 4 with the same desktop visible over HDMI.

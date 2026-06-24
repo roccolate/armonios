@@ -78,9 +78,24 @@ The current milestone is **Phase 10 — a real desktop**. Read
 - [x] Accept the `KOS` flat format (header magic `0x00534F4B`) as a synonym
       for our native `KLI1` header, with `programs/apps/kos_hello.S` as the
       smallest cross-compatible demo.
+- [x] USB HID foundations: PCI ECAM scan + BAR auto-assignment,
+      UHCI driver with real control and interrupt-in transfers,
+      boot-protocol HID report parser, descriptor walker, and a
+      kernel-wide poll loop that feeds the existing `input_queue`.
+      `make qemu-usb` boots the kernel with `qemu-xhci + usb-kbd +
+      usb-mouse` and reaches `USB: controller initialized` /
+      `USB: device on port 0/1`. Full HID event delivery needs a
+      UHCI controller with MMIO BARs (QEMU virt's `piix3-usb-uhci`
+      is I/O-only; RPi 4 or a custom QEMU machine expose one).
 
 Out of scope until the desktop is real:
-- SMP, USB HID, full FAT32 write, real HTTP client.
+- SMP, full FAT32 write (drivers/fat32 already supports create/
+  delete/rename + chain grow), real HTTP client.
+- XHCI driver (the kernel speaks UHCI today; an XHCI port is the
+  obvious next step because the QEMU virt machine defaults to
+  XHCI and most modern hardware does too).
+- I/O-space PCI BARs (UHCI on QEMU aarch64 virt is I/O-only;
+  current driver only handles MMIO BARs).
 - RPi 4 hardware bring-up (it builds, but it is not the active target).
 
 ---
@@ -154,6 +169,13 @@ make qemu-fb
 
 # Run in QEMU with a visible virtio-gpu window
 make qemu-fb-visible
+
+# Run in QEMU with a USB host (qemu-xhci + usb-kbd + usb-mouse).
+# The kernel prints "USB: controller initialized" and
+# "USB: device on port 0/1" as it walks the ECAM and probes the
+# controller. Live HID event delivery needs a UHCI controller with
+# MMIO BARs; on QEMU aarch64 virt piix3-usb-uhci is I/O-only.
+make qemu-usb
 
 # Exit QEMU: Ctrl+A then X
 ```

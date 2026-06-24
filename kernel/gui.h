@@ -11,6 +11,11 @@
 #define GUI_CURSOR_W         16
 #define GUI_CURSOR_H         16
 #define GUI_TITLE_LEN        32U
+/* Cap on tracked damage rectangles per desktop. When the list fills we
+ * collapse it to a single "full screen" sentinel, which keeps the worst
+ * case identical to the pre-damage path. 32 covers the common
+ * per-rect redraw bursts from one or two apps without spilling. */
+#define GUI_DAMAGE_MAX       32U
 /* Kernel-drawn close button inside the title bar. The box is only
  * rendered (and only intercepts clicks) when the window has a
  * title_h large enough to fit it without crowding the title text. */
@@ -100,6 +105,13 @@ typedef struct {
 #define GUI_BUTTON_MIDDLE (1U << 2)
 
 typedef struct {
+    int32_t x;
+    int32_t y;
+    int32_t w;
+    int32_t h;
+} damage_rect_t;
+
+typedef struct {
     fb_t *fb;
     uint32_t background_color;
     uint32_t focused_window_id;
@@ -113,6 +125,14 @@ typedef struct {
     int32_t drag_off_y;
     gui_window_t windows[GUI_MAX_WINDOWS];
     gui_cursor_t cursor;
+    /* Damage tracking. The compositor walks damage_rects on the next redraw
+     * and only repaints those regions. When damage_full is set the list is
+     * ignored and the full framebuffer is repainted (cheaper than a huge
+     * rect list once the bursts accumulate). Coords are in framebuffer
+     * pixels. */
+    damage_rect_t damage_rects[GUI_DAMAGE_MAX];
+    uint32_t damage_count;
+    uint8_t damage_full;
 } gui_desktop_t;
 
 int gui_init(gui_desktop_t *desktop, fb_t *fb, uint32_t background_color);
@@ -138,6 +158,15 @@ int gui_window_clear(gui_desktop_t *desktop, uint32_t window_id,
                       uint32_t color);
 int gui_window_ensure_backing(gui_window_t *window);
 void gui_window_free_backing(gui_window_t *window);
+/* Damage tracking. gui_damage_add pushes a framebuffer-coords rect onto the
+ * desktop's list, merging it with overlapping/adjacent entries and
+ * collapsing to a "full" sentinel when the list fills. The full sentinel
+ * short-circuits future adds until the next clear. Coords are clipped to
+ * the framebuffer; zero-area rects are dropped. */
+void gui_damage_add(gui_desktop_t *desktop, int32_t x, int32_t y,
+                    int32_t w, int32_t h);
+void gui_damage_add_full(gui_desktop_t *desktop);
+void gui_damage_clear(gui_desktop_t *desktop);
 int gui_window_push_event(gui_window_t *window, uint32_t type,
                            int32_t data1, int32_t data2);
 int gui_window_pop_event(gui_window_t *window, gui_event_t *out);

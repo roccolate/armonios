@@ -104,33 +104,44 @@ int usb_walk_configuration(const void *buffer, uint16_t buffer_len,
         if (len < 2U) {
             return -1;
         }
+        /* Reject if the descriptor would read past buffer_end. */
+        if ((uintptr_t)cursor + (uintptr_t)len > (uintptr_t)out->buffer_end) {
+            return -1;
+        }
         if (type == USB_DESC_INTERFACE) {
-            if (out->interface_count >= USB_MAX_INTERFACES) {
-                return -1;
+            /* If we have already filled the interface array, stop
+             * tracking the current interface (endpoints and HID
+             * descriptors after this point are ignored). */
+            if (out->interface_count < USB_MAX_INTERFACES) {
+                usb_interface_ref_t *iface =
+                    &out->interfaces[out->interface_count++];
+                iface->desc = (const usb_interface_descriptor_t *)cursor;
+                iface->endpoint_count = 0;
+                iface->hid = 0;
+                cur_iface = iface;
+            } else {
+                cur_iface = 0;
             }
-            usb_interface_ref_t *iface = &out->interfaces[out->interface_count++];
-            iface->desc = (const usb_interface_descriptor_t *)cursor;
-            iface->endpoint_count = 0;
-            iface->hid = 0;
-            cur_iface = iface;
         } else if (type == USB_DESC_ENDPOINT) {
             if (cur_iface == 0) {
-                return -1;
+                /* Endpoint appeared before any interface or
+                 * after we ran out of interface slots; ignore. */
+                ;
+            } else if (cur_iface->endpoint_count >= USB_MAX_ENDPOINTS) {
+                /* Silently drop endpoints beyond the cap. */
+                ;
+            } else {
+                usb_endpoint_ref_t *ep =
+                    &cur_iface->endpoints[cur_iface->endpoint_count++];
+                ep->desc = (const usb_endpoint_descriptor_t *)cursor;
+                ep->address = ep->desc->bEndpointAddress;
+                ep->transfer_type = (uint8_t)(ep->desc->bmAttributes & 0x03U);
+                ep->max_packet = ep->desc->wMaxPacketSize;
             }
-            if (cur_iface->endpoint_count >= USB_MAX_ENDPOINTS) {
-                return -1;
-            }
-            usb_endpoint_ref_t *ep =
-                &cur_iface->endpoints[cur_iface->endpoint_count++];
-            ep->desc = (const usb_endpoint_descriptor_t *)cursor;
-            ep->address = ep->desc->bEndpointAddress;
-            ep->transfer_type = (uint8_t)(ep->desc->bmAttributes & 0x03U);
-            ep->max_packet = ep->desc->wMaxPacketSize;
         } else if (type == USB_DESC_HID) {
-            if (cur_iface == 0) {
-                return -1;
+            if (cur_iface != 0) {
+                cur_iface->hid = (const usb_hid_descriptor_t *)cursor;
             }
-            cur_iface->hid = (const usb_hid_descriptor_t *)cursor;
         }
         cursor += len;
     }
