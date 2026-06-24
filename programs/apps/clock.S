@@ -15,6 +15,7 @@
 #define SYS_WINDOW_EVENT     74
 #define SYS_WINDOW_DESTROY  71
 #define SYS_WINDOW_SET_TITLE 75
+#define SYS_WINDOW_FLUSH      80
 
 .equ WIN_W, 200
 .equ WIN_H, 80
@@ -217,7 +218,11 @@ clock_redraw:
     svc #0
 
     mov x0, x19
-    mov x8, #SYS_WINDOW_REDRAW
+    mov x1, #0
+    mov x2, #0
+    mov x3, #WIN_W
+    mov x4, #(WIN_H - TITLE_BAR_H)
+    mov x8, #SYS_WINDOW_FLUSH
     svc #0
 9:
     ldp x29, x30, [sp], #16

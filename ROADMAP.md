@@ -81,17 +81,15 @@ assembly syscalls with a tiny userland library later.
   the first screenful is drawn.
 - The monitor owns a window and draws a compact `sys_proclist`/`sys_meminfo`
   view, but it still has only the simplest fixed layout.
-- Live app redraws still go through the full sentinel. Apps call
-  `SYS_WINDOW_REDRAW` (76) which triggers `gui_request_redraw`; the
-  per-rect path in `gui_draw` is exercised only by tests, not by user
-  input. `SYS_WINDOW_FLUSH` (80) lets an app push a content-local dirty
-  rect but no app uses it yet.
+- Live app redraws go through `SYS_WINDOW_FLUSH` (80) per window. Editor,
+  clock, and monitor push the content rect through the per-rect
+  compositor path; the partial-redraw branch in `gui_draw` is now
+  exercised in production, not just in the host suite. The shell and
+  the panel still use `SYS_WINDOW_REDRAW` (76) because their state
+  changes are global (focus, launcher, running-app entry).
 - Resize is defined in the event ABI but not produced. Minimize/maximize and
   taskbar-owned focus controls are not implemented.
 - Phase 8 (RPi 4 port) builds but has never been booted on hardware.
-- `kernel/user_demo.c` still owns an embedded boot program. AGENTS.md said
-  to keep it until a tiny loader-owned image existed; that loader exists
-  now (`kernel/user_image.c`), so this is the next cleanup.
 
 ---
 
@@ -161,7 +159,12 @@ Exit criteria:
   framebuffer directly.
 
 Exit criteria:
-- [ ] Two apps, two windows, each redraws only its own region on key event.
+- [x] Two apps, two windows, each redraws only its own region on key event.
+      Editor, clock, and monitor push a content-local damage rect through
+      `SYS_WINDOW_FLUSH` (80); the partial-redraw branch in `gui_draw`
+      coalesces multiple draws and only repaints the marked region. The
+      strict tests in `tests/test_gui.c` cover in-rect fills, off-screen
+      no-ops, and multiple disjoint rects in one draw.
 - [x] A crashed app's window stays around until the user closes it.
 - [x] A moving drag updates the window in real time at host-testable speed.
 
@@ -241,9 +244,10 @@ Exit criteria:
 - [x] Damage-rectangle tracking. The compositor keeps a coalesced damage
       list (cap 32, with a "full" sentinel that short-circuits further
       adds) and `gui_draw` walks the list so each redraw only repaints
-      the regions that actually changed. The kernel-side path is solid;
-      no app uses `SYS_WINDOW_FLUSH` (80) yet, so live app redraws still
-      fall through the full sentinel.
+      the regions that actually changed. Editor, clock, and monitor
+      push content-local damage through `SYS_WINDOW_FLUSH` (80); the
+      strict tests in `tests/test_gui.c` cover the in-rect fill, the
+      off-screen no-op, and multiple disjoint rects in a single draw.
 
 ---
 
@@ -270,36 +274,50 @@ criteria only become true when a windowed session runs end to end.
    MMIO-BAR UHCI, which qemu-virt does not expose; record the gap rather
    than chasing it.
 
-### B. Switch app redraws to the per-rect path
+### B. Switch app redraws to the per-rect path — done
 
-`SYS_WINDOW_FLUSH` (80) is implemented (`kernel/syscall.c:694`) and
-`gui_draw`'s partial path is restored, but no app calls it. Edit
-`programs/apps/{editor,monitor,clock}.S` so each per-character or
-per-tick repaint issues `SYS_WINDOW_FLUSH` for the dirty content rect
-instead of `SYS_WINDOW_REDRAW`. Add a host test that runs the GUI in
-full-sentinel mode first and then per-rect mode and asserts the per-rect
-run touches fewer pixels. This closes Phase 10.2's "redraws only its own
-region on key event" exit criterion.
+`programs/apps/{editor,clock,monitor}.S` now call `SYS_WINDOW_FLUSH`
+(80) for their content redraws. The shell and panel still use
+`SYS_WINDOW_REDRAW` (76) because their redraws cover global state
+(focus, launcher, running-app entry) where the content-local rect
+would miss parts of the desktop. Strict partial-redraw tests in
+`tests/test_gui.c` (`test_gui_damage_partial_repaint_paints_every_pixel_in_rect`,
+`test_gui_damage_partial_repaint_skips_when_rect_outside_fb`,
+`test_gui_damage_partial_repaint_with_multiple_disjoint_rects`) cover
+the in-rect fill, the off-screen no-op, and multiple disjoint rects
+in a single draw.
 
-### C. Code review leftovers from AGENTS.md audit
+### C. Code review leftovers from AGENTS.md audit — done
 
-Findings from the AGENTS.md review that still need a fix:
+- `drivers/input/virtio_input.c` no longer includes `<string.h>`.
+- `kernel/user_demo.{c,h}` has been renamed to `kernel/panel_boot.{c,h}`.
+  The kernel-side helpers now expose `panel_boot_run`,
+  `kolibri_spawn_vfs`, and `el0_return_address`. `kernel_main` boots
+  the panel process registered through bootfs; there is no embedded
+  `programs/user_demo.S` left to keep in sync.
 
-- `drivers/input/virtio_input.c:5` includes `<string.h>` but uses none of
-  it. Drop the include or replace it with a comment.
-- `kernel/user_demo.c` still carries the embedded boot program. The
-  loader-owned image (`kernel/user_image.c`) covers the role, so delete
-  `user_demo.c` and have `kernel_main` go straight to the panel process
-  registered through bootfs. This is the next cleanup item in
-  "After the desktop" above.
+### D. Strict tests for the partial-redraw path — done
 
-### D. Strict tests for the partial-redraw path
+Three new tests in `tests/test_gui.c` lock down the partial-redraw
+behaviour:
 
-Today the partial-redraw branch is only exercised by `make -C tests test`.
-Add a test that drives a 16×16 desktop, adds `(0,0,1,1)`, runs `gui_draw`,
-and asserts that only pixel 0 changed and `pixels[1]` keeps its prior
-value. Once that test is the source of truth, the AGENTS.md build/test
-flow catches a regression in seconds.
+- `test_gui_damage_partial_repaint_paints_every_pixel_in_rect` —
+  drives a 16×16 desktop with a 4×4 rect at (4,4), asserts every
+  pixel inside the rect was repainted and every pixel on the four
+  borders and the four corners keeps its prior value.
+- `test_gui_damage_partial_repaint_skips_when_rect_outside_fb` —
+  pushes rects that are entirely above, to the right, or at negative
+  coordinates and asserts nothing was repainted and the damage list
+  stays empty.
+- `test_gui_damage_partial_repaint_with_multiple_disjoint_rects` —
+  pushes two non-overlapping rects in one draw and asserts both were
+  painted while the pixels between and around them keep their prior
+  value.
+
+These join the existing
+`test_gui_damage_partial_repaint_leaves_pixels_outside_rect` and
+`test_gui_damage_full_sentinel_re_paints_everything` so any
+regression in the partial branch fails `make -C tests test` in seconds.
 
 ---
 
@@ -335,16 +353,16 @@ candidates, in rough order of return on effort:
   full HID event delivery needs a UHCI controller with MMIO BARs
   (QEMU virt's `piix3-usb-uhci` is I/O-only, which is the next gap to
   close).
-- **Switch apps to per-rect redraws.** Today every app redraw goes
-  through `SYS_WINDOW_REDRAW` (76), which calls `gui_request_redraw`
-  and collapses to the full sentinel. The next iteration is to call
-  `SYS_WINDOW_FLUSH` (80) from the editor/clock/monitor after each
-  small change so the partial `gui_draw` path is exercised in
-  practice, not just in the host suite.
-- **Remove the embedded user demo.** `kernel/user_demo.c` was kept
-  while no loader-owned image existed. `kernel/user_image.c` now
-  fills that role; deleting `user_demo.c` shrinks the kernel and
-  removes a parallel boot path that confuses readers.
+- **Switch apps to per-rect redraws (done).** Editor, clock, and
+  monitor now push their content rect through `SYS_WINDOW_FLUSH` (80)
+  so the partial `gui_draw` path is exercised in practice. The shell
+  and panel still call `SYS_WINDOW_REDRAW` (76) because their redraws
+  cover global state (focus, launcher, running-app entry) where the
+  content-local rect would miss parts of the desktop.
+- **Remove the embedded user demo (done).** `kernel/user_demo.{c,h}`
+  has been renamed to `kernel/panel_boot.{c,h}`. `kernel_main` boots
+  the panel process registered through bootfs; there is no embedded
+  `programs/user_demo.S` left to keep in sync.
 - SMP: enable the secondary cores after the uniprocessor desktop is stable.
 - A minimal TCP/HTTP client for `wget` style apps.
 - Real hardware boot on RPi 4 with the same desktop visible over HDMI.

@@ -5,7 +5,7 @@
 #include "kernel/print.h"
 #include "kernel/process.h"
 #include "kernel/syscall.h"
-#include "kernel/user_demo.h"
+#include "kernel/panel_boot.h"
 #include "uart/pl011.h"
 
 #define ESR_EC_SHIFT 26U
@@ -100,7 +100,7 @@ static void handle_user_fault(exception_frame_t *frame, uint64_t esr,
     }
 
     frame->x[0] = USER_FAULT_EXIT_CODE;
-    frame->elr = user_demo_return_address();
+    frame->elr = el0_return_address();
     frame->spsr = SPSR_EL1H_MASKED;
 }
 

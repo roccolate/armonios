@@ -15,6 +15,7 @@
 #define SYS_WINDOW_EVENT     74
 #define SYS_WINDOW_SET_TITLE 75
 #define SYS_WINDOW_REDRAW    76
+#define SYS_WINDOW_FLUSH      80
 
 .equ WIN_X,          56
 .equ WIN_Y,          120
@@ -262,7 +263,11 @@ monitor_redraw:
 
 8:
     mov x0, x19
-    mov x8, #SYS_WINDOW_REDRAW
+    mov x1, #0
+    mov x2, #0
+    mov x3, #WIN_W
+    mov x4, #(WIN_H - TITLE_BAR_H)
+    mov x8, #SYS_WINDOW_FLUSH
     svc #0
     ldp x29, x30, [sp], #16
     ret

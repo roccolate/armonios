@@ -1493,6 +1493,150 @@ void test_gui_damage_partial_repaint_leaves_pixels_outside_rect(void) {
     TEST_ASSERT_EQUAL_UINT64(0xff777777U, pixels[15 * 16 + 15]);
 }
 
+void test_gui_damage_partial_repaint_paints_every_pixel_in_rect(void) {
+    /* Stricter variant of test_gui_damage_partial_repaint_leaves_pixels_outside_rect.
+     * A 4x4 rect at (4,4) inside a 16x16 desktop: every pixel inside the
+     * rect must be repainted (gradient touched it), every pixel outside
+     * the rect must keep its prior value. Catches a regression where
+     * the partial path under-fills the rect (e.g. off-by-one in the
+     * row loop) or accidentally writes one column past the right edge. */
+    uint32_t pixels[16 * 16];
+    fb_t fb;
+    gui_desktop_t desktop;
+
+    for (uint32_t i = 0; i < 16 * 16; i++) {
+        pixels[i] = 0xff777777U;
+    }
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 16, 16, 16));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)gui_init(&desktop, &fb, 0xff101010U));
+    desktop.cursor.visible = 0;
+    gui_damage_clear(&desktop);
+
+    /* 4x4 rect at (4,4) covers pixels 4..7 in rows 4..7. */
+    gui_damage_add(&desktop, 4, 4, 4, 4);
+    gui_draw(&desktop);
+
+    /* Every pixel inside the rect was repainted. */
+    for (uint32_t row = 4; row < 8; row++) {
+        for (uint32_t col = 4; col < 8; col++) {
+            uint32_t idx = row * 16U + col;
+            TEST_ASSERT_TRUE(pixels[idx] != 0xff777777U);
+        }
+    }
+
+    /* Every pixel outside the rect keeps its prior value. We check the
+     * four borders (left, right, top, bottom of the rect) and the four
+     * outer corners so a regression that overruns by one pixel on any
+     * side fails. */
+    const uint32_t prior = 0xff777777U;
+    /* Top border (row 3). */
+    for (uint32_t col = 0; col < 16; col++) {
+        TEST_ASSERT_EQUAL_UINT64((uint64_t)prior,
+                                 (uint64_t)pixels[3 * 16U + col]);
+    }
+    /* Bottom border (row 8). */
+    for (uint32_t col = 0; col < 16; col++) {
+        TEST_ASSERT_EQUAL_UINT64((uint64_t)prior,
+                                 (uint64_t)pixels[8 * 16U + col]);
+    }
+    /* Left border of the rect rows (cols 0..3). */
+    for (uint32_t row = 4; row < 8; row++) {
+        for (uint32_t col = 0; col < 4; col++) {
+            TEST_ASSERT_EQUAL_UINT64((uint64_t)prior,
+                                     (uint64_t)pixels[row * 16U + col]);
+        }
+    }
+    /* Right border of the rect rows (cols 8..15). */
+    for (uint32_t row = 4; row < 8; row++) {
+        for (uint32_t col = 8; col < 16; col++) {
+            TEST_ASSERT_EQUAL_UINT64((uint64_t)prior,
+                                     (uint64_t)pixels[row * 16U + col]);
+        }
+    }
+    /* Outer corners. */
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)prior, (uint64_t)pixels[0]);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)prior, (uint64_t)pixels[15]);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)prior, (uint64_t)pixels[15 * 16U]);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)prior, (uint64_t)pixels[15 * 16U + 15U]);
+}
+
+void test_gui_damage_partial_repaint_skips_when_rect_outside_fb(void) {
+    /* A damage rect entirely outside the framebuffer must be a no-op.
+     * gui_damage_add clips; the resulting damage list stays empty so
+     * gui_draw has nothing to repaint and every pixel keeps its prior
+     * value. */
+    uint32_t pixels[16 * 16];
+    fb_t fb;
+    gui_desktop_t desktop;
+
+    for (uint32_t i = 0; i < 16 * 16; i++) {
+        pixels[i] = 0xff777777U;
+    }
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 16, 16, 16));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)gui_init(&desktop, &fb, 0xff101010U));
+    desktop.cursor.visible = 0;
+    gui_damage_clear(&desktop);
+
+    /* Rect completely above the framebuffer. gui_damage_add drops it. */
+    gui_damage_add(&desktop, 0, -10, 4, 4);
+    /* Rect completely to the right of the framebuffer. */
+    gui_damage_add(&desktop, 100, 0, 4, 4);
+    /* Rect at negative coords. */
+    gui_damage_add(&desktop, -5, -5, 4, 4);
+
+    gui_draw(&desktop);
+
+    /* Every pixel still has its prior value: nothing was repainted. */
+    for (uint32_t i = 0; i < 16 * 16; i++) {
+        TEST_ASSERT_EQUAL_UINT64((uint64_t)0xff777777U, (uint64_t)pixels[i]);
+    }
+    TEST_ASSERT_EQUAL_UINT64(0U, desktop.damage_count);
+    TEST_ASSERT_EQUAL_UINT64(0U, desktop.damage_full);
+}
+
+void test_gui_damage_partial_repaint_with_multiple_disjoint_rects(void) {
+    /* Two non-overlapping damage rects in the same draw must both be
+     * repainted, with their respective surrounding pixels kept
+     * untouched. */
+    uint32_t pixels[32 * 16];
+    fb_t fb;
+    gui_desktop_t desktop;
+
+    for (uint32_t i = 0; i < 32 * 16; i++) {
+        pixels[i] = 0xff777777U;
+    }
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 32, 16, 32));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)gui_init(&desktop, &fb, 0xff101010U));
+    desktop.cursor.visible = 0;
+    gui_damage_clear(&desktop);
+
+    gui_damage_add(&desktop, 0, 0, 4, 4);
+    gui_damage_add(&desktop, 16, 8, 4, 4);
+    TEST_ASSERT_EQUAL_UINT64(2U, desktop.damage_count);
+
+    gui_draw(&desktop);
+
+    /* First rect: pixels (0..3, 0..3). */
+    for (uint32_t row = 0; row < 4; row++) {
+        for (uint32_t col = 0; col < 4; col++) {
+            uint32_t idx = row * 32U + col;
+            TEST_ASSERT_TRUE(pixels[idx] != 0xff777777U);
+        }
+    }
+    /* Second rect: pixels (16..19, 8..11). */
+    for (uint32_t row = 8; row < 12; row++) {
+        for (uint32_t col = 16; col < 20; col++) {
+            uint32_t idx = row * 32U + col;
+            TEST_ASSERT_TRUE(pixels[idx] != 0xff777777U);
+        }
+    }
+    /* A pixel between the two rects must be untouched. */
+    TEST_ASSERT_EQUAL_UINT64(0xff777777U, pixels[5 * 32U + 10U]);
+    /* Pixels just outside the first rect must be untouched. */
+    TEST_ASSERT_EQUAL_UINT64(0xff777777U, pixels[4]);
+    TEST_ASSERT_EQUAL_UINT64(0xff777777U, pixels[4 * 32U + 0U]);
+}
+
 void test_gui_damage_full_sentinel_re_paints_everything(void) {
     uint32_t pixels[16 * 16];
     fb_t fb;

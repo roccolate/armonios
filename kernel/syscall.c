@@ -14,7 +14,7 @@
 #include "kernel/sched/sched.h"
 #include "kernel/syscall_numbers.h"
 #include "kernel/timer/timer.h"
-#include "kernel/user_demo.h"
+#include "kernel/panel_boot.h"
 #include "kernel/user_vm.h"
 #include "kernel/vfs.h"
 #include "uart/pl011.h"
@@ -116,7 +116,7 @@ static int64_t sys_spawn(uint64_t path_ptr, uint64_t entry_index) {
         return ERR_INVAL;
     }
 
-    pid = user_demo_spawn_vfs(path, (uint32_t)entry_index, 0, 0);
+    pid = kolibri_spawn_vfs(path, (uint32_t)entry_index, 0, 0);
     if (pid < 0) {
         return ERR_NOENT;
     }
@@ -137,7 +137,7 @@ static int64_t sys_spawn_argv(uint64_t path_ptr, uint64_t entry_index,
     /*
      * argv_ptr must point at `argc` uint64_t entries inside the
      * caller's registered user regions when argc > 0. The strings
-     * they reference are validated by user_demo_spawn_vfs (it walks
+     * they reference are validated by kolibri_spawn_vfs (it walks
      * each one until '\0'). argc == 0 with argv_ptr == 0 is the
      * "no argv" path and is always accepted; any other combination
      * of argc and argv_ptr is rejected.
@@ -153,7 +153,7 @@ static int64_t sys_spawn_argv(uint64_t path_ptr, uint64_t entry_index,
         }
     }
 
-    pid = user_demo_spawn_vfs(path, (uint32_t)entry_index,
+    pid = kolibri_spawn_vfs(path, (uint32_t)entry_index,
                               (const uint64_t *)(uintptr_t)argv_ptr,
                               (uint32_t)argc);
     if (pid < 0) {
@@ -745,7 +745,7 @@ static void sys_exit(exception_frame_t *frame, uint64_t code) {
     }
 
     frame->x[0] = code;
-    frame->elr = user_demo_return_address();
+    frame->elr = el0_return_address();
     frame->spsr = SPSR_EL1H_MASKED;
 }
 

@@ -75,7 +75,7 @@ OBJS := \
     $(BUILD_DIR)/kernel/syscall.o \
     $(BUILD_DIR)/kernel/timer/timer.o \
     $(BUILD_DIR)/kernel/tmpfs.o \
-    $(BUILD_DIR)/kernel/user_demo.o \
+    $(BUILD_DIR)/kernel/panel_boot.o \
     $(BUILD_DIR)/kernel/user_entry.o \
     $(BUILD_DIR)/kernel/user_image.o \
     $(BUILD_DIR)/kernel/user_vm.o \

@@ -19,7 +19,7 @@
 #include "kernel/sched/sched.h"
 #include "kernel/timer/timer.h"
 #include "kernel/tmpfs.h"
-#include "kernel/user_demo.h"
+#include "kernel/panel_boot.h"
 #include "kernel/vfs.h"
 #include "uart/pl011.h"
 #include "input/input.h"
@@ -133,8 +133,8 @@ static void init_vfs(void) {
     }
 }
 
-static void run_user_demo_smoke(const dtb_memory_t *memory) {
-    uint64_t user_exit_code = user_demo_run(memory->base, memory->size,
+static void run_panel_boot_smoke(const dtb_memory_t *memory) {
+    uint64_t user_exit_code = panel_boot_run(memory->base, memory->size,
                                             board_map_mmio);
 
     uart_puts("USER demo exit code: ");
@@ -424,7 +424,7 @@ void kernel_main(uint64_t dtb_addr) {
             init_display();
             init_network();
             init_input();
-            run_user_demo_smoke(&memory);
+            run_panel_boot_smoke(&memory);
             console_start_interactive();
             start_scheduler_demo();
         }
