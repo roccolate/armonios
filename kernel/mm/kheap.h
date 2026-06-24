@@ -31,4 +31,11 @@ uint64_t kheap_total_bytes(void);
  */
 uint64_t kheap_free_bytes(void);
 
+#ifdef KOLIBRIARM_TEST
+/**
+ * kheap_reset_for_tests - Clear kheap globals between isolated host tests.
+ */
+void kheap_reset_for_tests(void);
+#endif
+
 #endif
