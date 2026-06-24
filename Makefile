@@ -12,7 +12,9 @@ BOARD ?= qemu_virt
 BOARD_DIR := drivers/boards/$(BOARD)
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
-KERNEL_SIZE_LIMIT ?= 87000
+# 95000 covers the userland library migration (libkarm pulls in
+# crt0 + syscall + string per migrated app, which adds ~1 KB each).
+KERNEL_SIZE_LIMIT ?= 95000
 APPS := hello loop fault shell editor monitor win panel clock kos_hello
 APPS_DIR := programs/apps
 APPS_COMMON_OBJ := $(BUILD_DIR)/$(APPS_DIR)/common.o
@@ -163,11 +165,12 @@ $(BUILD_DIR)/$(LIBKARM_DIR)/%.o: $(LIBKARM_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(DEPFLAGS) $(USERLAND_CFLAGS) -c $< -o $@
 
 # apps that have migrated to libkarm link against the libkarm objects
-# directly instead of programs/apps/common.o. clock is the first such
-# app; the rule below keeps its dependency list explicit so the
-# generic pattern rule (which still pulls in common.o for the rest of
-# the apps) does not fire for clock. clock_end.o is linked last so
-# clock_image_end sits at the tail of the flat image.
+# directly instead of programs/apps/common.o. clock and monitor are
+# the first two; the rules below keep their dependency lists
+# explicit so the generic pattern rule (which still pulls in common.o
+# for the rest of the apps) does not fire for them. *_end.o is
+# linked last so the *_image_end marker sits at the tail of the flat
+# image.
 $(BUILD_DIR)/$(APPS_DIR)/clock.elf: $(BUILD_DIR)/$(APPS_DIR)/clock.o \
     $(BUILD_DIR)/$(APPS_DIR)/clock_header.o \
     $(BUILD_DIR)/$(LIBKARM_DIR)/syscall.o \
@@ -180,6 +183,22 @@ $(BUILD_DIR)/$(APPS_DIR)/clock.elf: $(BUILD_DIR)/$(APPS_DIR)/clock.o \
 	    $(BUILD_DIR)/$(LIBKARM_DIR)/syscall.o \
 	    $(BUILD_DIR)/$(LIBKARM_DIR)/crt0.o \
 	    $(BUILD_DIR)/$(APPS_DIR)/clock_end.o \
+	    -o $@
+
+$(BUILD_DIR)/$(APPS_DIR)/monitor.elf: $(BUILD_DIR)/$(APPS_DIR)/monitor.o \
+    $(BUILD_DIR)/$(APPS_DIR)/monitor_header.o \
+    $(BUILD_DIR)/$(LIBKARM_DIR)/syscall.o \
+    $(BUILD_DIR)/$(LIBKARM_DIR)/crt0.o \
+    $(BUILD_DIR)/$(LIBKARM_DIR)/string.o \
+    $(BUILD_DIR)/$(APPS_DIR)/monitor_end.o \
+    $(APPS_DIR)/image.ld
+	$(LD) -T $(APPS_DIR)/image.ld -nostdlib \
+	    $(BUILD_DIR)/$(APPS_DIR)/monitor.o \
+	    $(BUILD_DIR)/$(APPS_DIR)/monitor_header.o \
+	    $(BUILD_DIR)/$(LIBKARM_DIR)/syscall.o \
+	    $(BUILD_DIR)/$(LIBKARM_DIR)/crt0.o \
+	    $(BUILD_DIR)/$(LIBKARM_DIR)/string.o \
+	    $(BUILD_DIR)/$(APPS_DIR)/monitor_end.o \
 	    -o $@
 
 $(BUILD_DIR)/$(APPS_DIR)/%.elf: $(BUILD_DIR)/$(APPS_DIR)/%.o $(APPS_COMMON_OBJ) $(APPS_DIR)/image.ld
