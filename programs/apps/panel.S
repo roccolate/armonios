@@ -375,9 +375,9 @@ panel_redraw_button:
     ldp x29, x30, [sp], #16
     ret
 
-// panel_redraw_running: paint each running-apps slot. Empty slots show
-// the dim COL_RUN_BG color; populated slots show the brighter
-// COL_RUN_ACTIVE color and the app name centered.
+// panel_redraw_running: paint each running-apps slot. Empty slots match
+// the panel background; populated slots show the brighter COL_RUN_ACTIVE
+// color and the app name centered.
 panel_redraw_running:
     mov x28, sp                         // x28 = caller's sp (panel frame base + 16)
     stp x29, x30, [sp, #-16]!
@@ -393,14 +393,14 @@ panel_run_slot_loop:
     bl panel_run_slot_x                 // x0 = slot x
     mov x27, x0                         // x27 = slot x
 
-    // Determine background color: dim if empty, active if populated.
+    // Determine background color: panel background if empty, active if populated.
     mov x9, #RUNNING_STRIDE
     mul x9, x9, x26
     add x10, x28, #OFF_RUNNING
     add x10, x10, x9
     ldr x11, [x10]                      // x11 = slot.pid (full 8 bytes)
-    movz w12, #0xff18, lsl #16
-    movk w12, #0x2028
+    movz w12, #0xff20, lsl #16
+    movk w12, #0x2428
     cbz x11, 1f
     movz w12, #0xff50, lsl #16
     movk w12, #0x6880
@@ -517,7 +517,6 @@ panel_refresh_running:
     b.le panel_refresh_running_done      // 0 or negative => nothing to do
 
     mov x22, x0                         // x22 = n entries
-    ldr w20, [x28, #OFF_PANEL_PID]      // w20 = panel_pid
 
     // Walk proclist entries, skipping panel_pid. The first RUN_SLOT_COUNT
     // non-self entries populate the running-apps table.
@@ -535,7 +534,8 @@ panel_refresh_loop:
     add x9, x9, x10                     // x9 = &entry
     ldr w11, [x9]                       // entry.pid
     mov w21, w11                        // preserve pid across SVC
-    cmp w11, w20
+    ldr w17, [x28, #OFF_PANEL_PID]
+    cmp w11, w17
     b.eq panel_refresh_skip              // skip self
     cbz w11, panel_refresh_skip          // skip empty slots
 
