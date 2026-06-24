@@ -223,6 +223,22 @@ void test_virtio_blk_probe_reads_capacity(void);
 void test_virtio_blk_probe_rejects_non_block_device(void);
 void test_virtio_blk_probe_range_finds_later_transport(void);
 void test_virtio_blk_init_programs_modern_queue(void);
+void test_syscall_abi_implemented_numbers_match_dispatch(void);
+void test_syscall_abi_ranges_do_not_overlap(void);
+void test_syscall_abi_error_codes_match_documented_constants(void);
+void test_syscall_abi_user_range_validation_rejects_out_of_region(void);
+void test_process_isolation_two_processes_have_independent_regions(void);
+void test_process_isolation_mmap_returns_distinct_addresses(void);
+void test_process_isolation_mmap_rejects_hint_nonzero(void);
+void test_process_isolation_mmap_rejects_unknown_flags(void);
+void test_process_isolation_zero_process_returns_false(void);
+void test_window_abi_event_layout_is_12_bytes(void);
+void test_window_abi_event_types_match_documented_numbers(void);
+void test_window_abi_create_window_for_pid_assigns_owner(void);
+void test_window_abi_focus_window_raises_z_order(void);
+void test_window_abi_focus_no_focus_window_rejected(void);
+void test_window_abi_window_for_pid_skips_no_owner(void);
+void test_window_abi_window_for_pid_skips_skip_taskbar(void);
 
 int main(void) {
     UNITY_BEGIN();
@@ -449,6 +465,22 @@ int main(void) {
     RUN_TEST(test_virtio_blk_probe_rejects_non_block_device);
     RUN_TEST(test_virtio_blk_probe_range_finds_later_transport);
     RUN_TEST(test_virtio_blk_init_programs_modern_queue);
+    RUN_TEST(test_syscall_abi_implemented_numbers_match_dispatch);
+    RUN_TEST(test_syscall_abi_ranges_do_not_overlap);
+    RUN_TEST(test_syscall_abi_error_codes_match_documented_constants);
+    RUN_TEST(test_syscall_abi_user_range_validation_rejects_out_of_region);
+    RUN_TEST(test_process_isolation_two_processes_have_independent_regions);
+    RUN_TEST(test_process_isolation_mmap_returns_distinct_addresses);
+    RUN_TEST(test_process_isolation_mmap_rejects_hint_nonzero);
+    RUN_TEST(test_process_isolation_mmap_rejects_unknown_flags);
+    RUN_TEST(test_process_isolation_zero_process_returns_false);
+    RUN_TEST(test_window_abi_event_layout_is_12_bytes);
+    RUN_TEST(test_window_abi_event_types_match_documented_numbers);
+    RUN_TEST(test_window_abi_create_window_for_pid_assigns_owner);
+    RUN_TEST(test_window_abi_focus_window_raises_z_order);
+    RUN_TEST(test_window_abi_focus_no_focus_window_rejected);
+    RUN_TEST(test_window_abi_window_for_pid_skips_no_owner);
+    RUN_TEST(test_window_abi_window_for_pid_skips_skip_taskbar);
 
     return UNITY_END();
 }
