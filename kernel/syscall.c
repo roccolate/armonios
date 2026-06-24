@@ -5,57 +5,24 @@
 #include "drivers/board.h"
 #include "input/input.h"
 #include "kernel/console.h"
+#include "kernel/exceptions.h"
 #include "kernel/gui.h"
 #include "kernel/ipc.h"
 #include "kernel/mm/pmm.h"
 #include "kernel/print.h"
 #include "kernel/process.h"
 #include "kernel/sched/sched.h"
+#include "kernel/syscall_numbers.h"
 #include "kernel/timer/timer.h"
 #include "kernel/user_demo.h"
 #include "kernel/user_vm.h"
 #include "kernel/vfs.h"
 #include "uart/pl011.h"
 
-#define SYS_EXIT  1ULL
-#define SYS_YIELD 2ULL
-#define SYS_GETPID 3ULL
-#define SYS_SPAWN 4ULL
-#define SYS_WAIT  6ULL
-#define SYS_KILL  7ULL
-#define SYS_SPAWN_ARGV 8ULL
-#define SYS_OPEN  40ULL
-#define SYS_CLOSE 41ULL
-#define SYS_READ  42ULL
-#define SYS_MMAP 20ULL
-#define SYS_MUNMAP 21ULL
-#define SYS_WRITE 43ULL
-#define SYS_SEEK  44ULL
-#define SYS_STAT  45ULL
-#define SYS_READDIR 46ULL
-#define SYS_UNLINK 47ULL
-#define SYS_RENAME 48ULL
-#define SYS_IPC_SEND 60ULL
-#define SYS_IPC_RECV 61ULL
-#define SYS_WINDOW_CREATE    70ULL
-#define SYS_WINDOW_DESTROY   71ULL
-#define SYS_WINDOW_DRAW_TEXT 72ULL
-#define SYS_WINDOW_DRAW_RECT 73ULL
-#define SYS_WINDOW_EVENT     74ULL
-#define SYS_WINDOW_SET_TITLE 75ULL
-#define SYS_WINDOW_REDRAW    76ULL
-#define SYS_WINDOW_FOCUS     77ULL
-#define SYS_WINDOW_FOR_PID   78ULL
-#define SYS_CURSOR_SET_SHAPE 79ULL
-#define SYS_WINDOW_FLUSH     80ULL
-#define SYS_TIMEINFO 100ULL
-#define SYS_MEMINFO 101ULL
-#define SYS_PROCLIST 102ULL
-
+#define FD_STDIN  0ULL
 #define FD_STDOUT 1ULL
 #define FD_STDERR 2ULL
-#define FD_STDIN  0ULL
-#define FD_FILE_BASE 3LL
+#define FD_FILE_BASE 3ULL
 
 #define ERR_NOENT (-3LL)
 #define ERR_BADF  (-5LL)
