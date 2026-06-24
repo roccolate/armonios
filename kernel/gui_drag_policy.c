@@ -2,9 +2,49 @@
 
 #include "kernel/gui.h"
 
+static int str_eq(const char *a, const char *b) {
+    uint32_t i = 0;
+
+    if (a == 0 || b == 0) {
+        return 0;
+    }
+
+    for (;;) {
+        if (a[i] != b[i]) {
+            return 0;
+        }
+        if (a[i] == '\0') {
+            return 1;
+        }
+        i++;
+    }
+}
+
+static uint32_t effective_window_flags(const gui_window_t *window) {
+    uint32_t flags;
+
+    if (window == 0 || window->used == 0) {
+        return 0;
+    }
+
+    flags = window->flags;
+
+    /* Bootstrap policy for the built-in taskbar. The structural field now
+     * exists, but userland does not yet have a SET_FLAGS syscall. Until that
+     * ABI lands, the panel title gives the window manager a stable way to
+     * classify the desktop dock without relying on geometry. */
+    if (str_eq(window->title, "panel")) {
+        flags |= GUI_WINDOW_DOCK | GUI_WINDOW_NO_FOCUS |
+                 GUI_WINDOW_NO_DRAG | GUI_WINDOW_SKIP_TASKBAR;
+    }
+
+    return flags;
+}
+
 void gui_drag_start(gui_desktop_t *desktop, uint32_t window_id,
                     int32_t off_x, int32_t off_y) {
     gui_window_t *window;
+    uint32_t flags;
 
     if (desktop == 0 || window_id >= GUI_MAX_WINDOWS ||
         desktop->windows[window_id].used == 0) {
@@ -12,18 +52,57 @@ void gui_drag_start(gui_desktop_t *desktop, uint32_t window_id,
     }
 
     window = &desktop->windows[window_id];
+    flags = effective_window_flags(window);
 
-    /* Dock/panel-style windows have no kernel title bar and should not
-     * behave like draggable application windows. Titled windows drag only
-     * from their title bar, matching normal desktop window-manager policy. */
-    if (window->title_h == 0U || off_y < 0 ||
-        (uint32_t)off_y >= window->title_h) {
+    if ((flags & GUI_WINDOW_NO_DRAG) != 0U) {
+        return;
+    }
+
+    /* Titled windows drag only from their title bar. Untitled normal windows
+     * keep the legacy behavior and can drag from their content area. */
+    if (window->title_h > 0U &&
+        (off_y < 0 || (uint32_t)off_y >= window->title_h)) {
         return;
     }
 
     desktop->drag_window_id = window_id;
     desktop->drag_off_x = off_x;
     desktop->drag_off_y = off_y;
+}
+
+int gui_focus_window(gui_desktop_t *desktop, uint32_t window_id) {
+    uint32_t prev;
+    gui_window_t *window;
+
+    if (desktop == 0 || window_id >= GUI_MAX_WINDOWS ||
+        desktop->windows[window_id].used == 0) {
+        return -1;
+    }
+
+    window = &desktop->windows[window_id];
+    if ((effective_window_flags(window) & GUI_WINDOW_NO_FOCUS) != 0U) {
+        /* Dock/taskbar windows still receive mouse events via gui_handle_input,
+         * but they do not become the active app and do not raise above normal
+         * windows just because the user clicked inside them. */
+        gui_damage_add(desktop, (int32_t)window->x, (int32_t)window->y,
+                       (int32_t)window->w, (int32_t)window->h);
+        return 0;
+    }
+
+    prev = desktop->focused_window_id;
+    desktop->focused_window_id = window_id;
+    window->z = desktop->next_z++;
+
+    if (prev != GUI_NO_WINDOW && prev < GUI_MAX_WINDOWS &&
+        desktop->windows[prev].used != 0) {
+        gui_window_t *old = &desktop->windows[prev];
+        gui_damage_add(desktop, (int32_t)old->x, (int32_t)old->y,
+                       (int32_t)old->w, (int32_t)old->h);
+    }
+
+    gui_damage_add(desktop, (int32_t)window->x, (int32_t)window->y,
+                   (int32_t)window->w, (int32_t)window->h);
+    return 0;
 }
 
 int gui_window_push_event(gui_window_t *window, uint32_t type,
