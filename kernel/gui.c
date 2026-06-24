@@ -1117,49 +1117,165 @@ static void gui_draw_window(fb_t *fb, const gui_desktop_t *desktop,
     }
 }
 
-void gui_draw(gui_desktop_t *desktop) {
-    uint32_t height;
-    uint32_t bottom_color;
-    uint32_t last_z;
+/*
+ * Find the next used window covering (x, row) whose left edge is at or
+ * after x. Returns the window index or GUI_MAX_WINDOWS if none. Used by
+ * the full-redraw path to skip window spans when painting the gradient.
+ */
+static uint32_t gui_next_window_at_or_after(const gui_desktop_t *desktop,
+                                            uint32_t row, uint32_t x) {
+    uint32_t best = GUI_MAX_WINDOWS;
+    uint32_t best_x = UINT32_MAX;
+    for (uint32_t i = 0; i < GUI_MAX_WINDOWS; i++) {
+        const gui_window_t *w = &desktop->windows[i];
+        if (w->used == 0) {
+            continue;
+        }
+        if (w->y > row || (w->y + w->h) <= row) {
+            continue;
+        }
+        if (w->x + w->w <= x) {
+            continue;
+        }
+        if (w->x >= x && w->x < best_x) {
+            best = i;
+            best_x = w->x;
+        }
+    }
+    return best;
+}
 
+static uint32_t gui_next_window_above_z(const gui_desktop_t *desktop,
+                                        uint32_t min_z) {
+    uint32_t best = GUI_MAX_WINDOWS;
+    uint32_t best_z = UINT32_MAX;
+
+    for (uint32_t i = 0; i < GUI_MAX_WINDOWS; i++) {
+        const gui_window_t *window = &desktop->windows[i];
+        if (window->used == 0 || window->z <= min_z) {
+            continue;
+        }
+        if (window->z < best_z) {
+            best = i;
+            best_z = window->z;
+        }
+    }
+
+    return best;
+}
+
+void gui_draw(gui_desktop_t *desktop) {
     if (desktop == 0 || desktop->fb == 0) {
         return;
     }
 
-    height = desktop->fb->height;
-    bottom_color = gui_blend_color(desktop->background_color, 0xff000000U,
-                                   3U, 4U);
-    for (uint32_t row = 0; row < height; row++) {
-        uint32_t color = gui_blend_color(desktop->background_color,
-                                         bottom_color, row, height - 1U);
-        fb_fillrect(desktop->fb, 0, row, desktop->fb->width, 1U, color);
-    }
+    /* "Full" sentinel: take the cheap route of repainting the entire
+     * framebuffer. The damage list is ignored because the cost of
+     * walking many small rects would exceed the cost of one full pass
+     * once the bursts accumulate. */
+    if (desktop->damage_full) {
+        uint32_t bottom_color;
+        uint32_t height;
+        uint32_t row;
+        uint32_t last_z;
 
-    last_z = 0;
-    for (;;) {
-        uint32_t best = GUI_MAX_WINDOWS;
-        uint32_t best_z = UINT32_MAX;
-        for (uint32_t i = 0; i < GUI_MAX_WINDOWS; i++) {
-            const gui_window_t *window = &desktop->windows[i];
-            if (window->used == 0 || window->z <= last_z) {
-                continue;
-            }
-            if (window->z < best_z) {
-                best = i;
-                best_z = window->z;
+        height = desktop->fb->height;
+        bottom_color = gui_blend_color(desktop->background_color,
+                                       0xff000000U, 3U, 4U);
+        for (row = 0; row < height; row++) {
+            uint32_t x = 0;
+            while (x < desktop->fb->width) {
+                uint32_t w = gui_next_window_at_or_after(desktop, row, x);
+                uint32_t next;
+                if (w == GUI_MAX_WINDOWS) {
+                    next = desktop->fb->width;
+                } else {
+                    next = desktop->windows[w].x;
+                }
+                if (next > x) {
+                    uint32_t color = gui_blend_color(
+                        desktop->background_color, bottom_color, row,
+                        height - 1U);
+                    fb_fillrect(desktop->fb, x, row, next - x, 1U, color);
+                }
+                if (w == GUI_MAX_WINDOWS) {
+                    break;
+                }
+                x = desktop->windows[w].x + desktop->windows[w].w;
             }
         }
-        if (best == GUI_MAX_WINDOWS) {
-            break;
+        last_z = 0;
+        for (;;) {
+            uint32_t i = gui_next_window_above_z(desktop, last_z);
+            if (i == GUI_MAX_WINDOWS) {
+                break;
+            }
+            gui_draw_window(desktop->fb, desktop, i, &desktop->windows[i]);
+            last_z = desktop->windows[i].z;
         }
-        gui_draw_window(desktop->fb, desktop, best,
-                        &desktop->windows[best]);
-        last_z = best_z;
+        if (desktop->cursor.visible) {
+            gui_draw_cursor(desktop->fb, desktop->cursor.x,
+                            desktop->cursor.y, desktop->cursor.shape);
+        }
+        return;
     }
 
-    if (desktop->cursor.visible != 0U) {
-        gui_draw_cursor(desktop->fb, desktop->cursor.x, desktop->cursor.y,
-                        desktop->cursor.shape);
+    /* Partial-redraw path: walk the damage list and repaint each rect.
+     * The gradient is painted without skipping window spans (it is
+     * cheap; one fillrect per row) and the windows are then repainted
+     * in z-order, which overdraws where they overlap. The visual
+     * result matches the full path; the per-row cost is proportional
+     * to the damage area instead of the framebuffer size. */
+    for (uint32_t i = 0; i < desktop->damage_count; i++) {
+        const damage_rect_t *r = &desktop->damage_rects[i];
+        int32_t x0 = r->x;
+        int32_t y0 = r->y;
+        int32_t x1 = r->x + r->w;
+        int32_t y1 = r->y + r->h;
+        if (x0 < 0) {
+            x0 = 0;
+        }
+        if (y0 < 0) {
+            y0 = 0;
+        }
+        if (x1 > (int32_t)desktop->fb->width) {
+            x1 = (int32_t)desktop->fb->width;
+        }
+        if (y1 > (int32_t)desktop->fb->height) {
+            y1 = (int32_t)desktop->fb->height;
+        }
+        if (x1 <= x0 || y1 <= y0) {
+            continue;
+        }
+        uint32_t height = desktop->fb->height;
+        uint32_t bottom_color = gui_blend_color(desktop->background_color,
+                                                0xff000000U, 3U, 4U);
+        for (int32_t row = y0; row < y1; row++) {
+            uint32_t color = gui_blend_color(desktop->background_color,
+                                             bottom_color, (uint32_t)row,
+                                             height - 1U);
+            fb_fillrect(desktop->fb, (uint32_t)x0, (uint32_t)row,
+                        (uint32_t)(x1 - x0), 1U, color);
+        }
+        uint32_t last_z = 0;
+        for (;;) {
+            uint32_t wi = gui_next_window_above_z(desktop, last_z);
+            if (wi == GUI_MAX_WINDOWS) {
+                break;
+            }
+            gui_draw_window(desktop->fb, desktop, wi, &desktop->windows[wi]);
+            last_z = desktop->windows[wi].z;
+        }
+        if (desktop->cursor.visible) {
+            int32_t cx0 = desktop->cursor.x;
+            int32_t cy0 = desktop->cursor.y;
+            int32_t cx1 = cx0 + (int32_t)GUI_CURSOR_W;
+            int32_t cy1 = cy0 + (int32_t)GUI_CURSOR_H;
+            if (cx1 > x0 && cx0 < x1 && cy1 > y0 && cy0 < y1) {
+                gui_draw_cursor(desktop->fb, desktop->cursor.x,
+                                desktop->cursor.y, desktop->cursor.shape);
+            }
+        }
     }
 }
 
@@ -1200,10 +1316,17 @@ void gui_request_redraw(void) {
 
 void gui_damage_add(gui_desktop_t *desktop, int32_t x, int32_t y,
                     int32_t w, int32_t h) {
-    if (desktop == 0 || desktop->fb == 0 || w <= 0 || h <= 0) {
+    if (desktop == 0 || desktop->fb == 0) {
         return;
     }
-
+    if (desktop->damage_full) {
+        return;
+    }
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+    int32_t fb_w = (int32_t)desktop->fb->width;
+    int32_t fb_h = (int32_t)desktop->fb->height;
     if (x < 0) {
         w += x;
         x = 0;
@@ -1212,22 +1335,64 @@ void gui_damage_add(gui_desktop_t *desktop, int32_t x, int32_t y,
         h += y;
         y = 0;
     }
-    if (x >= (int32_t)desktop->fb->width ||
-        y >= (int32_t)desktop->fb->height) {
+    if (x >= fb_w || y >= fb_h) {
         return;
     }
-    if (x + w > (int32_t)desktop->fb->width) {
-        w = (int32_t)desktop->fb->width - x;
+    if (x + w > fb_w) {
+        w = fb_w - x;
     }
-    if (y + h > (int32_t)desktop->fb->height) {
-        h = (int32_t)desktop->fb->height - y;
+    if (y + h > fb_h) {
+        h = fb_h - y;
     }
     if (w <= 0 || h <= 0) {
         return;
     }
-
-    desktop->damage_full = 1;
-    desktop->damage_count = 0;
+    /* Fast path: a rect that covers the whole framebuffer collapses to
+     * the sentinel and short-circuits future adds. */
+    if (x == 0 && y == 0 && w == fb_w && h == fb_h) {
+        desktop->damage_full = 1;
+        desktop->damage_count = 0;
+        return;
+    }
+    /* Merge pass: scan existing rects, absorbing any that overlap or touch
+     * the new one and growing the new rect to cover them. Remove the
+     * absorbed entries so the list stays compact. */
+    for (uint32_t i = 0; i < desktop->damage_count; ) {
+        damage_rect_t *r = &desktop->damage_rects[i];
+        int32_t ax1 = x + w;
+        int32_t ay1 = y + h;
+        int32_t bx1 = r->x + r->w;
+        int32_t by1 = r->y + r->h;
+        if (x <= bx1 && ax1 >= r->x && y <= by1 && ay1 >= r->y) {
+            /* Overlap or touch: unify. */
+            int32_t nx0 = x < r->x ? x : r->x;
+            int32_t ny0 = y < r->y ? y : r->y;
+            int32_t nx1 = ax1 > bx1 ? ax1 : bx1;
+            int32_t ny1 = ay1 > by1 ? ay1 : by1;
+            x = nx0;
+            y = ny0;
+            w = nx1 - nx0;
+            h = ny1 - ny0;
+            /* Drop the absorbed entry by shifting the tail down. */
+            for (uint32_t k = i; k + 1U < desktop->damage_count; k++) {
+                desktop->damage_rects[k] = desktop->damage_rects[k + 1U];
+            }
+            desktop->damage_count--;
+            /* Do not advance i: re-check the new occupant at slot i. */
+            continue;
+        }
+        i++;
+    }
+    if (desktop->damage_count >= GUI_DAMAGE_MAX) {
+        desktop->damage_full = 1;
+        desktop->damage_count = 0;
+        return;
+    }
+    desktop->damage_rects[desktop->damage_count].x = x;
+    desktop->damage_rects[desktop->damage_count].y = y;
+    desktop->damage_rects[desktop->damage_count].w = w;
+    desktop->damage_rects[desktop->damage_count].h = h;
+    desktop->damage_count++;
     g_gui_dirty = 1;
 }
 
