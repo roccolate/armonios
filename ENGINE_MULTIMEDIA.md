@@ -43,6 +43,78 @@ numbers are planning budgets, not hard ABI guarantees:
 A simple profiler should land before serious engine optimization so each
 subsystem can report its per-frame cost.
 
+## Phase 8 - Userland C SDK
+
+Before adding larger tools or multimedia demos, introduce a tiny native C SDK for
+KolibriARM user applications. The goal is not POSIX compatibility yet; the goal
+is to stop writing large user apps directly in AArch64 assembly and to give
+future tools a stable syscall and GUI wrapper layer.
+
+Initial SDK tree:
+
+```text
+sdk/
+  crt0.S
+  syscalls.h
+  syscall.S
+  kolibriarm.h
+  gui.c
+  gui.h
+  string.c
+  app.ld
+```
+
+Initial C app examples:
+
+```text
+programs/apps_c/hello_c/main.c
+programs/apps_c/clock/main.c
+```
+
+Initial scope:
+
+- `crt0.S` provides the user entry point, calls `main(argc, argv)`, then exits
+  through `SYS_EXIT`.
+- `syscall.S` provides a small generic syscall trampoline using `svc #0`.
+- `syscalls.h` defines syscall numbers and kernel ABI constants in one place.
+- `kolibriarm.h` exposes common userland helpers such as `ka_exit`, `ka_yield`,
+  `ka_spawn`, `ka_getpid`, `ka_read`, `ka_write`, `ka_timeinfo`, `ka_meminfo`,
+  and `ka_proclist`.
+- `gui.h` / `gui.c` wrap the window syscalls into safer app-facing helpers such
+  as `ka_window_create`, `ka_window_destroy`, `ka_draw_text`, `ka_draw_rect`,
+  `ka_window_event`, `ka_window_redraw`, and `ka_window_focus`.
+- `string.c` provides only the tiny routines needed by bootstrap apps, such as
+  `strlen`, `strcmp`, `strncmp`, `memcpy`, `memset`, and integer formatting.
+- `app.ld` defines the user app image layout expected by the current loader.
+- Keep the SDK freestanding: no libc dependency until the app ABI, VFS, loader,
+  and memory model are stable.
+
+Candidate API shape:
+
+```c
+int ka_window_create(int x, int y, int w, int h, const char *title);
+void ka_draw_text(int win, int x, int y, uint32_t color, const char *text);
+void ka_draw_rect(int win, int x, int y, int w, int h, uint32_t color);
+int ka_window_event(int win, ka_event_t *events, int max_events);
+void ka_window_redraw(int win);
+int ka_spawn(const char *path);
+void ka_yield(void);
+void ka_exit(int code);
+```
+
+Migration rule:
+
+- Keep tiny smoke-test apps in assembly (`hello`, `loop`, `fault`) because they
+  are useful for ABI and exception testing.
+- New useful tools should default to C once the SDK exists.
+- Existing large assembly apps (`panel`, `shell`, `editor`, `monitor`) should be
+  stabilized first, then gradually rewritten or replaced with C versions.
+- Kernel low-level entry code, exception vectors, context switching, EL0 entry,
+  and `crt0.S` remain assembly.
+
+This SDK is a prerequisite for the multimedia phases below: the engine should be
+used from C apps, not from handwritten syscall-heavy assembly.
+
 ## Phase 9 - Display Backbone
 
 Build on the existing `drivers/fb` and `virtio-gpu` work instead of replacing
