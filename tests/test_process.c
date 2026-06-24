@@ -8,7 +8,16 @@ void test_process_user_range_contains_registered_regions(void) {
 
     process_init(&process, 7, "test");
     TEST_ASSERT_EQUAL_UINT64(7, process.pid);
-    TEST_ASSERT_TRUE(process.name == (const char *)"test");
+    /* process_init copies the name into process->name_storage, so
+     * the pointer is not the caller's literal any more. The contract
+     * is "the name survives until process_release or the next init,
+     * even if the caller's buffer goes away". Compare the value. */
+    TEST_ASSERT_NOT_NULL(process.name);
+    TEST_ASSERT_TRUE(process.name[0] == 't' &&
+                     process.name[1] == 'e' &&
+                     process.name[2] == 's' &&
+                     process.name[3] == 't' &&
+                     process.name[4] == '\0');
     TEST_ASSERT_EQUAL_UINT64(PROCESS_READY, process.state);
     TEST_ASSERT_EQUAL_UINT64(0, process.sp);
     TEST_ASSERT_EQUAL_UINT64(0, process.pc);
