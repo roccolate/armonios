@@ -215,6 +215,22 @@ $(BUILD_DIR)/$(APPS_DIR)/editor.elf: $(BUILD_DIR)/$(APPS_DIR)/editor.o \
 	    $(BUILD_DIR)/$(APPS_DIR)/editor_end.o \
 	    -o $@
 
+$(BUILD_DIR)/$(APPS_DIR)/shell.elf: $(BUILD_DIR)/$(APPS_DIR)/shell.o \
+    $(BUILD_DIR)/$(APPS_DIR)/shell_header.o \
+    $(BUILD_DIR)/$(LIBKARM_DIR)/syscall.o \
+    $(BUILD_DIR)/$(LIBKARM_DIR)/crt0.o \
+    $(BUILD_DIR)/$(LIBKARM_DIR)/string.o \
+    $(BUILD_DIR)/$(APPS_DIR)/shell_end.o \
+    $(APPS_DIR)/image.ld
+	$(LD) -T $(APPS_DIR)/image.ld -nostdlib \
+	    $(BUILD_DIR)/$(APPS_DIR)/shell.o \
+	    $(BUILD_DIR)/$(APPS_DIR)/shell_header.o \
+	    $(BUILD_DIR)/$(LIBKARM_DIR)/syscall.o \
+	    $(BUILD_DIR)/$(LIBKARM_DIR)/crt0.o \
+	    $(BUILD_DIR)/$(LIBKARM_DIR)/string.o \
+	    $(BUILD_DIR)/$(APPS_DIR)/shell_end.o \
+	    -o $@
+
 $(BUILD_DIR)/$(APPS_DIR)/%.elf: $(BUILD_DIR)/$(APPS_DIR)/%.o $(APPS_COMMON_OBJ) $(APPS_DIR)/image.ld
 	$(LD) -T $(APPS_DIR)/image.ld -nostdlib \
 	    $(BUILD_DIR)/$(APPS_DIR)/$*.o $(APPS_COMMON_OBJ) -o $@
