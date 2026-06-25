@@ -119,27 +119,18 @@ verifies the round trip: pop the queue before any move, assert
 that a same-size move leaves the queue empty, then resize and
 assert the resize triple is sitting at the head.
 
-### 5. Minimize / maximize and taskbar focus controls — partial
+### 5. Minimize / maximize and taskbar focus controls — done
 
-The kernel-side half lands in this commit set. `GUI_EVENT_MINIMIZE`
-(7) and `GUI_EVENT_MAXIMIZE` (8) join the existing event ids;
-`gui_window_t` grows a `minimized` byte; the title bar draws
-three siblings (min, max, close) along the right edge; clicking
-any of them dispatches the right kernel path or event. Three new
-syscalls (`sys_window_minimize`, `sys_window_restore`,
-`sys_window_state`) let apps drive the same state from their own
-UI without going through the title-bar buttons. The compositor
-skips minimised windows in both the gradient-skip loop and
-`gui_draw_window`, so the desktop gradient shows through.
-
-The panel-side half (greyed running-apps slots + click-to-restore)
-is intentionally deferred: `programs/apps/panel.S` is still asm
-and the panel rebuild would be a separate migration commit along
-the lines of the clock / monitor / editor / shell work. Apps
-that handle `GUI_EVENT_MINIMIZE` already have everything they
-need to provide their own restore UI; until the panel is
-migrated, the running-apps row stays focused on visibility, not
-state.
+The kernel-side half (syscalls 83/84/85, the three title-bar
+siblings, the per-window minimised flag) landed earlier. The
+panel-side half landed with the panel migration to libkarm: the
+panel now calls `gui_window_state` for each running-apps slot and
+renders minimised windows in a greyed colour (`COL_RUN_MIN`), and
+the click handler routes minimised slots to
+`gui_window_restore` instead of `SYS_WINDOW_FOCUS`. The
+visible-side affordance is now complete: minimise a window via
+its title-bar button, the panel slot greys out, click the slot,
+the window reappears with the right z-order.
 
 ### 6. Per-window cursor region registry
 
