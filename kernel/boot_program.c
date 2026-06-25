@@ -2,26 +2,16 @@
 
 #include <stdint.h>
 
-extern char __app_hello_start[];
-extern char __app_hello_end[];
-extern char __app_loop_start[];
-extern char __app_loop_end[];
-extern char __app_fault_start[];
-extern char __app_fault_end[];
 extern char __app_shell_start[];
 extern char __app_shell_end[];
 extern char __app_editor_start[];
 extern char __app_editor_end[];
 extern char __app_monitor_start[];
 extern char __app_monitor_end[];
-extern char __app_win_start[];
-extern char __app_win_end[];
 extern char __app_panel_start[];
 extern char __app_panel_end[];
 extern char __app_clock_start[];
 extern char __app_clock_end[];
-extern char __app_kos_hello_start[];
-extern char __app_kos_hello_end[];
 
 typedef struct {
     const char *name;
@@ -30,21 +20,6 @@ typedef struct {
 } boot_program_source_t;
 
 static const boot_program_source_t g_boot_programs[] = {
-    {
-        .name = "hello",
-        .image_start = (const uint8_t *)(const void *)__app_hello_start,
-        .image_end = (const uint8_t *)(const void *)__app_hello_end,
-    },
-    {
-        .name = "loop",
-        .image_start = (const uint8_t *)(const void *)__app_loop_start,
-        .image_end = (const uint8_t *)(const void *)__app_loop_end,
-    },
-    {
-        .name = "fault",
-        .image_start = (const uint8_t *)(const void *)__app_fault_start,
-        .image_end = (const uint8_t *)(const void *)__app_fault_end,
-    },
     {
         .name = "shell",
         .image_start = (const uint8_t *)(const void *)__app_shell_start,
@@ -61,11 +36,6 @@ static const boot_program_source_t g_boot_programs[] = {
         .image_end = (const uint8_t *)(const void *)__app_monitor_end,
     },
     {
-        .name = "win",
-        .image_start = (const uint8_t *)(const void *)__app_win_start,
-        .image_end = (const uint8_t *)(const void *)__app_win_end,
-    },
-    {
         .name = "panel",
         .image_start = (const uint8_t *)(const void *)__app_panel_start,
         .image_end = (const uint8_t *)(const void *)__app_panel_end,
@@ -74,11 +44,6 @@ static const boot_program_source_t g_boot_programs[] = {
         .name = "clock",
         .image_start = (const uint8_t *)(const void *)__app_clock_start,
         .image_end = (const uint8_t *)(const void *)__app_clock_end,
-    },
-    {
-        .name = "kos_hello",
-        .image_start = (const uint8_t *)(const void *)__app_kos_hello_start,
-        .image_end = (const uint8_t *)(const void *)__app_kos_hello_end,
     },
 };
 

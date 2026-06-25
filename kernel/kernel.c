@@ -117,7 +117,7 @@ static void init_vfs(void) {
         uart_puts("VFS tmpfs: failed\n");
     }
 
-    if (bootfs_read("hello", 0, magic, sizeof(magic),
+    if (bootfs_read("shell", 0, magic, sizeof(magic),
                     &bytes_read) == 0 && bytes_read == sizeof(magic)) {
         uart_puts("bootfs read: ok\n");
     } else {
@@ -125,7 +125,7 @@ static void init_vfs(void) {
     }
 
     bytes_read = 0;
-    if (vfs_read("/kolibri/hello", 0, magic, sizeof(magic),
+    if (vfs_read("/kolibri/shell", 0, magic, sizeof(magic),
                  &bytes_read) == 0 && bytes_read == sizeof(magic)) {
         uart_puts("VFS read: ok\n");
     } else {

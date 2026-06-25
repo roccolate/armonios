@@ -88,10 +88,10 @@ Input is queued but still early:
 
 ## Userland And Apps
 
-The tree already contains separate assembly app sources under `programs/apps/`
-for `hello`, `loop`, `fault`, `shell`, `editor`, `monitor`, `win`, `panel`,
-and `clock`. The build embeds flat app blobs into the kernel and exposes them
-through bootfs/VFS under `/kolibri/<name>`. The first boot app is `panel`,
+The tree contains C app sources under `programs/apps/` for `shell`,
+`editor`, `monitor`, `clock`, and `panel`. The build embeds flat app blobs
+into the kernel and exposes them through bootfs/VFS under
+`/kolibri/<name>`. The first boot app is `panel`,
 which owns the taskbar window and launches other apps.
 
 `shell`, `clock`, `editor`, and `monitor` are windowed apps. The shell has a

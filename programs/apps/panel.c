@@ -36,11 +36,11 @@
 #define TITLE_BAR_H      0                    // panel has no title bar
 #define BTN_H            24
 #define BTN_Y           (PANEL_Y + 4)         // 428
-// 8 launchers must fit in 640 px with a 4 px left margin:
-//   4 + 8*BTN_W + 7*BTN_GAP == 640 -> BTN_W=76, BTN_GAP=4
-#define BTN_W            76
+// 5 launchers must fit in 640 px with a 4 px left margin:
+//   4 + 5*BTN_W + 4*BTN_GAP == 640 -> BTN_W=124, BTN_GAP=4
+#define BTN_W           124
 #define BTN_GAP           4
-#define BTN_COUNT         8
+#define BTN_COUNT         5
 #define BTN_ROW_W       (BTN_COUNT * BTN_W + (BTN_COUNT - 1) * BTN_GAP)
 #define PANEL_CONTENT_W SCREEN_W
 #define PANEL_CONTENT_H PANEL_H
@@ -386,14 +386,11 @@ static void init_button_labels(panel_state_t *p) {
      * labels[0] would read as NULL from beyond image_size and the
      * strncpy walk would corrupt the stack. Inlining keeps every
      * literal in .user.image.rodata. */
-    copy_label(p->button_labels[0], LABEL_CAP, "hello");
-    copy_label(p->button_labels[1], LABEL_CAP, "loop");
-    copy_label(p->button_labels[2], LABEL_CAP, "fault");
-    copy_label(p->button_labels[3], LABEL_CAP, "shell");
-    copy_label(p->button_labels[4], LABEL_CAP, "editor");
-    copy_label(p->button_labels[5], LABEL_CAP, "monitor");
-    copy_label(p->button_labels[6], LABEL_CAP, "win");
-    copy_label(p->button_labels[7], LABEL_CAP, "clock");
+    copy_label(p->button_labels[0], LABEL_CAP, "shell");
+    copy_label(p->button_labels[1], LABEL_CAP, "editor");
+    copy_label(p->button_labels[2], LABEL_CAP, "monitor");
+    copy_label(p->button_labels[3], LABEL_CAP, "clock");
+    copy_label(p->button_labels[4], LABEL_CAP, "panel");
 }
 
 int main(int argc, char **argv) {

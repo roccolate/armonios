@@ -669,7 +669,7 @@ void test_vfs_unlink_rejects_non_fat_paths(void) {
     TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
                              (uint64_t)vfs_unlink("/fat/"));
     TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
-                             (uint64_t)vfs_unlink("/kolibri/hello"));
+                             (uint64_t)vfs_unlink("/kolibri/shell"));
     TEST_ASSERT_EQUAL_UINT64((uint64_t)-1, (uint64_t)vfs_unlink(0));
 }
 

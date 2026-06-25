@@ -15,24 +15,6 @@ SECTIONS {
         *(.text*)
     } :text
 
-    .app_hello : ALIGN(16) {
-        __app_hello_start = .;
-        KEEP(*(.app_hello_blob*))
-        __app_hello_end = .;
-    } :text
-
-    .app_loop : ALIGN(16) {
-        __app_loop_start = .;
-        KEEP(*(.app_loop_blob*))
-        __app_loop_end = .;
-    } :text
-
-    .app_fault : ALIGN(16) {
-        __app_fault_start = .;
-        KEEP(*(.app_fault_blob*))
-        __app_fault_end = .;
-    } :text
-
     .app_shell : ALIGN(16) {
         __app_shell_start = .;
         KEEP(*(.app_shell_blob*))
@@ -51,12 +33,6 @@ SECTIONS {
         __app_monitor_end = .;
     } :text
 
-    .app_win : ALIGN(16) {
-        __app_win_start = .;
-        KEEP(*(.app_win_blob*))
-        __app_win_end = .;
-    } :text
-
     .app_panel : ALIGN(16) {
         __app_panel_start = .;
         KEEP(*(.app_panel_blob*))
@@ -67,12 +43,6 @@ SECTIONS {
         __app_clock_start = .;
         KEEP(*(.app_clock_blob*))
         __app_clock_end = .;
-    } :text
-
-    .app_kos_hello : ALIGN(16) {
-        __app_kos_hello_start = .;
-        KEEP(*(.app_kos_hello_blob*))
-        __app_kos_hello_end = .;
     } :text
 
     .rodata : ALIGN(8) {

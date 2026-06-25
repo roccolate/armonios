@@ -15,7 +15,7 @@ KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 # 95000 covers the userland library migration (libkarm pulls in
 # crt0 + syscall + string per migrated app, which adds ~1 KB each).
 KERNEL_SIZE_LIMIT ?= 95000
-APPS := hello loop fault shell editor monitor win panel clock kos_hello
+APPS := shell editor monitor clock panel
 APPS_DIR := programs/apps
 APPS_COMMON_OBJ := $(BUILD_DIR)/$(APPS_DIR)/common.o
 APP_OBJS := $(addprefix $(BUILD_DIR)/$(APPS_DIR)/,$(addsuffix .o,$(APPS)))
@@ -267,8 +267,8 @@ $(MKFAT32_IMAGE): tools/mkfat32_image.c | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(HOST_CC) -Wall -Wextra -O2 $< -o $@
 
-$(VIRTIO_BLK_IMG): $(MKFAT32_IMAGE) $(BUILD_DIR)/$(APPS_DIR)/hello.bin | $(BUILD_DIR)
-	$(MKFAT32_IMAGE) $@ $(BUILD_DIR)/$(APPS_DIR)/hello.bin
+$(VIRTIO_BLK_IMG): $(MKFAT32_IMAGE) $(BUILD_DIR)/$(APPS_DIR)/shell.bin | $(BUILD_DIR)
+	$(MKFAT32_IMAGE) $@ $(BUILD_DIR)/$(APPS_DIR)/shell.bin
 
 entry-check: $(KERNEL_ELF)
 	@$(READELF) -h $(KERNEL_ELF) | grep "Entry point address:" | grep -q "$(LOAD_ADDR)"

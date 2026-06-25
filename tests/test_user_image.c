@@ -3,11 +3,11 @@
 #include "unity/unity.h"
 #include "../kernel/user_image.h"
 
-extern char __app_hello_start[];
+extern char __app_shell_start[];
 
 void test_user_image_entry_uses_base_plus_offset(void) {
     user_image_t image = {
-        .name = "hello",
+        .name = "shell",
         .base = 0x400000ULL,
         .size = 0x1000ULL,
         .entry_offset = 0x80ULL,
@@ -23,7 +23,7 @@ void test_user_image_entry_uses_base_plus_offset(void) {
 void test_user_image_prepare_process_registers_image_and_stack(void) {
     process_t process;
     user_image_t image = {
-        .name = "hello",
+        .name = "shell",
         .base = 0x500000ULL,
         .size = 0x2000ULL,
         .entry_offset = 0x100ULL,
@@ -112,15 +112,15 @@ void test_user_image_load_bootfs_flat_uses_named_boot_file(void) {
 
     TEST_ASSERT_EQUAL_UINT64(0,
                              (uint64_t)user_image_load_bootfs_flat(
-                                 &image, "bootfs-flat", "hello",
+                                 &image, "bootfs-flat", "shell",
                                  (uint64_t)(uintptr_t)loaded, sizeof(loaded),
                                  0));
     TEST_ASSERT_TRUE(image.name == (const char *)"bootfs-flat");
     TEST_ASSERT_EQUAL_UINT64((uint64_t)(uintptr_t)loaded, image.base);
-    TEST_ASSERT_EQUAL_UINT64((uint8_t)__app_hello_start[0], loaded[0]);
-    TEST_ASSERT_EQUAL_UINT64((uint8_t)__app_hello_start[1], loaded[1]);
-    TEST_ASSERT_EQUAL_UINT64((uint8_t)__app_hello_start[2], loaded[2]);
-    TEST_ASSERT_EQUAL_UINT64((uint8_t)__app_hello_start[3], loaded[3]);
+    TEST_ASSERT_EQUAL_UINT64((uint8_t)__app_shell_start[0], loaded[0]);
+    TEST_ASSERT_EQUAL_UINT64((uint8_t)__app_shell_start[1], loaded[1]);
+    TEST_ASSERT_EQUAL_UINT64((uint8_t)__app_shell_start[2], loaded[2]);
+    TEST_ASSERT_EQUAL_UINT64((uint8_t)__app_shell_start[3], loaded[3]);
 }
 
 void test_user_image_prepare_process_rejects_invalid_inputs(void) {

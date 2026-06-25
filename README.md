@@ -76,8 +76,8 @@ The current milestone is **Phase 10 — a real desktop**. Read
       as windowed desktop apps.
 - [x] Port KolibriOS's 8x8 font (`8X8ISXP`-shaped, ASCII 32-126).
 - [x] Accept the `KOS` flat format (header magic `0x00534F4B`) as a synonym
-      for our native `KLI1` header, with `programs/apps/kos_hello.S` as the
-      smallest cross-compatible demo.
+      for our native `KLI1` header. The KolibriOS-style KOS image loader is
+      exercised by the in-tree flat-image tests.
 - [x] USB HID foundations: PCI ECAM scan + BAR auto-assignment,
       UHCI driver with real control and interrupt-in transfers,
       boot-protocol HID report parser, descriptor walker, and a
@@ -155,9 +155,6 @@ make qemu
 # run editor myfile.txt    # passes myfile.txt as argv[1] to the editor
 # run monitor
 # run clock
-# run hello
-# run loop
-# run kos_hello            # uses the KolibriOS-style KOS flat header
 # kill last
 # exit
 

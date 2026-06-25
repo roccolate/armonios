@@ -104,11 +104,13 @@ void ka_exit(int code);
 
 Migration rule:
 
-- Keep tiny smoke-test apps in assembly (`hello`, `loop`, `fault`) because they
-  are useful for ABI and exception testing.
-- New useful tools should default to C once the SDK exists.
-- Existing large assembly apps (`panel`, `shell`, `editor`, `monitor`) should be
-  stabilized first, then gradually rewritten or replaced with C versions.
+- The C userland library (`programs/libkarm/`) is the supported userland
+  starting point. ABI and exception paths are exercised through the
+  in-tree unit tests, not through standalone userland apps.
+- Every shipping app is C + `libkarm`/`libkarmdesk`. The panel, shell,
+  editor, monitor, and clock have all been ported; the tiny AArch64
+  smoke-test apps (`hello.S`, `loop.S`, `fault.S`, `win.S`,
+  `kos_hello.S`) are gone.
 - Kernel low-level entry code, exception vectors, context switching, EL0 entry,
   and `crt0.S` remain assembly.
 
