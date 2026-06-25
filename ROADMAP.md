@@ -119,19 +119,27 @@ verifies the round trip: pop the queue before any move, assert
 that a same-size move leaves the queue empty, then resize and
 assert the resize triple is sitting at the head.
 
-### 5. Minimize / maximize and taskbar focus controls
+### 5. Minimize / maximize and taskbar focus controls — partial
 
-The title bar has only a close box. There is no minimize button, no
-maximize/restore, no taskbar-owned focus controls. The panel's
-running-apps row is clickable for `SYS_WINDOW_FOCUS`, but it does not
-expose minimize/restore affordances.
+The kernel-side half lands in this commit set. `GUI_EVENT_MINIMIZE`
+(7) and `GUI_EVENT_MAXIMIZE` (8) join the existing event ids;
+`gui_window_t` grows a `minimized` byte; the title bar draws
+three siblings (min, max, close) along the right edge; clicking
+any of them dispatches the right kernel path or event. Three new
+syscalls (`sys_window_minimize`, `sys_window_restore`,
+`sys_window_state`) let apps drive the same state from their own
+UI without going through the title-bar buttons. The compositor
+skips minimised windows in both the gradient-skip loop and
+`gui_draw_window`, so the desktop gradient shows through.
 
-Implementation sketch:
-- Define `GUI_EVENT_MINIMIZE` and `GUI_EVENT_MAXIMIZE` next to
-  `GUI_EVENT_CLOSE`. Map clicks on dedicated title-bar boxes to them.
-- Track `minimized` per window; skip it in `gui_draw` and grey the
-  corresponding panel slot.
-- Add a restore click region or double-click handler.
+The panel-side half (greyed running-apps slots + click-to-restore)
+is intentionally deferred: `programs/apps/panel.S` is still asm
+and the panel rebuild would be a separate migration commit along
+the lines of the clock / monitor / editor / shell work. Apps
+that handle `GUI_EVENT_MINIMIZE` already have everything they
+need to provide their own restore UI; until the panel is
+migrated, the running-apps row stays focused on visibility, not
+state.
 
 ### 6. Per-window cursor region registry
 
