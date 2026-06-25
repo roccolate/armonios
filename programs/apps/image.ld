@@ -5,5 +5,6 @@ SECTIONS {
         KEEP(*(.user.image.header*))
         *(.user.image.text* .text .text.*)
         *(.user.image.rodata* .rodata .rodata.*)
+        KEEP(*(.user.image.end*))
     }
 }
