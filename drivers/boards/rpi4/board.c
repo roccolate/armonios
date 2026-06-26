@@ -1,6 +1,7 @@
 #include "boards/rpi4/board.h"
 
 #include "irq/gicv2.h"
+#include "kernel/kernel_compiler.h"
 #include "kernel/mm/vmm.h"
 #include "storage/emmc.h"
 #include "uart/pl011.h"
@@ -12,7 +13,7 @@ static volatile uint32_t *mailbox_reg(uint32_t offset) {
     return (volatile uint32_t *)(RPI4_MAILBOX_BASE + offset);
 }
 
-__attribute__((unused)) static int mailbox_call(uint32_t channel, uint32_t *data) {
+KERNEL_UNUSED static int mailbox_call(uint32_t channel, uint32_t *data) {
     uint32_t r;
 
     *mailbox_reg(0x20) = 0;

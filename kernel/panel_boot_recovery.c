@@ -2,10 +2,6 @@
 
 #include <stddef.h>
 
-#include "kernel/panel_boot.h"
-#include "kernel/print.h"
-#include "uart/pl011.h"
-
 panel_boot_recovery_action_t panel_boot_recovery_decide(uint32_t attempts_used,
                                                        uint64_t last_exit_code) {
     (void)last_exit_code;
@@ -19,29 +15,35 @@ panel_boot_recovery_action_t panel_boot_recovery_decide(uint32_t attempts_used,
     return PANEL_BOOT_RECOVERY_CONTINUE;
 }
 
-uint64_t panel_boot_run_with_recovery(uint64_t memory_base, uint64_t memory_size,
-                                      panel_map_mmio_fn_t map_mmio) {
+static void panel_boot_recovery_log(panel_boot_recovery_log_fn_t log,
+                                    const char *line) {
+    if (log != 0) {
+        log(line);
+    }
+}
+
+uint64_t panel_boot_recovery_run(panel_boot_recovery_run_fn_t run, void *ctx,
+                                 panel_boot_recovery_log_fn_t log) {
     uint64_t last_exit = 0;
     uint32_t attempts = 0;
+
+    if (run == 0) {
+        panel_boot_recovery_log(log, "panel_boot: no run callback\n");
+        return 0;
+    }
 
     while (attempts < PANEL_BOOT_RECOVERY_MAX_ATTEMPTS) {
         attempts++;
 
         if (attempts == 1U) {
-            uart_puts("panel_boot: launching\n");
+            panel_boot_recovery_log(log, "panel_boot: launching\n");
         } else {
-            uart_puts("panel_boot: relaunching attempt ");
-            print_hex64(attempts);
-            uart_puts("\n");
+            panel_boot_recovery_log(log, "panel_boot: relaunching\n");
         }
 
-        last_exit = panel_boot_run(memory_base, memory_size, map_mmio);
+        last_exit = run(ctx);
 
-        uart_puts("panel_boot: exited code ");
-        print_hex64(last_exit);
-        uart_puts(" after ");
-        print_hex64(attempts);
-        uart_puts(" attempt(s)\n");
+        panel_boot_recovery_log(log, "panel_boot: exited\n");
 
         if (panel_boot_recovery_decide(attempts, last_exit) !=
             PANEL_BOOT_RECOVERY_CONTINUE) {
@@ -50,9 +52,7 @@ uint64_t panel_boot_run_with_recovery(uint64_t memory_base, uint64_t memory_size
     }
 
     if (attempts >= PANEL_BOOT_RECOVERY_MAX_ATTEMPTS) {
-        uart_puts("panel_boot: giving up after ");
-        print_hex64(attempts);
-        uart_puts(" attempts\n");
+        panel_boot_recovery_log(log, "panel_boot: giving up\n");
     }
 
     return last_exit;

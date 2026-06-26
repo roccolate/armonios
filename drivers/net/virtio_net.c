@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "kernel/kernel_compiler.h"
+
 #define VIRTIO_MMIO_MAGIC_VALUE 0x000
 #define VIRTIO_MMIO_VERSION     0x004
 #define VIRTIO_MMIO_DEVICE_ID   0x008
@@ -66,15 +68,15 @@ typedef struct {
     virtq_used_elem_t ring[VIRTIO_NET_QUEUE_SIZE];
 } virtq_used_t;
 
-static virtq_desc_t g_rx_desc[VIRTIO_NET_QUEUE_SIZE] __attribute__((aligned(16)));
-static virtq_avail_t g_rx_avail __attribute__((aligned(2)));
-static volatile virtq_used_t g_rx_used __attribute__((aligned(4)));
-static uint8_t g_rx_buf[VIRTIO_NET_QUEUE_SIZE][RX_BUF_SIZE] __attribute__((aligned(8)));
+static virtq_desc_t g_rx_desc[VIRTIO_NET_QUEUE_SIZE] KERNEL_ALIGNED(16);
+static virtq_avail_t g_rx_avail KERNEL_ALIGNED(2);
+static volatile virtq_used_t g_rx_used KERNEL_ALIGNED(4);
+static uint8_t g_rx_buf[VIRTIO_NET_QUEUE_SIZE][RX_BUF_SIZE] KERNEL_ALIGNED(8);
 
-static virtq_desc_t g_tx_desc[VIRTIO_NET_QUEUE_SIZE] __attribute__((aligned(16)));
-static virtq_avail_t g_tx_avail __attribute__((aligned(2)));
-static volatile virtq_used_t g_tx_used __attribute__((aligned(4)));
-static uint8_t g_tx_buf[VIRTIO_NET_QUEUE_SIZE][TX_BUF_SIZE] __attribute__((aligned(8)));
+static virtq_desc_t g_tx_desc[VIRTIO_NET_QUEUE_SIZE] KERNEL_ALIGNED(16);
+static virtq_avail_t g_tx_avail KERNEL_ALIGNED(2);
+static volatile virtq_used_t g_tx_used KERNEL_ALIGNED(4);
+static uint8_t g_tx_buf[VIRTIO_NET_QUEUE_SIZE][TX_BUF_SIZE] KERNEL_ALIGNED(8);
 
 static uint16_t g_tx_last_used = 0;
 

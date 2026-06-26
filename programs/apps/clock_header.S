@@ -5,7 +5,8 @@
 // only thing the header needs is the magic, the size, and the
 // entry_offsets[0] pointer at libkarm's _start. Everything else is
 // zero so the kernel's loader treats this as a flat image with a
-// single entry.
+// single entry. The KLI1 header layout is defined in
+// kernel/user_image_format.h.
 //
 // clock_image_end lives in clock_end.S so it sits at the very tail of
 // the flat image and clock_image_header's image_size field covers

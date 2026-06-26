@@ -269,6 +269,32 @@ void test_vfs_mount_static_respects_node_limit(void) {
                              (uint64_t)vfs_mount_static(&extra, 1));
 }
 
+void test_vfs_strip_prefix_returns_suffix_for_exact_prefix(void) {
+    const char *kolibri = vfs_strip_prefix("/kolibri/shell", "/kolibri/");
+    const char *fat = vfs_strip_prefix("/fat/dir/file.txt", "/fat/");
+
+    TEST_ASSERT_NOT_NULL(kolibri);
+    TEST_ASSERT_EQUAL_UINT64('s', (uint64_t)kolibri[0]);
+    TEST_ASSERT_EQUAL_UINT64('h', (uint64_t)kolibri[1]);
+    TEST_ASSERT_EQUAL_UINT64('\0', (uint64_t)kolibri[5]);
+
+    TEST_ASSERT_NOT_NULL(fat);
+    TEST_ASSERT_EQUAL_UINT64('d', (uint64_t)fat[0]);
+    TEST_ASSERT_EQUAL_UINT64('/', (uint64_t)fat[3]);
+    TEST_ASSERT_EQUAL_UINT64('\0', (uint64_t)fat[12]);
+}
+
+void test_vfs_strip_prefix_rejects_invalid_or_empty_suffix(void) {
+    TEST_ASSERT_NULL(vfs_strip_prefix(0, "/fat/"));
+    TEST_ASSERT_NULL(vfs_strip_prefix("/fat/a", 0));
+    TEST_ASSERT_NULL(vfs_strip_prefix("/fat/a", ""));
+    TEST_ASSERT_NULL(vfs_strip_prefix("/fat", "/fat/"));
+    TEST_ASSERT_NULL(vfs_strip_prefix("/fat/", "/fat/"));
+    TEST_ASSERT_NULL(vfs_strip_prefix("/fatty/a", "/fat/"));
+    TEST_ASSERT_NULL(vfs_strip_prefix("/kolibri", "/kolibri/"));
+    TEST_ASSERT_NULL(vfs_strip_prefix("/kolibri/", "/kolibri/"));
+}
+
 void test_vfs_open_read_fd_and_close(void) {
     uint8_t data[] = { 0xa0, 0xb1, 0xc2, 0xd3 };
     uint8_t first[2] = { 0 };

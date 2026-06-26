@@ -554,14 +554,11 @@ void test_fat32_delete_frees_chain_and_removes_entry(void) {
     test_fat32_disk_t disk;
     fat32_fs_t fs;
     fat32_file_t file;
-    uint32_t first_fat;
-    uint32_t second_fat;
 
     test_setup_fat32_disk_writable(&disk, &fs);
     TEST_ASSERT_EQUAL_UINT64(0,
                              (uint64_t)fat32_open_root(&fs, "HELLO.TXT",
                                                          &file));
-    first_fat = file.first_cluster;
 
     TEST_ASSERT_EQUAL_UINT64(0,
                              (uint64_t)fat32_delete(&fs, "HELLO.TXT"));
@@ -575,7 +572,6 @@ void test_fat32_delete_frees_chain_and_removes_entry(void) {
                              (uint64_t)fat32_open_root(&fs, "HELLO.TXT",
                                                        &gone));
 
-    uint32_t fat_value = 0;
     /*
      * After delete, the FAT entry for the released cluster chain is
      * back to 0. The HELLO.TXT setup preallocated clusters 3 and 4,

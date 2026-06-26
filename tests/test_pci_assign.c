@@ -14,10 +14,6 @@
  * BAR whose address field is non-zero.
  */
 
-static uint32_t g_read_count[6];
-static uint32_t g_write_log[6][8];
-static uint32_t g_write_idx[6];
-
 void test_pci_assign_bars_skips_already_programmed_bars(void) {
     pci_device_t devs[1];
     devs[0].bus = 0;

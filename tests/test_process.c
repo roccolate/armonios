@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include "unity/unity.h"
+#include "../kernel/mm/pmm.h"
 #include "../kernel/process.h"
 
 void test_process_user_range_contains_registered_regions(void) {
@@ -409,10 +410,71 @@ void test_process_next_runnable_round_robin_and_reclaim_zombies(void) {
     TEST_ASSERT_EQUAL_UINT64(PROCESS_BLOCKED, b->state);
 }
 
+void test_process_dispatch_next_preempt_marks_current_ready(void) {
+    process_t *current;
+    process_t *next;
+    exception_frame_t frame = {0};
+
+    process_table_init();
+    current = process_alloc(1, "current");
+    next = process_alloc(2, "next");
+
+    TEST_ASSERT_NOT_NULL(current);
+    TEST_ASSERT_NOT_NULL(next);
+
+    current->state = PROCESS_RUNNING;
+    next->state = PROCESS_READY;
+    next->regs[0] = 0x44ULL;
+    process_set_entry(next, 0x1234ULL, 0x8000ULL, 0x3c5ULL);
+    process_set_current(current);
+
+    TEST_ASSERT_EQUAL_UINT64(1,
+                             (uint64_t)process_dispatch_next(
+                                 current, &frame, PROCESS_DISPATCH_PREEMPT));
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_READY, current->state);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_RUNNING, next->state);
+    TEST_ASSERT_TRUE(process_current() == next);
+    TEST_ASSERT_EQUAL_UINT64(0x44ULL, frame.x[0]);
+    TEST_ASSERT_EQUAL_UINT64(0x1234ULL, frame.elr);
+    TEST_ASSERT_EQUAL_UINT64(0x8000ULL, frame.sp_el0);
+    TEST_ASSERT_EQUAL_UINT64(0x3c5ULL, frame.spsr);
+}
+
+void test_process_dispatch_next_exit_leaves_current_zombie(void) {
+    process_t *current;
+    process_t *next;
+    exception_frame_t frame = {0};
+
+    process_table_init();
+    current = process_alloc(1, "current");
+    next = process_alloc(2, "next");
+
+    TEST_ASSERT_NOT_NULL(current);
+    TEST_ASSERT_NOT_NULL(next);
+
+    current->state = PROCESS_RUNNING;
+    next->state = PROCESS_READY;
+    next->regs[1] = 0x55ULL;
+    process_set_entry(next, 0x2234ULL, 0x9000ULL, 0x3c5ULL);
+    process_set_current(current);
+    process_mark_exited(current, 0xeeULL);
+
+    TEST_ASSERT_EQUAL_UINT64(1,
+                             (uint64_t)process_dispatch_next(
+                                 current, &frame, PROCESS_DISPATCH_EXIT));
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_ZOMBIE, current->state);
+    TEST_ASSERT_EQUAL_UINT64(0xeeULL, current->exit_code);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_RUNNING, next->state);
+    TEST_ASSERT_TRUE(process_current() == next);
+    TEST_ASSERT_EQUAL_UINT64(0x55ULL, frame.x[1]);
+    TEST_ASSERT_EQUAL_UINT64(0x2234ULL, frame.elr);
+    TEST_ASSERT_EQUAL_UINT64(0x9000ULL, frame.sp_el0);
+}
+
 /* ------------------------------------------------------------------
  * Tests for process_free_resources and the per-process physical-page
  * accounting it implements. The tests use a real PMM and kheap via
- * the linked kernel/*.c files; pmm_alloc_page returns physical
+ * the linked kernel C files; pmm_alloc_page returns physical
  * addresses, and process_free_resources must return each one. We
  * assert the addresses no longer appear in a follow-up allocation
  * (PMM reuses freed pages).

@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "kernel/kernel_compiler.h"
+
 #define EMMC_ARG2    0x00
 #define EMMC_BLKSZ_REG   0x04
 #define EMMC_CMD     0x08
@@ -122,11 +124,11 @@ static int emmc_send_command(emmc_device_t *dev, uint32_t cmd, uint32_t arg) {
     return 0;
 }
 
-__attribute__((unused)) static uint32_t emmc_get_response(emmc_device_t *dev, uint32_t idx) {
+KERNEL_UNUSED static uint32_t emmc_get_response(emmc_device_t *dev, uint32_t idx) {
     return *emmc_reg(dev->base, EMMC_RESP0 + idx * 4);
 }
 
-__attribute__((unused)) static int emmc_set_bus_width(emmc_device_t *dev, uint32_t width) {
+KERNEL_UNUSED static int emmc_set_bus_width(emmc_device_t *dev, uint32_t width) {
     uint32_t ctrl = *emmc_reg(dev->base, EMMC_CONTROL0);
 
     if (width == EMMC_BUS_WIDTH_4) {

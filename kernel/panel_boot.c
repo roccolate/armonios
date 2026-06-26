@@ -4,8 +4,12 @@
 #include <stdint.h>
 
 #include "kernel/boot_program.h"
+#include "kernel/aarch64_state.h"
+#include "kernel/layout.h"
+#include "kernel/mm/pmm.h"
 #include "kernel/mm/mmu.h"
 #include "kernel/mm/vmm.h"
+#include "kernel/panel_boot_argv.h"
 #include "kernel/process.h"
 #include "kernel/user_image.h"
 #include "kernel/user_vm.h"
@@ -25,24 +29,18 @@
  * The kernel-side helpers here are the EL0 launch path, not a demo.
  */
 
-#define PANEL_BOOT_STACK_SIZE 4096ULL
-#define PANEL_BOOT_IMAGE_SLOT_SIZE 8192ULL
 #define PANEL_BOOT_PID_BASE 1U
-#define PANEL_BOOT_PSTATE 0x340ULL
-#define PANEL_BOOT_IMAGE_VA_BASE 0x0000000000400000ULL
-#define PANEL_BOOT_IMAGE_VA_STRIDE 0x0000000000010000ULL
-#define PANEL_BOOT_STACK_VA_BASE 0x0000000000800000ULL
-#define PANEL_BOOT_STACK_VA_STRIDE 0x0000000000010000ULL
 
 #define PANEL_BOOT_APP "panel"
 
 extern uint64_t user_enter_el0(uint64_t entry, uint64_t stack_top, uint64_t pstate);
 extern char user_enter_el0_return[];
 
-static uint8_t g_user_stacks[PROCESS_MAX_PROCESSES][PANEL_BOOT_STACK_SIZE]
-    __attribute__((aligned(4096)));
-static uint8_t g_user_image_slots[PROCESS_MAX_PROCESSES][PANEL_BOOT_IMAGE_SLOT_SIZE]
-    __attribute__((aligned(4096)));
+typedef struct {
+    uint64_t image_paddr;
+    uint64_t stack_paddr;
+} panel_user_storage_t;
+
 static uint64_t g_spawn_memory_base;
 static uint64_t g_spawn_memory_size;
 static panel_map_mmio_fn_t g_spawn_map_mmio;
@@ -53,22 +51,63 @@ uint64_t el0_return_address(void) {
 }
 
 static uint64_t panel_image_vaddr(uint32_t slot) {
-    return PANEL_BOOT_IMAGE_VA_BASE + slot * PANEL_BOOT_IMAGE_VA_STRIDE;
+    return KERNEL_USER_IMAGE_VA_BASE +
+           (uint64_t)slot * KERNEL_USER_IMAGE_VA_STRIDE;
 }
 
 static uint64_t panel_stack_vaddr(uint32_t slot) {
-    return PANEL_BOOT_STACK_VA_BASE + slot * PANEL_BOOT_STACK_VA_STRIDE;
+    return KERNEL_USER_STACK_VA_BASE +
+           (uint64_t)slot * KERNEL_USER_STACK_VA_STRIDE;
+}
+
+static void zero_memory(uint64_t paddr, uint64_t size) {
+    uint8_t *bytes = (uint8_t *)(uintptr_t)paddr;
+
+    for (uint64_t i = 0; i < size; i++) {
+        bytes[i] = 0;
+    }
+}
+
+static void free_user_storage(panel_user_storage_t *storage) {
+    if (storage == 0) {
+        return;
+    }
+
+    if (storage->image_paddr != 0) {
+        for (uint64_t i = 0; i < KERNEL_USER_IMAGE_SLOT_PAGES; i++) {
+            pmm_free_page(storage->image_paddr + i * PAGE_SIZE);
+        }
+    }
+    if (storage->stack_paddr != 0) {
+        pmm_free_page(storage->stack_paddr);
+    }
+
+    storage->image_paddr = 0;
+    storage->stack_paddr = 0;
 }
 
 static int load_named_image(const char *name, user_image_t *image,
-                            uint32_t slot, uint32_t entry_index) {
+                            uint32_t slot, uint32_t entry_index,
+                            panel_user_storage_t *storage) {
+    if (storage == 0) {
+        return -1;
+    }
+
+    storage->image_paddr = pmm_alloc_pages(KERNEL_USER_IMAGE_SLOT_PAGES);
+    if (storage->image_paddr == 0) {
+        return -1;
+    }
+    zero_memory(storage->image_paddr, KERNEL_USER_IMAGE_SLOT_SIZE);
+
     if (user_image_load_bootfs_flat(image, name, name,
-                                    (uint64_t)(uintptr_t)g_user_image_slots[slot],
-                                    PANEL_BOOT_IMAGE_SLOT_SIZE, entry_index) != 0) {
+                                    storage->image_paddr,
+                                    KERNEL_USER_IMAGE_SLOT_SIZE,
+                                    entry_index) != 0) {
         return -1;
     }
 
     image->base = panel_image_vaddr(slot);
+    image->size = KERNEL_USER_IMAGE_SLOT_SIZE;
     return 0;
 }
 
@@ -125,131 +164,70 @@ static int create_panel_page_table(process_t *process,
 }
 
 static int init_panel_process(process_t *process, const user_image_t *image,
+                              panel_user_storage_t *storage,
                               uint32_t slot, uint64_t memory_base,
                               uint64_t memory_size,
                               panel_map_mmio_fn_t map_mmio) {
-    uint64_t image_paddr;
-    uint64_t stack_paddr;
     uint64_t stack_vaddr;
 
-    if (process == 0 || slot >= PROCESS_MAX_PROCESSES) {
+    if (process == 0 || image == 0 || storage == 0 ||
+        slot >= PROCESS_MAX_PROCESSES || storage->image_paddr == 0) {
         return -1;
     }
 
-    image_paddr = (uint64_t)(uintptr_t)g_user_image_slots[slot];
-    stack_paddr = (uint64_t)(uintptr_t)g_user_stacks[slot];
+    storage->stack_paddr = pmm_alloc_pages(KERNEL_USER_STACK_PAGES);
+    if (storage->stack_paddr == 0) {
+        return -1;
+    }
+    zero_memory(storage->stack_paddr, KERNEL_USER_STACK_SIZE);
+
     stack_vaddr = panel_stack_vaddr(slot);
 
     if (user_image_prepare_process(process, image, stack_vaddr,
-                                   PANEL_BOOT_STACK_SIZE, PANEL_BOOT_PSTATE) != 0) {
+                                   KERNEL_USER_STACK_SIZE,
+                                   AARCH64_SPSR_EL0T_DAF_MASKED) != 0) {
         return -1;
     }
 
-    return create_panel_page_table(process, image, image_paddr,
-                                    stack_vaddr, stack_paddr,
-                                    PANEL_BOOT_STACK_SIZE, memory_base,
-                                    memory_size, map_mmio);
+    if (create_panel_page_table(process, image, storage->image_paddr,
+                                stack_vaddr, storage->stack_paddr,
+                                KERNEL_USER_STACK_SIZE, memory_base,
+                                memory_size, map_mmio) != 0) {
+        return -1;
+    }
+
+    if (process_set_user_region_mapping(
+            process, image->base, image->size, storage->image_paddr,
+            PROCESS_USER_REGION_OWNED_PAGES) != 0) {
+        return -1;
+    }
+    storage->image_paddr = 0;
+    if (process_set_user_region_mapping(
+            process, stack_vaddr, KERNEL_USER_STACK_SIZE, storage->stack_paddr,
+            PROCESS_USER_REGION_OWNED_PAGES) != 0) {
+        return -1;
+    }
+    return 0;
 }
 
-/*
- * Place argv onto the new process's stack.
- *
- * The new process stack lives in g_user_stacks[slot] (kernel physical)
- * and is mapped at panel_stack_vaddr(slot). The layout, from
- * high address down to the initial sp:
- *
- *   [stack_top]
- *     "argN-1\0"     <- argv[argc-1] points here
- *     ...
- *     "arg0\0"       <- argv[0] points here
- *     NULL           <- argv[argc] sentinel
- *     argv[argc-1]   <- pointer
- *     ...
- *     argv[0]
- *     [sp = initial] <- returned as argv_ptr
- *
- * The argv budget is capped at PANEL_BOOT_ARGV_MAX_BYTES total so a
- * hostile caller cannot push the new process off its stack.
- */
-#define PANEL_BOOT_ARGV_MAX_STRINGS 8U
-#define PANEL_BOOT_ARGV_MAX_BYTES   256U
-
-static int place_argv_on_stack(uint32_t slot, const uint64_t *argv_ptr,
+static int place_argv_on_stack(uint64_t stack_paddr, uint32_t slot,
+                               const uint64_t *argv_ptr,
                                uint32_t argc, uint64_t *out_argv_vaddr) {
-    uint8_t *stack = g_user_stacks[slot];
-    uint64_t stack_base = panel_stack_vaddr(slot);
-    uint64_t stack_top = stack_base + PANEL_BOOT_STACK_SIZE;
-    uint64_t argv_vaddr;
-    uint64_t cursor;
-    uint64_t *argv_out;
-    uint64_t string_bytes;
-    uint32_t i;
-
-    if (argc == 0) {
-        *out_argv_vaddr = 0;
-        return 0;
-    }
-    if (argc > PANEL_BOOT_ARGV_MAX_STRINGS) {
+    if (stack_paddr == 0 || slot >= PROCESS_MAX_PROCESSES) {
         return -1;
     }
 
-    /*
-     * Measure each input string up front so the copy stays bounded.
-     * The total is capped at PANEL_BOOT_ARGV_MAX_BYTES to keep a
-     * hostile caller from forcing a huge stack copy. argv_ptr and
-     * each string pointer must be non-NULL; the strings themselves
-     * are not null-terminated inside a fixed cap because the cap
-     * rejects the argv long before a single string can exceed it.
-     */
-    string_bytes = 0;
-    for (i = 0; i < argc; i++) {
-        const char *str = (const char *)(uintptr_t)argv_ptr[i];
-        if (str == 0) {
-            return -1;
-        }
-        uint64_t len = 0;
-        while (str[len] != '\0') {
-            len++;
-        }
-        string_bytes += len + 1U;
-    }
-    if (string_bytes > PANEL_BOOT_ARGV_MAX_BYTES) {
-        return -1;
-    }
-
-    uint64_t total = string_bytes + (uint64_t)(argc + 1U) * sizeof(uint64_t);
-    /* AArch64 ABI requires the initial sp to be 16-byte aligned. */
-    total = (total + 15U) & ~(uint64_t)15U;
-    if (total > PANEL_BOOT_STACK_SIZE) {
-        return -1;
-    }
-
-    argv_vaddr = stack_top - total;
-    cursor = argv_vaddr + (uint64_t)(argc + 1U) * sizeof(uint64_t);
-    argv_out = (uint64_t *)(stack + (argv_vaddr - stack_base));
-
-    for (i = 0; i < argc; i++) {
-        const char *src = (const char *)(uintptr_t)argv_ptr[i];
-        uint8_t *dst = stack + (cursor - stack_base);
-        uint64_t len = 0;
-        while (src[len] != '\0') {
-            dst[len] = (uint8_t)src[len];
-            len++;
-        }
-        dst[len] = '\0';
-        argv_out[i] = cursor;
-        cursor += len + 1U;
-    }
-    argv_out[argc] = 0;
-
-    *out_argv_vaddr = argv_vaddr;
-    return 0;
+    return panel_boot_place_argv_on_stack((uint8_t *)(uintptr_t)stack_paddr,
+                                          panel_stack_vaddr(slot),
+                                          KERNEL_USER_STACK_SIZE,
+                                          argv_ptr, argc, out_argv_vaddr);
 }
 
 int kolibri_spawn_vfs(const char *path, uint32_t entry_index,
                       const uint64_t *argv_ptr, uint32_t argc) {
     process_t *process;
     user_image_t image;
+    panel_user_storage_t storage = {0};
     uint32_t slot;
     const char *app_name;
     size_t name_len;
@@ -259,14 +237,11 @@ int kolibri_spawn_vfs(const char *path, uint32_t entry_index,
         return -1;
     }
 
-    if (path[0] != '/' || path[1] != 'k' || path[2] != 'o' ||
-        path[3] != 'l' || path[4] != 'i' || path[5] != 'b' ||
-        path[6] != 'r' || path[7] != 'i' || path[8] != '/' ||
-        path[9] == '\0') {
+    app_name = vfs_strip_prefix(path, "/kolibri/");
+    if (app_name == 0) {
         return -1;
     }
 
-    app_name = path + 9;
     name_len = 0;
     while (app_name[name_len] != '\0') {
         name_len++;
@@ -286,14 +261,16 @@ int kolibri_spawn_vfs(const char *path, uint32_t entry_index,
         return -1;
     }
 
-    if (load_named_image(app_name, &image, slot, entry_index) != 0) {
+    if (load_named_image(app_name, &image, slot, entry_index, &storage) != 0) {
         process_release(process);
+        free_user_storage(&storage);
         return -1;
     }
 
-    if (init_panel_process(process, &image, slot, g_spawn_memory_base,
+    if (init_panel_process(process, &image, &storage, slot, g_spawn_memory_base,
                            g_spawn_memory_size, g_spawn_map_mmio) != 0) {
         process_release(process);
+        free_user_storage(&storage);
         return -1;
     }
 
@@ -303,7 +280,8 @@ int kolibri_spawn_vfs(const char *path, uint32_t entry_index,
      * argc==0 and argc>0 paths and keeps the inlined code small. */
     process->regs[0] = 0;
     process->regs[1] = 0;
-    if (place_argv_on_stack(slot, argv_ptr, argc, &argv_vaddr) != 0) {
+    if (place_argv_on_stack(storage.stack_paddr, slot, argv_ptr, argc,
+                            &argv_vaddr) != 0) {
         process_release(process);
         return -1;
     }
@@ -324,6 +302,7 @@ uint64_t panel_boot_run(uint64_t memory_base, uint64_t memory_size,
     uint64_t exit_code;
     process_t *panel;
     user_image_t panel_image;
+    panel_user_storage_t storage = {0};
     uint32_t slot;
 
     (void)process_reclaim_zombies();
@@ -339,15 +318,18 @@ uint64_t panel_boot_run(uint64_t memory_base, uint64_t memory_size,
         return 1;
     }
 
-    if (load_named_image(PANEL_BOOT_APP, &panel_image, slot, 0) != 0) {
+    if (load_named_image(PANEL_BOOT_APP, &panel_image, slot, 0,
+                         &storage) != 0) {
         process_release(panel);
+        free_user_storage(&storage);
         uart_puts("panel_boot: image load failed\n");
         return 1;
     }
 
-    if (init_panel_process(panel, &panel_image, slot, memory_base,
+    if (init_panel_process(panel, &panel_image, &storage, slot, memory_base,
                            memory_size, map_mmio) != 0) {
         process_release(panel);
+        free_user_storage(&storage);
         uart_puts("panel_boot: process setup failed\n");
         return 1;
     }

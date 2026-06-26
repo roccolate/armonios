@@ -10,6 +10,8 @@
 #include "drivers/board.h"
 #include "drivers/net/virtio_net.h"
 #include "drivers/uart/pl011.h"
+#include "kernel/net/dhcp_options.h"
+#include "kernel/print.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -234,70 +236,34 @@ static void send_dhcp_request(uint32_t server_ip, uint32_t requested_ip) {
                     DHCP_PORT_SERVER, DHCP_PORT_CLIENT);
 }
 
-static void parse_dhcp_offer(dhcp_packet_t *pkt, uint32_t len) {
-    (void)len;
-
-    if (pkt->op != 2 || pkt->xid != g_dhcp_xid) {
-        return;
-    }
-
+static void parse_dhcp_offer(dhcp_packet_t *pkt,
+                             const dhcp_options_t *options) {
     g_net_info.ip = get_ip_addr(pkt->yiaddr);
 
-    uint8_t *opt = pkt->options;
-    while (opt < pkt->options + DHCP_OPTIONS_LEN - 1) {
-        if (opt[0] == 0xFF) {
-            break;
-        }
-        if (opt[0] == 0) {
-            opt++;
-            continue;
-        }
-        if (opt[0] == 53 && opt[2] == DHCP_OFFER) {
-            g_net_info.dhcp_state = DHCP_OFFER;
-        }
-        if (opt[0] == 54) {
-            g_net_info.dhcp_state = DHCP_REQUEST;
-        }
-        opt += 2 + opt[1];
+    if (options->message_type == DHCP_OFFER) {
+        g_net_info.dhcp_state = DHCP_OFFER;
     }
-
     uart_puts("[net] DHCP offer: ");
     print_ip(g_net_info.ip);
     uart_puts("\n");
 }
 
-static void parse_dhcp_ack(dhcp_packet_t *pkt, uint32_t len) {
-    (void)len;
-
-    if (pkt->op != 2 || pkt->xid != g_dhcp_xid) {
-        return;
-    }
-
+static void parse_dhcp_ack(dhcp_packet_t *pkt,
+                           const dhcp_options_t *options) {
     g_net_info.ip = get_ip_addr(pkt->yiaddr);
 
-    uint8_t *opt = pkt->options;
-    while (opt < pkt->options + DHCP_OPTIONS_LEN - 1) {
-        if (opt[0] == 0xFF) {
-            break;
-        }
-        if (opt[0] == 0) {
-            opt++;
-            continue;
-        }
-        if (opt[0] == 53 && opt[2] == DHCP_ACK) {
-            g_net_info.dhcp_state = DHCP_ACK;
-            g_net_info.discovered = 1;
-        }
-        if (opt[0] == 1) {
-            g_net_info.subnet = get_ip_addr(&opt[2]);
-        }
-        if (opt[0] == 3) {
-            g_net_info.gateway = get_ip_addr(&opt[2]);
-        }
-        if (opt[0] == 6) {
-            g_net_info.dns = get_ip_addr(&opt[2]);
-        }
-        opt += 2 + opt[1];
+    if (options->message_type == DHCP_ACK) {
+        g_net_info.dhcp_state = DHCP_ACK;
+        g_net_info.discovered = 1;
+    }
+    if ((options->flags & DHCP_OPTIONS_HAS_SUBNET) != 0) {
+        g_net_info.subnet = options->subnet;
+    }
+    if ((options->flags & DHCP_OPTIONS_HAS_GATEWAY) != 0) {
+        g_net_info.gateway = options->gateway;
+    }
+    if ((options->flags & DHCP_OPTIONS_HAS_DNS) != 0) {
+        g_net_info.dns = options->dns;
     }
 
     uart_puts("[net] DHCP ack: ");
@@ -310,6 +276,7 @@ static void parse_dhcp_ack(dhcp_packet_t *pkt, uint32_t len) {
 static void parse_udp_packet(uint8_t *data, uint32_t len) {
     uint16_t dest_port;
     dhcp_packet_t *pkt;
+    dhcp_options_t options;
 
     if (len < 8) {
         return;
@@ -328,26 +295,15 @@ static void parse_udp_packet(uint8_t *data, uint32_t len) {
         return;
     }
 
-    if (pkt->op == 2) {
-        uint8_t *opt = pkt->options;
-        while (opt < pkt->options + DHCP_OPTIONS_LEN - 1) {
-            if (opt[0] == 0xFF) {
-                break;
-            }
-            if (opt[0] == 0) {
-                opt++;
-                continue;
-            }
-            if (opt[0] == 53) {
-                if (opt[2] == DHCP_OFFER) {
-                    parse_dhcp_offer(pkt, len);
-                } else if (opt[2] == DHCP_ACK) {
-                    parse_dhcp_ack(pkt, len);
-                }
-                break;
-            }
-            opt += 2 + opt[1];
-        }
+    if (pkt->op != 2 || pkt->xid != g_dhcp_xid ||
+        dhcp_options_parse(pkt->options, DHCP_OPTIONS_LEN, &options) != 0) {
+        return;
+    }
+
+    if (options.message_type == DHCP_OFFER) {
+        parse_dhcp_offer(pkt, &options);
+    } else if (options.message_type == DHCP_ACK) {
+        parse_dhcp_ack(pkt, &options);
     }
 }
 
@@ -403,11 +359,11 @@ int net_init(void) {
     }
 
     uart_puts("[net] found at ");
-    uart_put_hex(net_base);
+    print_hex64(net_base);
     uart_puts(" MAC=");
     for (int i = 0; i < 6; i++) {
         if (i > 0) uart_putc(':');
-        uart_put_hex_byte(net_info.mac[i]);
+        print_hex8(net_info.mac[i]);
     }
     uart_puts("\n");
 

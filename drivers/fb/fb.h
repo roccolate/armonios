@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-typedef struct {
+typedef struct fb {
     uint32_t *pixels;
     uint32_t width;
     uint32_t height;

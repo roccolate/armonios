@@ -11,6 +11,13 @@ void print_hex64(uint64_t value) {
     }
 }
 
+void print_hex8(uint8_t value) {
+    static const char digits[] = "0123456789abcdef";
+
+    uart_putc(digits[(value >> 4) & 0xf]);
+    uart_putc(digits[value & 0xf]);
+}
+
 void print_dec64(uint64_t value) {
     char buf[20];
     uint32_t i = 0;

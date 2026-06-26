@@ -3,7 +3,8 @@
 // End-of-image marker for the shell app. shell_image_end has to
 // live at the very tail of the flat image so that shell_image_header's
 // image_size field correctly reports how many bytes the loader
-// should copy into per-process memory.
+// should copy into per-process memory. The KLI1 layout is defined in
+// kernel/user_image_format.h.
 //
 // The marker is placed in its own .user.image.end section so the
 // linker script can position it after every other .user_image

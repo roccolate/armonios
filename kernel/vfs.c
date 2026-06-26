@@ -190,6 +190,22 @@ const vfs_node_t *vfs_find(const char *path) {
     return 0;
 }
 
+const char *vfs_strip_prefix(const char *path, const char *prefix) {
+    if (path == 0 || prefix == 0 || prefix[0] == '\0') {
+        return 0;
+    }
+
+    while (*prefix != '\0') {
+        if (*path != *prefix) {
+            return 0;
+        }
+        path++;
+        prefix++;
+    }
+
+    return *path == '\0' ? 0 : path;
+}
+
 int vfs_read(const char *path, uint64_t offset, uint8_t *buffer,
              uint64_t capacity, uint64_t *bytes_read) {
     const vfs_node_t *node = vfs_find(path);
@@ -445,23 +461,18 @@ static int vfs_fat32_basename(const char *path, char *out,
 
 int vfs_unlink(const char *path) {
     char name[VFS_MAX_PATH];
+    const char *fat_path;
     fat32_fs_t *fs;
 
-    if (path == 0) {
-        return -1;
-    }
-    if (vfs_path_equals(path, "/") || vfs_path_equals(path, "/.")) {
-        return -1;
-    }
-    if (path[0] != '/' || path[1] != 'f' || path[2] != 'a' ||
-        path[3] != 't' || path[4] != '/' || path[5] == '\0') {
+    fat_path = vfs_strip_prefix(path, "/fat/");
+    if (fat_path == 0) {
         return -1;
     }
     fs = fat32_default_fs();
     if (fs == 0 || fs->mounted == 0) {
         return -1;
     }
-    if (vfs_fat32_basename(path, name, sizeof(name)) != 0) {
+    if (vfs_fat32_basename(fat_path, name, sizeof(name)) != 0) {
         return -1;
     }
     return fat32_delete(fs, name);
@@ -470,25 +481,21 @@ int vfs_unlink(const char *path) {
 int vfs_rename(const char *old_path, const char *new_path) {
     char old_name[VFS_MAX_PATH];
     char new_name[VFS_MAX_PATH];
+    const char *old_fat_path;
+    const char *new_fat_path;
     fat32_fs_t *fs;
 
-    if (old_path == 0 || new_path == 0) {
-        return -1;
-    }
-    if (old_path[0] != '/' || old_path[1] != 'f' || old_path[2] != 'a' ||
-        old_path[3] != 't' || old_path[4] != '/' || old_path[5] == '\0') {
-        return -1;
-    }
-    if (new_path[0] != '/' || new_path[1] != 'f' || new_path[2] != 'a' ||
-        new_path[3] != 't' || new_path[4] != '/' || new_path[5] == '\0') {
+    old_fat_path = vfs_strip_prefix(old_path, "/fat/");
+    new_fat_path = vfs_strip_prefix(new_path, "/fat/");
+    if (old_fat_path == 0 || new_fat_path == 0) {
         return -1;
     }
     fs = fat32_default_fs();
     if (fs == 0 || fs->mounted == 0) {
         return -1;
     }
-    if (vfs_fat32_basename(old_path, old_name, sizeof(old_name)) != 0 ||
-        vfs_fat32_basename(new_path, new_name, sizeof(new_name)) != 0) {
+    if (vfs_fat32_basename(old_fat_path, old_name, sizeof(old_name)) != 0 ||
+        vfs_fat32_basename(new_fat_path, new_name, sizeof(new_name)) != 0) {
         return -1;
     }
     return fat32_rename(fs, old_name, new_name);

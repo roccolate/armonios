@@ -43,79 +43,21 @@ numbers are planning budgets, not hard ABI guarantees:
 A simple profiler should land before serious engine optimization so each
 subsystem can report its per-frame cost.
 
-## Phase 8 - Userland C SDK
+## Phase 8 - Userland C SDK Baseline
 
-Before adding larger tools or multimedia demos, introduce a tiny native C SDK for
-KolibriARM user applications. The goal is not POSIX compatibility yet; the goal
-is to stop writing large user apps directly in AArch64 assembly and to give
-future tools a stable syscall and GUI wrapper layer.
+This prerequisite is complete enough for the multimedia plan:
 
-Initial SDK tree:
-
-```text
-sdk/
-  crt0.S
-  syscalls.h
-  syscall.S
-  kolibriarm.h
-  gui.c
-  gui.h
-  string.c
-  app.ld
-```
-
-Initial C app examples:
-
-```text
-programs/apps_c/hello_c/main.c
-programs/apps_c/clock/main.c
-```
-
-Initial scope:
-
-- `crt0.S` provides the user entry point, calls `main(argc, argv)`, then exits
-  through `SYS_EXIT`.
-- `syscall.S` provides a small generic syscall trampoline using `svc #0`.
-- `syscalls.h` defines syscall numbers and kernel ABI constants in one place.
-- `kolibriarm.h` exposes common userland helpers such as `ka_exit`, `ka_yield`,
-  `ka_spawn`, `ka_getpid`, `ka_read`, `ka_write`, `ka_timeinfo`, `ka_meminfo`,
-  and `ka_proclist`.
-- `gui.h` / `gui.c` wrap the window syscalls into safer app-facing helpers such
-  as `ka_window_create`, `ka_window_destroy`, `ka_draw_text`, `ka_draw_rect`,
-  `ka_window_event`, `ka_window_redraw`, and `ka_window_focus`.
-- `string.c` provides only the tiny routines needed by bootstrap apps, such as
-  `strlen`, `strcmp`, `strncmp`, `memcpy`, `memset`, and integer formatting.
-- `app.ld` defines the user app image layout expected by the current loader.
-- Keep the SDK freestanding: no libc dependency until the app ABI, VFS, loader,
-  and memory model are stable.
-
-Candidate API shape:
-
-```c
-int ka_window_create(int x, int y, int w, int h, const char *title);
-void ka_draw_text(int win, int x, int y, uint32_t color, const char *text);
-void ka_draw_rect(int win, int x, int y, int w, int h, uint32_t color);
-int ka_window_event(int win, ka_event_t *events, int max_events);
-void ka_window_redraw(int win);
-int ka_spawn(const char *path);
-void ka_yield(void);
-void ka_exit(int code);
-```
-
-Migration rule:
-
-- The C userland library (`programs/libkarm/`) is the supported userland
-  starting point. ABI and exception paths are exercised through the
-  in-tree unit tests, not through standalone userland apps.
-- Every shipping app is C + `libkarm`/`libkarmdesk`. The panel, shell,
-  editor, monitor, and clock have all been ported; the tiny AArch64
-  smoke-test apps (`hello.S`, `loop.S`, `fault.S`, `win.S`,
-  `kos_hello.S`) are gone.
+- `programs/libkarm/` provides user entry, syscall trampolines, and small
+  freestanding C helpers.
+- `programs/libkarmdesk/` provides app-facing desktop/window wrappers.
+- Shipping apps are C programs under `programs/apps/`: panel, shell, editor,
+  monitor, and clock.
+- The app linker script emits KLI1 flat images consumed by the current loader.
 - Kernel low-level entry code, exception vectors, context switching, EL0 entry,
   and `crt0.S` remain assembly.
 
-This SDK is a prerequisite for the multimedia phases below: the engine should be
-used from C apps, not from handwritten syscall-heavy assembly.
+Future engine APIs should build on `libkarm`/`libkarmdesk`; do not create a
+second SDK tree.
 
 ## Phase 9 - Display Backbone
 
@@ -242,7 +184,7 @@ Initial tilemap format:
 
 ## Phase 14 - Compositor
 
-Align this with the existing Phase 5 GUI plan.
+Build on the current kernel GUI split rather than replacing it.
 
 Initial scope:
 - Layer/window composition over the framebuffer backbuffer.

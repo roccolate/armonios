@@ -17,6 +17,7 @@
 
 #include <stdint.h>
 
+#include "fb/fb.h"
 #include "kernel/gui.h"
 #include "kernel/process.h"
 

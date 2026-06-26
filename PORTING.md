@@ -11,8 +11,8 @@ KolibriARM should be structured so that the following components remain portable
 - `kernel/mm/` — physical and virtual memory management
 - `kernel/sched/` — scheduler and context switch
 - `kernel/ipc/` — message passing and shared memory
-- `kernel/fs/` — VFS and filesystem drivers
-- `kernel/gui/` — window manager and compositor
+- `kernel/vfs.c`, `kernel/tmpfs.c`, `kernel/fat32.c` — VFS and filesystems
+- `kernel/gui_*.{c,h}` — window manager and compositor
 - `boot/start.S` — except the initial stack address (see below)
 
 The following components are board-specific and should live behind `drivers/boards/<board>/` or an equivalent platform layer:
@@ -260,7 +260,7 @@ When porting to a board that doesn't provide a DTB (rare for Cortex-A), hardcode
 | Board | Status | Notes |
 |-------|--------|-------|
 | QEMU virt (Cortex-A72) | Working | Primary development target |
-| Raspberry Pi 4 | In Progress | Phase 8 target, board layer done |
+| Raspberry Pi 4 | Builds | Board layer exists; PCIe/VL805 bring-up remains |
 | Raspberry Pi 5 | Planned | After RPi 4 |
 | Orange Pi 5 (RK3588) | Future | After RPi port matures |
 

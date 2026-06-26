@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include "unity/unity.h"
+#include "fb/fb.h"
 #include "../kernel/gui.h"
 #include "../kernel/process.h"
 
@@ -491,7 +492,7 @@ void test_gui_title_bar_shifts_owner_draw_below_bar(void) {
                                  &desktop, 0, 0, 8, 8, 0xff0000aaU,
                                  0xffffffffU, &window_id));
     TEST_ASSERT_EQUAL_UINT64(0,
-                             (uint64_t)gui_set_window_title_bar(
+                             (uint64_t)gui_window_set_title_bar_internal(
                                  &desktop, window_id, 3U));
 
     /* Owner draws a red rect at logical (0, 0, 4, 1). Without the shift
@@ -539,7 +540,7 @@ void test_gui_title_bar_paints_bar_and_text(void) {
     /* Use a smaller title_h so the test window (8 px tall) still has
      * content underneath the bar. */
     TEST_ASSERT_EQUAL_UINT64(0,
-                             (uint64_t)gui_set_window_title_bar(
+                             (uint64_t)gui_window_set_title_bar_internal(
                                  &desktop, window_id, 3U));
 
     gui_draw(&desktop);
@@ -579,7 +580,7 @@ void test_gui_cursor_shape_changes_over_clickable_title_decoration(void) {
                                  &desktop, 7U, 20, 10, 100, 60, 0xff0000aaU,
                                  0xff808080U, "demo", &titled));
     TEST_ASSERT_EQUAL_UINT64(0,
-                             (uint64_t)gui_set_window_title_bar(
+                             (uint64_t)gui_window_set_title_bar_internal(
                                  &desktop, titled, 12U));
 
     gui_set_cursor(&desktop, 30, 30);
@@ -697,7 +698,7 @@ void test_gui_cursor_register_region_overrides_title_bar_default(void) {
                                  &desktop, 9U, 20, 10, 100, 60, 0xff0000aaU,
                                  0xff808080U, "titled", &window_id));
     TEST_ASSERT_EQUAL_UINT64(0,
-                             (uint64_t)gui_set_window_title_bar(
+                             (uint64_t)gui_window_set_title_bar_internal(
                                  &desktop, window_id, 12U));
 
     TEST_ASSERT_EQUAL_UINT64(0,
@@ -902,10 +903,10 @@ void test_gui_set_title_bar_rejects_height_larger_than_window(void) {
                                  &desktop, 0, 0, 2, 2, 0xff0000aaU,
                                  0xffffffffU, &window_id));
     TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
-                            (uint64_t)gui_set_window_title_bar(
+                            (uint64_t)gui_window_set_title_bar_internal(
                                 &desktop, window_id, 2U));
     TEST_ASSERT_EQUAL_UINT64(0,
-                            (uint64_t)gui_set_window_title_bar(
+                            (uint64_t)gui_window_set_title_bar_internal(
                                 &desktop, window_id, 1U));
 }
 
@@ -924,7 +925,7 @@ void test_gui_set_title_bar_zero_disables_bar(void) {
                                  &desktop, 7U, 0, 0, 8, 8, 0xff0000aaU,
                                  0xffffffffU, "abc", &window_id));
     TEST_ASSERT_EQUAL_UINT64(0,
-                             (uint64_t)gui_set_window_title_bar(
+                             (uint64_t)gui_window_set_title_bar_internal(
                                  &desktop, window_id, 0U));
 
     gui_draw(&desktop);
@@ -932,6 +933,38 @@ void test_gui_set_title_bar_zero_disables_bar(void) {
     /* With title_h=0 the bg_color (0xff0000aa) shows at the interior
      * (1, 1) and there is no kernel title bar overlay. */
     TEST_ASSERT_EQUAL_UINT64(0xff0000aaU, pixels[1 * 8 + 1]);
+}
+
+void test_gui_decoration_hit_test_reports_slot_geometry(void) {
+    gui_window_t window = {0};
+    gui_decoration_hit_t hit;
+    uint32_t x = 0;
+    uint32_t y = 0;
+    uint32_t w = 0;
+    uint32_t h = 0;
+
+    window.used = 1;
+    window.x = 10;
+    window.y = 20;
+    window.w = 80;
+    window.h = 80;
+    window.title_h = 12U;
+    window.title[0] = 'x';
+
+    TEST_ASSERT_EQUAL_UINT64(
+        1, (uint64_t)gui_close_box_rect(&window, &x, &y, &w, &h));
+    TEST_ASSERT_EQUAL_UINT64(
+        1, (uint64_t)gui_hit_test_decoration(
+               &window, (int32_t)(x + 1U), (int32_t)(y + 1U), &hit));
+    TEST_ASSERT_EQUAL_UINT64(GUI_DECORATION_SLOT_CLOSE, hit.slot);
+    TEST_ASSERT_EQUAL_UINT64(x, hit.x);
+    TEST_ASSERT_EQUAL_UINT64(y, hit.y);
+    TEST_ASSERT_EQUAL_UINT64(w, hit.w);
+    TEST_ASSERT_EQUAL_UINT64(h, hit.h);
+
+    TEST_ASSERT_EQUAL_UINT64(
+        0, (uint64_t)gui_hit_test_decoration(&window, 1, 1, &hit));
+    TEST_ASSERT_EQUAL_UINT64(GUI_DECORATION_SLOT_NONE, hit.slot);
 }
 
 void test_gui_close_button_pushed_event_on_title_bar_click(void) {
@@ -958,7 +991,7 @@ void test_gui_close_button_pushed_event_on_title_bar_click(void) {
                                  desktop, 7U, 0, 0, 80, 80, 0xff0000aaU,
                                  0xff808080U, "demo", &window_id));
     TEST_ASSERT_EQUAL_UINT64(0,
-                             (uint64_t)gui_set_window_title_bar(
+                             (uint64_t)gui_window_set_title_bar_internal(
                                  desktop, window_id, 12U));
 
     /* Cursor inside the close box: cb_x = 80 - 10 - 2 = 68, cb_y = 2,
@@ -1003,7 +1036,7 @@ void test_gui_close_button_destroys_window_for_dead_owner(void) {
                                  desktop, 7U, 0, 0, 80, 80, 0xff0000aaU,
                                  0xff808080U, "demo", &window_id));
     TEST_ASSERT_EQUAL_UINT64(0,
-                             (uint64_t)gui_set_window_title_bar(
+                             (uint64_t)gui_window_set_title_bar_internal(
                                  desktop, window_id, 12U));
 
     gui_set_cursor(desktop, 72, 6);
@@ -1038,7 +1071,7 @@ void test_gui_close_button_destroys_window_for_reclaimed_owner(void) {
                                  desktop, 7U, 0, 0, 80, 80, 0xff0000aaU,
                                  0xff808080U, "demo", &window_id));
     TEST_ASSERT_EQUAL_UINT64(0,
-                             (uint64_t)gui_set_window_title_bar(
+                             (uint64_t)gui_window_set_title_bar_internal(
                                  desktop, window_id, 12U));
 
     gui_set_cursor(desktop, 72, 6);
@@ -1072,7 +1105,7 @@ void test_gui_close_button_click_outside_box_starts_drag(void) {
                                  desktop, 7U, 0, 0, 80, 80, 0xff0000aaU,
                                  0xff808080U, "demo", &window_id));
     TEST_ASSERT_EQUAL_UINT64(0,
-                             (uint64_t)gui_set_window_title_bar(
+                             (uint64_t)gui_window_set_title_bar_internal(
                                  desktop, window_id, 12U));
 
     /* Click on the title bar but to the left of the close box: should
@@ -1458,6 +1491,35 @@ void test_gui_backing_buffer_reallocates_when_window_reused(void) {
     TEST_ASSERT_EQUAL_UINT64(0xff112233U, window->backing[6]);
 }
 
+void test_gui_backing_buffer_resize_clears_reused_capacity(void) {
+    uint32_t pixels[16 * 16] = { 0 };
+    fb_t fb;
+    gui_desktop_t desktop;
+    uint32_t window_id;
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 16, 16, 16));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)gui_init(&desktop, &fb, 0xff101010U));
+    desktop.cursor.visible = 0;
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window(
+                                 &desktop, 0, 0, 8, 8, 0xff223344U,
+                                 0xffffffffU, &window_id));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_window_draw_rect(
+                                 &desktop, window_id, 0, 0, 1, 1, 0xffff0000U));
+
+    gui_window_t *window = &desktop.windows[window_id];
+    TEST_ASSERT_EQUAL_UINT64(0xffff0000U, window->backing[0]);
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_resize_window(
+                                 &desktop, window_id, 0, 0, 4, 4));
+
+    TEST_ASSERT_TRUE(window->backing != 0);
+    TEST_ASSERT_EQUAL_UINT64(0xff223344U, window->backing[0]);
+}
+
 /*
  * Damage-tracking tests. These exercise the per-rect path that the
  * partial-redraw branch of gui_draw uses, so a regression in coalescing,
@@ -1668,7 +1730,7 @@ void test_gui_damage_title_bar_offset_in_draw_text(void) {
                                  &desktop, 1, 1, 5, 5, 0xff000000U,
                                  0xffffffffU, &window_id));
     TEST_ASSERT_EQUAL_UINT64(0,
-                             (uint64_t)gui_set_window_title_bar(
+                             (uint64_t)gui_window_set_title_bar_internal(
                                  &desktop, window_id, 2U));
     gui_damage_clear(&desktop);
 

@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "kernel/kernel_compiler.h"
+
 #define DHCP_DISCOVER 1
 #define DHCP_OFFER    2
 #define DHCP_REQUEST  3
@@ -32,7 +34,7 @@ typedef struct {
     uint8_t  sname[DHCP_SNAME_LEN];
     uint8_t  file[DHCP_FILE_LEN];
     uint8_t  options[DHCP_OPTIONS_LEN];
-} __attribute__((packed)) dhcp_packet_t;
+} KERNEL_PACKED dhcp_packet_t;
 
 typedef struct {
     uint8_t  mac[6];

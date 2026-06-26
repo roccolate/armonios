@@ -1,7 +1,7 @@
 /*
  * tests/test_user_image_runtime.c
  *
- * Host-side tests for the KLI1 / KOS image loader that catch the
+ * Host-side tests for the KLI1 image loader that catch the
  * class of bugs we just shipped (image_size smaller than the
  * actual data). The loader itself is correct: it copies exactly
  * `image_size` bytes from the source blob into the per-process
@@ -51,6 +51,7 @@
 #include <string.h>
 
 #include "unity/unity.h"
+#include "../kernel/user_image_format.h"
 #include "../kernel/user_image.h"
 
 /*
@@ -122,31 +123,7 @@ __asm__(
 );
 
 /* ------------------------------------------------------------------
- * Blob 3: KOS-style header (24 bytes), with rodata at the tail.
- * ------------------------------------------------------------------ */
-__asm__(
-    ".section .user_image_kos_blob, \"a\"\n"
-    ".balign 16\n"
-    ".global _user_image_kos_start\n"
-    "_user_image_kos_start:\n"
-    ".long 0x00534f4b\n"           /* USER_KOS_MAGIC */
-    ".long _user_image_kos_end - _user_image_kos_start\n" /* image_size */
-    ".long 0\n"                    /* mem_size; 0 means image_size */
-    ".long 0\n"                    /* stack_size; 0 means default */
-    ".long _user_image_kos_entry - _user_image_kos_start\n" /* entry_offset */
-    ".long 0\n"                    /* reserved */
-    ".global _user_image_kos_entry\n"
-    "_user_image_kos_entry:\n"
-    ".long 0xd503201f\n"
-    ".skip 48\n"
-    ".ascii \"KOS_TAIL_STRING\\0\"\n"
-    ".balign 16\n"
-    ".global _user_image_kos_end\n"
-    "_user_image_kos_end:\n"
-);
-
-/* ------------------------------------------------------------------
- * Blob 4: image_size == 0. Must be rejected.
+ * Blob 3: image_size == 0. Must be rejected.
  * ------------------------------------------------------------------ */
 __asm__(
     ".section .user_image_zero_size_blob, \"a\"\n"
@@ -164,7 +141,7 @@ __asm__(
 );
 
 /* ------------------------------------------------------------------
- * Blob 5: entry_offset is past image_size. Must be rejected.
+ * Blob 4: entry_offset is past image_size. Must be rejected.
  * ------------------------------------------------------------------ */
 __asm__(
     ".section .user_image_bad_entry_blob, \"a\"\n"
@@ -189,8 +166,6 @@ extern char _user_image_well_formed_entry[];
 extern char _user_image_short_image_size_start[];
 extern char _user_image_short_image_size_end[];
 extern char _user_image_short_image_size_end_of_text[];
-extern char _user_image_kos_start[];
-extern char _user_image_kos_end[];
 extern char _user_image_zero_size_start[];
 extern char _user_image_zero_size_end[];
 extern char _user_image_bad_entry_start[];
@@ -308,44 +283,6 @@ void test_user_image_runtime_short_image_size_drops_tail(void) {
     }
     TEST_ASSERT_TRUE(found_in_source);
     TEST_ASSERT_TRUE(!found_in_loaded);
-}
-
-void test_user_image_runtime_kos_header_round_trips(void) {
-    /*
-     * Same contract, KOS variant. The KOS header is a synonym for
-     * KLI1 and the loader handles both via user_image_load_flat.
-     * The trailing rodata string must survive.
-     */
-    uint8_t loaded[256];
-    user_image_t image;
-    int found = 0;
-    const char needle[] = "KOS_TAIL_STRING";
-    size_t nlen = sizeof(needle) - 1;
-
-    for (size_t i = 0; i < sizeof(loaded); i++) {
-        loaded[i] = 0;
-    }
-
-    uint64_t source_size = (uint64_t)(uintptr_t)_user_image_kos_end -
-                            (uint64_t)(uintptr_t)_user_image_kos_start;
-
-    TEST_ASSERT_TRUE((int)(0) == user_image_load_flat(&image, "kos",
-            (uint64_t)(uintptr_t)loaded, sizeof(loaded),
-            (uint64_t)(uintptr_t)_user_image_kos_start,
-            source_size, 0));
-
-    TEST_ASSERT_EQUAL_UINT64(source_size, image.size);
-
-    for (uint64_t i = 0; i + nlen <= image.size && !found; i++) {
-        size_t j = 0;
-        while (j < nlen && (uint8_t)loaded[i + j] == (uint8_t)needle[j]) {
-            j++;
-        }
-        if (j == nlen) {
-            found = 1;
-        }
-    }
-    TEST_ASSERT_TRUE(found);
 }
 
 void test_user_image_runtime_rejects_image_size_zero(void) {

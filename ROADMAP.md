@@ -52,8 +52,8 @@ exercises each dispatch entry at runtime. Any new syscall must add a row in
 SYSCALLS.md, an entry in `syscall_numbers.h`, the dispatch case in
 `kernel/syscall.c`, and a host test — in the same commit.
 
-The kernel debug console (`k>`) still ships with `help`, `mem`, `ps`,
-`ticks`, `storage`, `fb`, `mouse`, and `click` for headless diagnostics.
+The kernel debug console (`k>`) ships with `help`, `mem`, `ps`, `ticks`,
+`status`, `mouse`, `click`, and `key` for headless diagnostics.
 
 ---
 
@@ -83,6 +83,8 @@ Run these after kernel, boot, driver, syscall, or userland changes:
 - `timeout 8s make qemu-fb` must reach `panel: ready`.
 - `timeout 8s make qemu-usb` must enumerate both directly attached HID
   devices and print `USB HID: 2 devices`.
+- `make qemu-fs-test` must confirm the generated FAT32 virtio-blk image mounts
+  and the FAT32-backed user-image path is selected.
 - `make qemu-fb-visible` must be checked manually: cursor movement, click to
   raise, panel launch buttons, title-bar close, minimize/restore through the
   taskbar, editor typing, and opening all four apps without a crash.
@@ -149,7 +151,7 @@ The next set of candidates beyond alpha, in rough order of return on effort:
 - Scripted screenshot or framebuffer diff tests for desktop regressions.
 - Cleaner shutdown syscall and panel policy branch.
 - TCP/HTTP for `wget`-style apps.
-- Larger EL0 stacks or stack-usage tooling for bigger apps.
+- Larger EL0 stacks if bigger apps need them.
 - SMP after the uniprocessor desktop is boringly stable.
 - Engine and multimedia runtime.
 
@@ -162,12 +164,11 @@ The next set of candidates beyond alpha, in rough order of return on effort:
   is subtle.
 - Reuse existing modules before adding new ones: `kernel/mm`,
   `kernel/sched`, `kernel/timer`, `drivers/irq`, `drivers/uart`,
-  `kernel/gui`.
+  `kernel/gui_*`.
 - Prefer a `drivers/boards/qemu_virt/` platform layer before touching
   RPi 4.
-- Port ideas from KolibriOS, not its x86 asm. The 8×8 font and the `KOS`
-  header are the first ports; syscall IDs, IPC semantics, and window list
-  layout are next.
+- Port ideas from KolibriOS, not its x86 asm. Keep ABI choices explicit and
+  pinned by tests before apps depend on them.
 - Keep the kernel readable in one sitting. If a module stops fitting on
   a few pages, split it before adding features.
 

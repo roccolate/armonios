@@ -20,20 +20,28 @@ APP_BLOB_OBJS  := $(patsubst %.bin,%.host_blob.o,$(APP_BLOB_BINS))
 
 SRCS=unity/unity.c main.c \
      test_pmm.c test_kheap.c test_vmm.c test_process.c \
+     test_init_status.c \
      test_boot_program.c test_bootfs.c test_user_image.c test_user_vm.c \
      test_user_image_runtime.c \
+     test_panel_boot_argv.c \
      test_panel_boot_recovery.c \
-     test_vfs.c test_tmpfs.c test_fat32.c test_ipc.c test_font.c \
+     test_vfs.c test_tmpfs.c test_fat32.c test_dhcp_options.c \
+     test_ipc.c test_font.c \
      test_gui.c test_fb.c test_dtb.c test_virtio_blk.c test_input.c \
      test_hid.c test_pci.c test_hid_driver.c test_usb_core.c \
      test_pci_assign.c test_hid_state.c test_hid_init.c \
      test_syscall_abi.c test_process_isolation.c test_window_abi.c \
      ../kernel/mm/pmm.c ../kernel/mm/kheap.c ../kernel/mm/vmm.c \
      ../kernel/boot_program.c ../kernel/bootfs.c \
-     ../kernel/panel_boot_recovery.c \
-     ../kernel/fat32.c ../kernel/font.c ../kernel/gui.c \
+     ../kernel/panel_boot_argv.c ../kernel/panel_boot_recovery.c \
+     ../kernel/fat32.c ../kernel/net/dhcp_options.c \
+     ../kernel/font.c ../kernel/gui_backing.c \
+     ../kernel/gui_cursor.c \
+     ../kernel/gui_events.c ../kernel/gui_input.c ../kernel/gui_pool.c \
+     ../kernel/gui_compositor.c \
+     ../kernel/init_status.c \
      ../kernel/ipc.c ../kernel/process.c \
-     ../kernel/tmpfs.c \
+     ../kernel/tmpfs.c ../kernel/syscall_helpers.c \
      ../kernel/user_image.c ../kernel/user_vm.c ../kernel/vfs.c \
      ../kernel/dtb.c ../kernel/dtb_framebuffer.c \
      ../drivers/fb/fb.c ../drivers/storage/virtio_blk.c \
@@ -53,6 +61,8 @@ $(TARGET): $(SRCS) $(APP_BLOB_OBJS)
 %.host_blob.o: %.bin
 	$(OBJCOPY) -I binary -O elf64-x86-64 -B i386:x86-64 \
 	    --rename-section .data=.app_host_blob,alloc,load,readonly,data,contents \
+	    --add-section .note.GNU-stack=/dev/null \
+	    --set-section-flags .note.GNU-stack=readonly \
 	    $< $@
 
 .PHONY: test

@@ -8,8 +8,10 @@
 #include "kernel/exceptions.h"
 #include "kernel/fat32.h"
 #include "kernel/gui.h"
+#include "kernel/init_status.h"
 #include "kernel/ipc.h"
 #include "kernel/irq.h"
+#include "kernel/kernel_compiler.h"
 #include "kernel/mm/kheap.h"
 #include "kernel/mm/mmu.h"
 #include "kernel/mm/pmm.h"
@@ -95,17 +97,22 @@ static void run_kheap_smoke(void) {
     kfree(heap_c);
 }
 
-static void init_vfs(void) {
+static init_status_t init_vfs(void) {
     static const uint8_t note[] = "KolibriARM tmpfs\n";
     uint8_t magic[4];
     uint64_t bytes_read = 0;
     uint64_t bytes_written = 0;
+    int bootfs_ok = 0;
+    int tmpfs_ok = 0;
+    int bootfs_read_ok = 0;
+    int vfs_read_ok = 0;
 
     vfs_reset();
     tmpfs_reset();
 
     if (bootfs_mount_vfs() == 0) {
         uart_puts("VFS bootfs: mounted\n");
+        bootfs_ok = 1;
     } else {
         uart_puts("VFS bootfs: failed\n");
     }
@@ -114,6 +121,7 @@ static void init_vfs(void) {
         tmpfs_write("note", 0, note, sizeof(note) - 1U, &bytes_written) == 0 &&
         tmpfs_mount_vfs("/tmp/note", "note") == 0) {
         uart_puts("VFS tmpfs: mounted\n");
+        tmpfs_ok = 1;
     } else {
         uart_puts("VFS tmpfs: failed\n");
     }
@@ -121,6 +129,7 @@ static void init_vfs(void) {
     if (bootfs_read("shell", 0, magic, sizeof(magic),
                     &bytes_read) == 0 && bytes_read == sizeof(magic)) {
         uart_puts("bootfs read: ok\n");
+        bootfs_read_ok = 1;
     } else {
         uart_puts("bootfs read: failed\n");
     }
@@ -129,18 +138,54 @@ static void init_vfs(void) {
     if (vfs_read("/kolibri/shell", 0, magic, sizeof(magic),
                  &bytes_read) == 0 && bytes_read == sizeof(magic)) {
         uart_puts("VFS read: ok\n");
+        vfs_read_ok = 1;
     } else {
         uart_puts("VFS read: failed\n");
     }
+
+    if (bootfs_ok == 0 || bootfs_read_ok == 0 || vfs_read_ok == 0) {
+        return INIT_STATUS_FAIL;
+    }
+    if (tmpfs_ok == 0) {
+        return INIT_STATUS_WARN;
+    }
+    return INIT_STATUS_OK;
 }
 
-static void run_panel_boot_smoke(const dtb_memory_t *memory) {
-    uint64_t user_exit_code = panel_boot_run_with_recovery(
-        memory->base, memory->size, board_map_mmio);
+typedef struct {
+    uint64_t memory_base;
+    uint64_t memory_size;
+    panel_map_mmio_fn_t map_mmio;
+} panel_boot_context_t;
+
+static uint64_t run_panel_boot_once(void *ctx) {
+    panel_boot_context_t *boot = (panel_boot_context_t *)ctx;
+
+    if (boot == 0) {
+        return 1;
+    }
+    return panel_boot_run(boot->memory_base, boot->memory_size,
+                          boot->map_mmio);
+}
+
+static void panel_boot_log_line(const char *line) {
+    uart_puts(line);
+}
+
+static init_status_t run_panel_boot_smoke(const dtb_memory_t *memory) {
+    panel_boot_context_t boot = {
+        .memory_base = memory->base,
+        .memory_size = memory->size,
+        .map_mmio = board_map_mmio,
+    };
+    uint64_t user_exit_code = panel_boot_recovery_run(
+        run_panel_boot_once, &boot, panel_boot_log_line);
 
     uart_puts("USER demo exit code: ");
     print_hex64(user_exit_code);
     uart_puts("\n");
+
+    return user_exit_code == 0 ? INIT_STATUS_OK : INIT_STATUS_WARN;
 }
 
 static int fat32_read_storage(void *context, uint32_t lba, uint8_t *buffer) {
@@ -191,13 +236,13 @@ static int probe_fat32(void) {
     return 0;
 }
 
-static int probe_storage(void) {
-    uint8_t sector[512] __attribute__((aligned(8)));
+static init_status_t probe_storage(void) {
+    uint8_t sector[512] KERNEL_ALIGNED(8);
     int read_status;
 
     if (board_storage_init() != 0) {
         uart_puts("storage: init failed\n");
-        return -1;
+        return INIT_STATUS_WARN;
     }
 
     uart_puts("storage: initialized\n");
@@ -212,20 +257,20 @@ static int probe_storage(void) {
         uart_puts("storage sector0: ");
         print_hex64(word);
         uart_puts("\n");
-        return probe_fat32();
+        return probe_fat32() == 0 ? INIT_STATUS_OK : INIT_STATUS_WARN;
     } else {
         uart_puts("storage read err: ");
         print_hex64((uint64_t)(uint32_t)read_status);
         uart_puts("\n");
     }
 
-    return -1;
+    return INIT_STATUS_WARN;
 }
 
 static uint64_t g_gpu_base;
 static uint8_t g_gpu_ready;
 
-static void init_display(void) {
+static init_status_t init_display(void) {
     uint64_t gpu_base;
 
     g_gpu_base = 0;
@@ -234,19 +279,18 @@ static void init_display(void) {
     if (virtio_gpu_probe_range(board_virtio_mmio_base(),
                                board_virtio_mmio_size(),
                                board_virtio_mmio_stride(), &gpu_base) != 0) {
-        console_set_framebuffer_ready(0);
-        return;
+        return INIT_STATUS_WARN;
     }
 
     g_gpu_base = gpu_base;
 
     if (virtio_gpu_draw(gpu_base, gui_init_for_framebuffer, 0) == 0) {
         uart_puts("VIRTIO gpu: windows\n");
-        console_set_framebuffer_ready(1);
         g_gpu_ready = 1;
+        return INIT_STATUS_OK;
     } else {
         uart_puts("VIRTIO gpu: failed\n");
-        console_set_framebuffer_ready(0);
+        return INIT_STATUS_WARN;
     }
 }
 
@@ -321,15 +365,17 @@ static void init_timer_irq_demo(void) {
     irq_enable();
 }
 
-static void init_network(void) {
+static init_status_t init_network(void) {
     if (net_init() == 0) {
         uart_puts("network: initialized\n");
+        return INIT_STATUS_OK;
     } else {
         uart_puts("network: failed\n");
+        return INIT_STATUS_WARN;
     }
 }
 
-static void init_input(void) {
+static init_status_t init_input(void) {
     input_queue_init();
     if (board_virtio_input_init() == 0) {
         uart_puts("input: virtio-input initialized\n");
@@ -390,48 +436,69 @@ static void init_input(void) {
             uart_puts("USB HID: no boot-protocol devices\n");
         }
     }
+
+    return INIT_STATUS_OK;
 }
 
-static void start_scheduler_demo(void) {
-    (void)sched_create_kernel_thread(console_input_thread, 0, "kconsole");
+static init_status_t start_scheduler_demo(void) {
+    if (sched_create_kernel_thread(console_input_thread, 0, "kconsole") != 0) {
+        return INIT_STATUS_FAIL;
+    }
+
+    init_status_set(INIT_PHASE_SCHED, INIT_STATUS_OK);
     sched_start();
+    return INIT_STATUS_OK;
 }
 
 void kernel_main(uint64_t dtb_addr) {
     dtb_memory_t memory;
+    init_status_t storage_status;
 
+    init_status_reset();
     board_early_init();
+    init_status_set(INIT_PHASE_BOARD, INIT_STATUS_OK);
 
     uart_puts("\nKolibriARM ");
     uart_puts(board_name());
     uart_puts("\n");
 
     if (dtb_get_memory(dtb_addr, &memory) == 0) {
+        init_status_set(INIT_PHASE_DTB, INIT_STATUS_OK);
         init_memory_manager(&memory, dtb_addr);
+        init_status_set(INIT_PHASE_PMM, INIT_STATUS_OK);
         process_table_init();
         ipc_init();
         console_init(&memory);
+        init_status_set(INIT_PHASE_CONSOLE, INIT_STATUS_OK);
         run_pmm_smoke();
         run_kheap_smoke();
+        init_status_set(INIT_PHASE_KHEAP, INIT_STATUS_OK);
 
         if (enable_identity_mmu(&memory, dtb_addr) == 0) {
-            init_vfs();
+            init_status_set(INIT_PHASE_VMM, INIT_STATUS_OK);
+            init_status_set(INIT_PHASE_VFS, init_vfs());
             init_timer_irq_demo();
-            if (probe_storage() == 0) {
-                console_set_storage_ready(1);
+            init_status_set(INIT_PHASE_IRQ_TIMER, INIT_STATUS_OK);
+            storage_status = probe_storage();
+            init_status_set(INIT_PHASE_STORAGE, storage_status);
+            if (storage_status == INIT_STATUS_OK) {
                 uart_puts("USER image source: FAT32\n");
             } else {
-                console_set_storage_ready(0);
                 uart_puts("USER image source: bootfs\n");
             }
-            init_display();
-            init_network();
-            init_input();
-            run_panel_boot_smoke(&memory);
+            init_status_set(INIT_PHASE_DISPLAY, init_display());
+            init_status_set(INIT_PHASE_NETWORK, init_network());
+            init_status_set(INIT_PHASE_INPUT, init_input());
+            init_status_set(INIT_PHASE_PANEL, run_panel_boot_smoke(&memory));
             console_start_interactive();
-            start_scheduler_demo();
+            if (start_scheduler_demo() != INIT_STATUS_OK) {
+                init_status_set(INIT_PHASE_SCHED, INIT_STATUS_FAIL);
+            }
+        } else {
+            init_status_set(INIT_PHASE_VMM, INIT_STATUS_FAIL);
         }
     } else {
+        init_status_set(INIT_PHASE_DTB, INIT_STATUS_FAIL);
         uart_puts("RAM map: unavailable\n");
     }
 

@@ -4,6 +4,7 @@
 
 #include "drivers/board.h"
 #include "input/input.h"
+#include "kernel/aarch64_state.h"
 #include "kernel/console.h"
 #include "kernel/exceptions.h"
 #include "kernel/gui.h"
@@ -12,6 +13,7 @@
 #include "kernel/print.h"
 #include "kernel/process.h"
 #include "kernel/sched/sched.h"
+#include "kernel/syscall_helpers.h"
 #include "kernel/syscall_numbers.h"
 #include "kernel/timer/timer.h"
 #include "kernel/panel_boot.h"
@@ -24,51 +26,20 @@
 #define FD_STDERR 2ULL
 #define FD_FILE_BASE 3ULL
 
-#define ERR_NOENT (-3LL)
-#define ERR_BADF  (-5LL)
-#define ERR_INVAL (-7LL)
-#define ERR_AGAIN (-11LL)
-#define ERR_PERM  (-13LL)
-
-#define SPSR_EL1H_MASKED 0x3c5ULL
-
 typedef struct {
     uint32_t pid;
     uint32_t state;
     char name[16];
 } syscall_proc_entry_t;
 
-static int user_range_contains(uint64_t ptr, uint64_t len) {
-    return process_user_range_contains(process_current(), ptr, len);
-}
-
-static int copy_user_cstr(uint64_t ptr, char *out, uint64_t capacity) {
-    const char *src = (const char *)(uintptr_t)ptr;
-
-    if (ptr == 0 || out == 0 || capacity == 0) {
-        return -1;
-    }
-
-    for (uint64_t i = 0; i < capacity; i++) {
-        if (!user_range_contains(ptr + i, 1)) {
-            return -1;
-        }
-
-        out[i] = src[i];
-        if (out[i] == '\0') {
-            return 0;
-        }
-    }
-
-    return -1;
-}
-
-static int64_t sys_write(uint64_t fd, uint64_t buf, uint64_t len) {
+static int64_t sys_write(process_t *process, uint64_t fd, uint64_t buf,
+                         uint64_t len) {
     const char *text = (const char *)(uintptr_t)buf;
     uint64_t bytes_written = 0;
 
-    if (!user_range_contains(buf, len)) {
-        return ERR_INVAL;
+    int64_t status = sys_user_buf_in(process, buf, len);
+    if (status != 0) {
+        return status;
     }
 
     if (fd >= (uint64_t)FD_FILE_BASE) {
@@ -91,12 +62,13 @@ static int64_t sys_write(uint64_t fd, uint64_t buf, uint64_t len) {
     return (int64_t)len;
 }
 
-static int64_t sys_open(uint64_t path_ptr, uint64_t flags) {
+static int64_t sys_open(process_t *process, uint64_t path_ptr,
+                        uint64_t flags) {
     char path[VFS_MAX_PATH];
     int fd;
 
     if (flags > VFS_O_RDWR ||
-        copy_user_cstr(path_ptr, path, sizeof(path)) != 0) {
+        sys_user_copy_cstr(process, path_ptr, path, sizeof(path)) != 0) {
         return ERR_INVAL;
     }
 
@@ -108,12 +80,13 @@ static int64_t sys_open(uint64_t path_ptr, uint64_t flags) {
     return (int64_t)fd + FD_FILE_BASE;
 }
 
-static int64_t sys_spawn(uint64_t path_ptr, uint64_t entry_index) {
+static int64_t sys_spawn(process_t *process, uint64_t path_ptr,
+                         uint64_t entry_index) {
     char path[VFS_MAX_PATH];
     int pid;
 
     if (entry_index > 0xffffffffULL ||
-        copy_user_cstr(path_ptr, path, sizeof(path)) != 0) {
+        sys_user_copy_cstr(process, path_ptr, path, sizeof(path)) != 0) {
         return ERR_INVAL;
     }
 
@@ -125,13 +98,14 @@ static int64_t sys_spawn(uint64_t path_ptr, uint64_t entry_index) {
     return pid;
 }
 
-static int64_t sys_spawn_argv(uint64_t path_ptr, uint64_t entry_index,
+static int64_t sys_spawn_argv(process_t *process, uint64_t path_ptr,
+                              uint64_t entry_index,
                               uint64_t argv_ptr, uint64_t argc) {
     char path[VFS_MAX_PATH];
     int pid;
 
     if (entry_index > 0xffffffffULL || argc > 0xffffffffULL ||
-        copy_user_cstr(path_ptr, path, sizeof(path)) != 0) {
+        sys_user_copy_cstr(process, path_ptr, path, sizeof(path)) != 0) {
         return ERR_INVAL;
     }
 
@@ -149,7 +123,8 @@ static int64_t sys_spawn_argv(uint64_t path_ptr, uint64_t entry_index,
         }
     } else {
         if (argv_ptr == 0 ||
-            !user_range_contains(argv_ptr, argc * sizeof(uint64_t))) {
+            sys_user_buf_in(process, argv_ptr,
+                            argc * sizeof(uint64_t)) != 0) {
             return ERR_INVAL;
         }
     }
@@ -228,15 +203,18 @@ static int64_t sys_seek(uint64_t fd, uint64_t offset, uint64_t whence) {
     return (int64_t)offset;
 }
 
-static int64_t sys_read(uint64_t fd, uint64_t buf, uint64_t len) {
+static int64_t sys_read(process_t *process, uint64_t fd, uint64_t buf,
+                        uint64_t len) {
     uint64_t bytes_read = 0;
+    int64_t status;
 
     if (fd == FD_STDIN) {
         uint8_t *out = (uint8_t *)(uintptr_t)buf;
         int c;
 
-        if (!user_range_contains(buf, len)) {
-            return ERR_INVAL;
+        status = sys_user_buf_out(process, buf, len);
+        if (status != 0) {
+            return status;
         }
 
         if (len == 0) {
@@ -256,8 +234,9 @@ static int64_t sys_read(uint64_t fd, uint64_t buf, uint64_t len) {
         return ERR_BADF;
     }
 
-    if (!user_range_contains(buf, len)) {
-        return ERR_INVAL;
+    status = sys_user_buf_out(process, buf, len);
+    if (status != 0) {
+        return status;
     }
 
     if (vfs_read_fd((int64_t)fd - FD_FILE_BASE, (uint8_t *)(uintptr_t)buf,
@@ -268,12 +247,13 @@ static int64_t sys_read(uint64_t fd, uint64_t buf, uint64_t len) {
     return (int64_t)bytes_read;
 }
 
-static int64_t sys_stat(uint64_t path_ptr, uint64_t stat_ptr) {
+static int64_t sys_stat(process_t *process, uint64_t path_ptr,
+                        uint64_t stat_ptr) {
     char path[VFS_MAX_PATH];
     vfs_stat_t stat;
 
-    if (copy_user_cstr(path_ptr, path, sizeof(path)) != 0 ||
-        !user_range_contains(stat_ptr, sizeof(stat))) {
+    if (sys_user_copy_cstr(process, path_ptr, path, sizeof(path)) != 0 ||
+        sys_user_buf_out(process, stat_ptr, sizeof(stat)) != 0) {
         return ERR_INVAL;
     }
 
@@ -285,12 +265,13 @@ static int64_t sys_stat(uint64_t path_ptr, uint64_t stat_ptr) {
     return 0;
 }
 
-static int64_t sys_readdir(uint64_t path_ptr, uint64_t buf, uint64_t len) {
+static int64_t sys_readdir(process_t *process, uint64_t path_ptr,
+                           uint64_t buf, uint64_t len) {
     char path[VFS_MAX_PATH];
     uint64_t bytes_written = 0;
 
-    if (copy_user_cstr(path_ptr, path, sizeof(path)) != 0 ||
-        !user_range_contains(buf, len)) {
+    if (sys_user_copy_cstr(process, path_ptr, path, sizeof(path)) != 0 ||
+        sys_user_buf_out(process, buf, len) != 0) {
         return ERR_INVAL;
     }
 
@@ -301,10 +282,10 @@ static int64_t sys_readdir(uint64_t path_ptr, uint64_t buf, uint64_t len) {
     return (int64_t)bytes_written;
 }
 
-static int64_t sys_unlink(uint64_t path_ptr) {
+static int64_t sys_unlink(process_t *process, uint64_t path_ptr) {
     char path[VFS_MAX_PATH];
 
-    if (copy_user_cstr(path_ptr, path, sizeof(path)) != 0) {
+    if (sys_user_copy_cstr(process, path_ptr, path, sizeof(path)) != 0) {
         return ERR_INVAL;
     }
     if (vfs_unlink(path) != 0) {
@@ -313,12 +294,13 @@ static int64_t sys_unlink(uint64_t path_ptr) {
     return 0;
 }
 
-static int64_t sys_rename(uint64_t old_ptr, uint64_t new_ptr) {
+static int64_t sys_rename(process_t *process, uint64_t old_ptr,
+                          uint64_t new_ptr) {
     char old_path[VFS_MAX_PATH];
     char new_path[VFS_MAX_PATH];
 
-    if (copy_user_cstr(old_ptr, old_path, sizeof(old_path)) != 0 ||
-        copy_user_cstr(new_ptr, new_path, sizeof(new_path)) != 0) {
+    if (sys_user_copy_cstr(process, old_ptr, old_path, sizeof(old_path)) != 0 ||
+        sys_user_copy_cstr(process, new_ptr, new_path, sizeof(new_path)) != 0) {
         return ERR_INVAL;
     }
     if (vfs_rename(old_path, new_path) != 0) {
@@ -327,11 +309,13 @@ static int64_t sys_rename(uint64_t old_ptr, uint64_t new_ptr) {
     return 0;
 }
 
-static int64_t sys_meminfo(uint64_t info_ptr) {
+static int64_t sys_meminfo(process_t *process, uint64_t info_ptr) {
     uint64_t *info = (uint64_t *)(uintptr_t)info_ptr;
+    int64_t status;
 
-    if (!user_range_contains(info_ptr, 2U * sizeof(uint64_t))) {
-        return ERR_INVAL;
+    status = sys_user_buf_out(process, info_ptr, 2U * sizeof(uint64_t));
+    if (status != 0) {
+        return status;
     }
 
     info[0] = pmm_total_count();
@@ -339,11 +323,13 @@ static int64_t sys_meminfo(uint64_t info_ptr) {
     return 0;
 }
 
-static int64_t sys_timeinfo(uint64_t info_ptr) {
+static int64_t sys_timeinfo(process_t *process, uint64_t info_ptr) {
     uint64_t *info = (uint64_t *)(uintptr_t)info_ptr;
+    int64_t status;
 
-    if (!user_range_contains(info_ptr, 3U * sizeof(uint64_t))) {
-        return ERR_INVAL;
+    status = sys_user_buf_out(process, info_ptr, 3U * sizeof(uint64_t));
+    if (status != 0) {
+        return status;
     }
 
     info[0] = timer_ticks();
@@ -352,19 +338,24 @@ static int64_t sys_timeinfo(uint64_t info_ptr) {
     return 0;
 }
 
-static int64_t sys_proclist(uint64_t entries_ptr, uint64_t max_entries) {
+static int64_t sys_proclist(process_t *process, uint64_t entries_ptr,
+                            uint64_t max_entries) {
     syscall_proc_entry_t *entries =
         (syscall_proc_entry_t *)(uintptr_t)entries_ptr;
     uint64_t written = 0;
+    int64_t status;
 
     if (max_entries == 0) {
         return 0;
     }
 
-    if (max_entries > PROCESS_MAX_PROCESSES ||
-        !user_range_contains(entries_ptr,
-                             max_entries * sizeof(syscall_proc_entry_t))) {
+    if (max_entries > PROCESS_MAX_PROCESSES) {
         return ERR_INVAL;
+    }
+    status = sys_user_buf_out(process, entries_ptr,
+                              max_entries * sizeof(syscall_proc_entry_t));
+    if (status != 0) {
+        return status;
     }
 
     for (uint32_t i = 0; i < PROCESS_MAX_PROCESSES && written < max_entries; i++) {
@@ -406,10 +397,15 @@ static int64_t sys_mmap(process_t *process, uint64_t hint, uint64_t size, uint64
 
 static int64_t sys_ipc_send(process_t *process, uint64_t target_pid,
                             uint64_t buf, uint64_t len) {
+    int64_t status;
+
     if (process == 0 || target_pid == 0 || len == 0 ||
-        target_pid > 0xffffffffULL || len > IPC_MAX_MESSAGE_SIZE ||
-        !user_range_contains(buf, len)) {
+        target_pid > 0xffffffffULL || len > IPC_MAX_MESSAGE_SIZE) {
         return ERR_INVAL;
+    }
+    status = sys_user_buf_in(process, buf, len);
+    if (status != 0) {
+        return status;
     }
 
     if (ipc_send(process->pid, (uint32_t)target_pid,
@@ -424,10 +420,14 @@ static int64_t sys_ipc_recv(process_t *process, uint64_t buf,
                             uint64_t capacity) {
     ipc_message_t message;
     uint8_t *out = (uint8_t *)(uintptr_t)buf;
+    int64_t status;
 
-    if (process == 0 || buf == 0 || capacity != IPC_MAX_MESSAGE_SIZE ||
-        !user_range_contains(buf, capacity)) {
+    if (process == 0 || capacity != IPC_MAX_MESSAGE_SIZE) {
         return ERR_INVAL;
+    }
+    status = sys_user_buf_out(process, buf, capacity);
+    if (status != 0) {
+        return status;
     }
 
     if (ipc_recv(process->pid, &message) != 0) {
@@ -447,21 +447,11 @@ static int64_t sys_ipc_recv(process_t *process, uint64_t buf,
 
 static int sys_yield_process(exception_frame_t *frame) {
     process_t *current = process_current();
-    process_t *next = process_next_runnable(current);
 
-    if (current == 0 || next == 0) {
+    if (current == 0) {
         return 0;
     }
-
-    if (current->state == PROCESS_RUNNING) {
-        current->state = PROCESS_READY;
-    }
-
-    next->state = PROCESS_RUNNING;
-    process_set_current(next);
-    process_activate_context(next, frame);
-
-    return 1;
+    return process_dispatch_next(current, frame, PROCESS_DISPATCH_PREEMPT);
 }
 
 static int64_t sys_window_create(process_t *process, uint64_t x, uint64_t y,
@@ -480,7 +470,7 @@ static int64_t sys_window_create(process_t *process, uint64_t x, uint64_t y,
         title[i] = '\0';
     }
     if (title_ptr != 0) {
-        if (copy_user_cstr(title_ptr, title, GUI_TITLE_LEN) != 0) {
+        if (sys_user_copy_cstr(process, title_ptr, title, GUI_TITLE_LEN) != 0) {
             return ERR_INVAL;
         }
     }
@@ -502,17 +492,15 @@ static int64_t sys_window_create(process_t *process, uint64_t x, uint64_t y,
 }
 
 static int64_t sys_window_destroy(process_t *process, uint64_t window_id) {
-    if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
-        return ERR_INVAL;
+    gui_desktop_t *desktop;
+    gui_window_t *window;
+    int64_t status;
+
+    status = sys_owner_window(process, window_id, &desktop, &window);
+    if (status != 0) {
+        return status;
     }
-    gui_window_t *window = &gui_desktop()->windows[window_id];
-    if (window->used == 0) {
-        return ERR_NOENT;
-    }
-    if (window->owner_pid != process->pid) {
-        return ERR_BADF;
-    }
-    if (gui_destroy_window(gui_desktop(), (uint32_t)window_id) != 0) {
+    if (gui_destroy_window(desktop, (uint32_t)window_id) != 0) {
         return ERR_BADF;
     }
     /* Old window rectangle must be repainted by the compositor. */
@@ -523,18 +511,22 @@ static int64_t sys_window_destroy(process_t *process, uint64_t window_id) {
 static int64_t sys_window_draw_text(process_t *process, uint64_t window_id,
                                     uint64_t x, uint64_t y, uint64_t color,
                                     uint64_t str_ptr) {
+    gui_desktop_t *desktop;
+    gui_window_t *window;
     char text[128];
+    int64_t status;
+
     if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
         return ERR_INVAL;
     }
-    gui_window_t *window = &gui_desktop()->windows[window_id];
-    if (window->used == 0 || window->owner_pid != process->pid) {
-        return ERR_BADF;
+    status = sys_owner_window_badf(process, window_id, &desktop, &window);
+    if (status != 0) {
+        return status;
     }
-    if (copy_user_cstr(str_ptr, text, sizeof(text)) != 0) {
+    if (sys_user_copy_cstr(process, str_ptr, text, sizeof(text)) != 0) {
         return ERR_INVAL;
     }
-    if (gui_window_draw_text(gui_desktop(), (uint32_t)window_id,
+    if (gui_window_draw_text(desktop, (uint32_t)window_id,
                              (int32_t)x, (int32_t)y, text,
                              (uint32_t)color) != 0) {
         return ERR_BADF;
@@ -545,16 +537,20 @@ static int64_t sys_window_draw_text(process_t *process, uint64_t window_id,
 static int64_t sys_window_draw_rect(process_t *process, uint64_t window_id,
                                     uint64_t x, uint64_t y, uint64_t w,
                                     uint64_t h, uint64_t color) {
+    gui_desktop_t *desktop;
+    gui_window_t *window;
+    int64_t status;
+
     if (process == 0 || window_id >= GUI_MAX_WINDOWS ||
         x > 0x7fffffffULL || y > 0x7fffffffULL ||
         w > 0xffffffffULL || h > 0xffffffffULL) {
         return ERR_INVAL;
     }
-    gui_window_t *window = &gui_desktop()->windows[window_id];
-    if (window->used == 0 || window->owner_pid != process->pid) {
-        return ERR_BADF;
+    status = sys_owner_window_badf(process, window_id, &desktop, &window);
+    if (status != 0) {
+        return status;
     }
-    if (gui_window_draw_rect(gui_desktop(), (uint32_t)window_id,
+    if (gui_window_draw_rect(desktop, (uint32_t)window_id,
                              (int32_t)x, (int32_t)y, (uint32_t)w,
                              (uint32_t)h, (uint32_t)color) != 0) {
         return ERR_BADF;
@@ -564,19 +560,22 @@ static int64_t sys_window_draw_rect(process_t *process, uint64_t window_id,
 
 static int64_t sys_window_set_title(process_t *process, uint64_t window_id,
                                     uint64_t title_ptr, uint64_t title_h) {
+    gui_desktop_t *desktop;
+    gui_window_t *window;
     char title[GUI_TITLE_LEN];
+    int64_t status;
+
     if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
         return ERR_INVAL;
     }
-    gui_window_t *window = &gui_desktop()->windows[window_id];
-    if (window->used == 0 || window->owner_pid != process->pid) {
-        return ERR_BADF;
+    status = sys_owner_window_badf(process, window_id, &desktop, &window);
+    if (status != 0) {
+        return status;
     }
-    if (copy_user_cstr(title_ptr, title, GUI_TITLE_LEN) != 0) {
+    if (sys_user_copy_cstr(process, title_ptr, title, GUI_TITLE_LEN) != 0) {
         return ERR_INVAL;
     }
-    if (gui_set_window_title(gui_desktop(), (uint32_t)window_id,
-                             title) != 0) {
+    if (gui_window_set_title_internal(desktop, (uint32_t)window_id, title) != 0) {
         return ERR_BADF;
     }
     /* Title text change must show on the next compositor pass. */
@@ -586,7 +585,7 @@ static int64_t sys_window_set_title(process_t *process, uint64_t window_id,
      * compatibility. The kernel validates title_h against the window
      * height before applying. */
     if (title_h > 0 &&
-        gui_set_window_title_bar(gui_desktop(), (uint32_t)window_id,
+        gui_window_set_title_bar_internal(desktop, (uint32_t)window_id,
                                  (uint32_t)title_h) != 0) {
         return ERR_INVAL;
     }
@@ -594,12 +593,12 @@ static int64_t sys_window_set_title(process_t *process, uint64_t window_id,
 }
 
 static int64_t sys_window_redraw(process_t *process, uint64_t window_id) {
-    if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
-        return ERR_INVAL;
-    }
-    gui_window_t *window = &gui_desktop()->windows[window_id];
-    if (window->used == 0 || window->owner_pid != process->pid) {
-        return ERR_BADF;
+    gui_window_t *window;
+    int64_t status;
+
+    status = sys_owner_window_badf(process, window_id, 0, &window);
+    if (status != 0) {
+        return status;
     }
     /* Mark the desktop dirty so the kernel redraws on next tick. */
     gui_request_redraw();
@@ -694,18 +693,18 @@ static int64_t sys_cursor_register_region(process_t *process, uint64_t win,
 static int64_t sys_window_flush(process_t *process, uint64_t window_id,
                                 uint64_t x, uint64_t y, uint64_t w,
                                 uint64_t h) {
+    gui_desktop_t *desktop;
+    gui_window_t *window;
+    int64_t status;
+
     if (process == 0 || window_id >= GUI_MAX_WINDOWS ||
         x > 0x7fffffffULL || y > 0x7fffffffULL ||
         w > 0xffffffffULL || h > 0xffffffffULL) {
         return ERR_INVAL;
     }
-    gui_desktop_t *desktop = gui_desktop();
-    if (desktop == 0) {
-        return ERR_AGAIN;
-    }
-    gui_window_t *window = &desktop->windows[window_id];
-    if (window->used == 0 || window->owner_pid != process->pid) {
-        return ERR_BADF;
+    status = sys_owner_window_badf(process, window_id, &desktop, &window);
+    if (status != 0) {
+        return status;
     }
     if (w == 0 || h == 0) {
         return 0;
@@ -726,27 +725,19 @@ static int64_t sys_window_flush(process_t *process, uint64_t window_id,
  * may read another process's window bounds.
  */
 static int64_t sys_window_get_bounds(process_t *process, uint64_t window_id,
-                                    uint64_t out_ptr) {
+                                     uint64_t out_ptr) {
     gui_desktop_t *desktop;
     gui_window_t *window;
     uint32_t *out = (uint32_t *)(uintptr_t)out_ptr;
+    int64_t status;
 
-    if (process == 0 || window_id >= GUI_MAX_WINDOWS || out_ptr == 0) {
-        return ERR_INVAL;
+    status = sys_user_buf_out(process, out_ptr, sizeof(uint32_t) * 4U);
+    if (status != 0) {
+        return status;
     }
-    if (!user_range_contains(out_ptr, sizeof(uint32_t) * 4U)) {
-        return ERR_INVAL;
-    }
-    desktop = gui_desktop();
-    if (desktop == 0) {
-        return ERR_AGAIN;
-    }
-    window = &desktop->windows[window_id];
-    if (window->used == 0) {
-        return ERR_NOENT;
-    }
-    if (window->owner_pid != process->pid) {
-        return ERR_BADF;
+    status = sys_owner_window(process, window_id, &desktop, &window);
+    if (status != 0) {
+        return status;
     }
     out[0] = window->x;
     out[1] = window->y;
@@ -767,23 +758,20 @@ static int64_t sys_window_get_bounds(process_t *process, uint64_t window_id,
  * fail with ERR_INVAL without touching the window.
  */
 static int64_t sys_window_set_bounds(process_t *process, uint64_t window_id,
-                                    uint64_t x, uint64_t y, uint64_t w,
-                                    uint64_t h) {
+                                     uint64_t x, uint64_t y, uint64_t w,
+                                     uint64_t h) {
+    gui_desktop_t *desktop;
+    gui_window_t *window;
+    int64_t status;
+
     if (process == 0 || window_id >= GUI_MAX_WINDOWS ||
         x > 0x7fffffffU || y > 0x7fffffffU ||
         w > 0xffffffffU || h > 0xffffffffU) {
         return ERR_INVAL;
     }
-    gui_desktop_t *desktop = gui_desktop();
-    if (desktop == 0) {
-        return ERR_AGAIN;
-    }
-    gui_window_t *window = &desktop->windows[window_id];
-    if (window->used == 0) {
-        return ERR_NOENT;
-    }
-    if (window->owner_pid != process->pid) {
-        return ERR_BADF;
+    status = sys_owner_window(process, window_id, &desktop, &window);
+    if (status != 0) {
+        return status;
     }
     if (gui_resize_window(desktop, (uint32_t)window_id, (uint32_t)x,
                           (uint32_t)y, (uint32_t)w, (uint32_t)h) != 0) {
@@ -802,20 +790,11 @@ static int64_t sys_window_set_bounds(process_t *process, uint64_t window_id,
 static int64_t sys_window_minimize(process_t *process, uint64_t window_id) {
     gui_desktop_t *desktop;
     gui_window_t *window;
+    int64_t status;
 
-    if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
-        return ERR_INVAL;
-    }
-    desktop = gui_desktop();
-    if (desktop == 0) {
-        return ERR_AGAIN;
-    }
-    window = &desktop->windows[window_id];
-    if (window->used == 0) {
-        return ERR_NOENT;
-    }
-    if (window->owner_pid != process->pid) {
-        return ERR_BADF;
+    status = sys_owner_window(process, window_id, &desktop, &window);
+    if (status != 0) {
+        return status;
     }
     if (gui_window_minimize(desktop, (uint32_t)window_id) != 0) {
         return ERR_INVAL;
@@ -833,20 +812,11 @@ static int64_t sys_window_minimize(process_t *process, uint64_t window_id) {
 static int64_t sys_window_restore(process_t *process, uint64_t window_id) {
     gui_desktop_t *desktop;
     gui_window_t *window;
+    int64_t status;
 
-    if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
-        return ERR_INVAL;
-    }
-    desktop = gui_desktop();
-    if (desktop == 0) {
-        return ERR_AGAIN;
-    }
-    window = &desktop->windows[window_id];
-    if (window->used == 0) {
-        return ERR_NOENT;
-    }
-    if (window->owner_pid != process->pid) {
-        return ERR_BADF;
+    status = sys_owner_window(process, window_id, &desktop, &window);
+    if (status != 0) {
+        return status;
     }
     if (gui_window_restore(desktop, (uint32_t)window_id) != 0) {
         return ERR_INVAL;
@@ -869,23 +839,15 @@ static int64_t sys_window_state(process_t *process, uint64_t window_id,
     gui_window_t *window;
     uint32_t *out = (uint32_t *)(uintptr_t)out_ptr;
     uint32_t state = 0;
+    int64_t status;
 
-    if (process == 0 || window_id >= GUI_MAX_WINDOWS || out_ptr == 0) {
-        return ERR_INVAL;
+    status = sys_user_buf_out(process, out_ptr, sizeof(uint32_t));
+    if (status != 0) {
+        return status;
     }
-    if (!user_range_contains(out_ptr, sizeof(uint32_t))) {
-        return ERR_INVAL;
-    }
-    desktop = gui_desktop();
-    if (desktop == 0) {
-        return ERR_AGAIN;
-    }
-    window = &desktop->windows[window_id];
-    if (window->used == 0) {
-        return ERR_NOENT;
-    }
-    if (window->owner_pid != process->pid) {
-        return ERR_BADF;
+    status = sys_owner_window(process, window_id, &desktop, &window);
+    if (status != 0) {
+        return status;
     }
     if (window->minimized != 0U) {
         state |= 0x1U;
@@ -901,17 +863,22 @@ static int64_t sys_window_state(process_t *process, uint64_t window_id,
 static int64_t sys_window_event(process_t *process, exception_frame_t *frame,
                                uint64_t window_id, uint64_t buf_ptr,
                                uint64_t buf_count) {
+    gui_window_t *window;
     uint32_t *out = (uint32_t *)(uintptr_t)buf_ptr;
+    int64_t status;
+
     if (process == 0 || window_id >= GUI_MAX_WINDOWS ||
         buf_count == 0 || buf_count > 64) {
         return ERR_INVAL;
     }
-    if (!user_range_contains(buf_ptr, buf_count * 3U * sizeof(uint32_t))) {
-        return ERR_INVAL;
+    status = sys_user_buf_out(process, buf_ptr,
+                              buf_count * 3U * sizeof(uint32_t));
+    if (status != 0) {
+        return status;
     }
-    gui_window_t *window = &gui_desktop()->windows[window_id];
-    if (window->used == 0 || window->owner_pid != process->pid) {
-        return ERR_BADF;
+    status = sys_owner_window_badf(process, window_id, 0, &window);
+    if (status != 0) {
+        return status;
     }
 
     uint64_t yielded = 0;
@@ -940,7 +907,6 @@ static int64_t sys_window_event(process_t *process, exception_frame_t *frame,
 
 static void sys_exit(exception_frame_t *frame, uint64_t code) {
     process_t *current = process_current();
-    process_t *next;
 
     process_mark_exited(current, code);
 
@@ -948,17 +914,13 @@ static void sys_exit(exception_frame_t *frame, uint64_t code) {
     print_hex64(code);
     uart_puts("\n");
 
-    next = process_next_runnable(current);
-    if (next != 0) {
-        next->state = PROCESS_RUNNING;
-        process_set_current(next);
-        process_activate_context(next, frame);
+    if (process_dispatch_next(current, frame, PROCESS_DISPATCH_EXIT) != 0) {
         return;
     }
 
     frame->x[0] = code;
     frame->elr = el0_return_address();
-    frame->spsr = SPSR_EL1H_MASKED;
+    frame->spsr = AARCH64_SPSR_EL1H_DAIF_MASKED;
 }
 
 void syscall_dispatch(exception_frame_t *frame) {
@@ -1013,11 +975,12 @@ void syscall_dispatch(exception_frame_t *frame) {
         }
         break;
     case SYS_SPAWN:
-        frame->x[0] = (uint64_t)sys_spawn(frame->x[0], frame->x[1]);
+        frame->x[0] = (uint64_t)sys_spawn(current, frame->x[0], frame->x[1]);
         break;
     case SYS_SPAWN_ARGV:
-        frame->x[0] = (uint64_t)sys_spawn_argv(frame->x[0], frame->x[1],
-                                              frame->x[2], frame->x[3]);
+        frame->x[0] = (uint64_t)sys_spawn_argv(current, frame->x[0],
+                                               frame->x[1], frame->x[2],
+                                               frame->x[3]);
         break;
     case SYS_WAIT:
         frame->x[0] = (uint64_t)sys_wait(frame->x[0]);
@@ -1026,13 +989,14 @@ void syscall_dispatch(exception_frame_t *frame) {
         frame->x[0] = (uint64_t)sys_kill(frame->x[0]);
         break;
     case SYS_OPEN:
-        frame->x[0] = (uint64_t)sys_open(frame->x[0], frame->x[1]);
+        frame->x[0] = (uint64_t)sys_open(current, frame->x[0], frame->x[1]);
         break;
     case SYS_CLOSE:
         frame->x[0] = (uint64_t)sys_close(frame->x[0]);
         break;
     case SYS_READ:
-        frame->x[0] = (uint64_t)sys_read(frame->x[0], frame->x[1], frame->x[2]);
+        frame->x[0] = (uint64_t)sys_read(current, frame->x[0], frame->x[1],
+                                         frame->x[2]);
         break;
     case SYS_MMAP:
         frame->x[0] = (uint64_t)sys_mmap(current, frame->x[0], frame->x[1], frame->x[2]);
@@ -1041,23 +1005,25 @@ void syscall_dispatch(exception_frame_t *frame) {
         frame->x[0] = (uint64_t)sys_munmap(current, frame->x[0], frame->x[1]);
         break;
     case SYS_WRITE:
-        frame->x[0] = (uint64_t)sys_write(frame->x[0], frame->x[1], frame->x[2]);
+        frame->x[0] = (uint64_t)sys_write(current, frame->x[0], frame->x[1],
+                                          frame->x[2]);
         break;
     case SYS_SEEK:
         frame->x[0] = (uint64_t)sys_seek(frame->x[0], frame->x[1], frame->x[2]);
         break;
     case SYS_STAT:
-        frame->x[0] = (uint64_t)sys_stat(frame->x[0], frame->x[1]);
+        frame->x[0] = (uint64_t)sys_stat(current, frame->x[0], frame->x[1]);
         break;
     case SYS_READDIR:
-        frame->x[0] = (uint64_t)sys_readdir(frame->x[0], frame->x[1],
-                                            frame->x[2]);
+        frame->x[0] = (uint64_t)sys_readdir(current, frame->x[0],
+                                            frame->x[1], frame->x[2]);
         break;
     case SYS_UNLINK:
-        frame->x[0] = (uint64_t)sys_unlink(frame->x[0]);
+        frame->x[0] = (uint64_t)sys_unlink(current, frame->x[0]);
         break;
     case SYS_RENAME:
-        frame->x[0] = (uint64_t)sys_rename(frame->x[0], frame->x[1]);
+        frame->x[0] = (uint64_t)sys_rename(current, frame->x[0],
+                                           frame->x[1]);
         break;
     case SYS_IPC_SEND:
         frame->x[0] = (uint64_t)sys_ipc_send(current, frame->x[0],
@@ -1141,13 +1107,14 @@ void syscall_dispatch(exception_frame_t *frame) {
             frame->x[4], frame->x[5], frame->x[6]);
         break;
     case SYS_TIMEINFO:
-        frame->x[0] = (uint64_t)sys_timeinfo(frame->x[0]);
+        frame->x[0] = (uint64_t)sys_timeinfo(current, frame->x[0]);
         break;
     case SYS_MEMINFO:
-        frame->x[0] = (uint64_t)sys_meminfo(frame->x[0]);
+        frame->x[0] = (uint64_t)sys_meminfo(current, frame->x[0]);
         break;
     case SYS_PROCLIST:
-        frame->x[0] = (uint64_t)sys_proclist(frame->x[0], frame->x[1]);
+        frame->x[0] = (uint64_t)sys_proclist(current, frame->x[0],
+                                             frame->x[1]);
         break;
     default:
         frame->x[0] = (uint64_t)ERR_INVAL;

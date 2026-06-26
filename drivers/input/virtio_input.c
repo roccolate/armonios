@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "kernel/kernel_compiler.h"
 #include "uart/pl011.h"
 
 #define VIRTIO_MMIO_MAGIC_VALUE         0x000
@@ -45,34 +46,34 @@ typedef struct {
     int32_t value;
 } virtio_input_event_t;
 
-typedef struct __attribute__((packed)) {
+typedef struct {
     uint64_t addr;
     uint32_t len;
     uint16_t flags;
     uint16_t next;
-} virtq_desc_t;
+} KERNEL_PACKED virtq_desc_t;
 
-typedef struct __attribute__((packed)) {
+typedef struct {
     uint16_t flags;
     uint16_t idx;
     uint16_t ring[VIRTIO_INPUT_QUEUE_SIZE];
-} virtq_avail_t;
+} KERNEL_PACKED virtq_avail_t;
 
-typedef struct __attribute__((packed)) {
+typedef struct {
     uint32_t id;
     uint32_t len;
-} virtq_used_elem_t;
+} KERNEL_PACKED virtq_used_elem_t;
 
-typedef struct __attribute__((packed)) {
+typedef struct {
     uint16_t flags;
     uint16_t idx;
     virtq_used_elem_t ring[VIRTIO_INPUT_QUEUE_SIZE];
-} virtq_used_t;
+} KERNEL_PACKED virtq_used_t;
 
-static virtq_desc_t g_desc[VIRTIO_INPUT_QUEUE_SIZE] __attribute__((aligned(16)));
-static virtq_avail_t g_avail __attribute__((aligned(2)));
-static virtq_used_t g_used __attribute__((aligned(4)));
-static virtio_input_event_t g_events[VIRTIO_INPUT_QUEUE_SIZE] __attribute__((aligned(8)));
+static virtq_desc_t g_desc[VIRTIO_INPUT_QUEUE_SIZE] KERNEL_ALIGNED(16);
+static virtq_avail_t g_avail KERNEL_ALIGNED(2);
+static virtq_used_t g_used KERNEL_ALIGNED(4);
+static virtio_input_event_t g_events[VIRTIO_INPUT_QUEUE_SIZE] KERNEL_ALIGNED(8);
 
 static volatile uint32_t *virtio_reg(uint64_t base, uint32_t offset) {
     return (volatile uint32_t *)(uintptr_t)(base + offset);

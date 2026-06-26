@@ -3,7 +3,8 @@
 // Image header for the shell app. The shell logic now lives in
 // programs/apps/shell.c and enters through libkarm's _start, so the
 // only thing the header needs is the magic, the size, and the
-// entry_offsets[0] pointer at libkarm's _start.
+// entry_offsets[0] pointer at libkarm's _start. The KLI1 header
+// layout is defined in kernel/user_image_format.h.
 //
 // shell_image_end lives in shell_end.S so it sits at the very tail
 // of the flat image and shell_image_header's image_size field covers

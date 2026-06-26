@@ -61,16 +61,7 @@ void irq_handler_frame(exception_frame_t *frame) {
         current->pstate = frame->spsr;
         current->sp = frame->sp_el0;
 
-        process_t *next = process_next_runnable(current);
-        if (next != 0) {
-            if (current->state == PROCESS_RUNNING) {
-                current->state = PROCESS_READY;
-            }
-
-            next->state = PROCESS_RUNNING;
-            process_set_current(next);
-            process_activate_context(next, frame);
-        }
+        (void)process_dispatch_next(current, frame, PROCESS_DISPATCH_PREEMPT);
     }
 }
 

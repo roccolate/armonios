@@ -1,163 +1,70 @@
 # Current State
 
-This is a focused audit of the desktop and GUI-related pieces in the current
-tree. It is intentionally narrower than the full roadmap.
+This is the short live snapshot of the QEMU desktop and its kernel support.
+Historical cleanup details live in `docs/TECH_DEBT_REVIEW.md`.
 
-## Kernel GUI
+## Boot And Processes
 
-The active GUI code lives in `kernel/gui.c` and `kernel/gui.h`. It is still a
-kernel-owned compositor, not a desktop server.
+- The default board is QEMU `virt`.
+- The kernel runs in EL1 with an identity-mapped kernel/MMIO bootstrap.
+- EL0 apps run from per-process `TTBR0_EL1` page tables.
+- Each process owns tracked user regions for image, stack, and mmap memory.
+  `PROCESS_MAX_USER_REGIONS` is 8.
+- App image and stack pages are allocated per spawn from PMM and released by
+  process cleanup.
+- The fixed user image/stack virtual layout is centralized in
+  `kernel/layout.h`.
 
-Current desktop/window functions:
+## Userland
 
-- `gui_init` initializes a fixed `gui_desktop_t` over an `fb_t`.
-- `gui_create_window` creates an ownerless kernel-drawn window for tests and
-  compatibility paths.
-- `gui_create_window_for_pid` creates a window owned by a process pid.
-- `gui_destroy_window` clears a window slot.
-- `gui_set_window_title` stores a fixed-size title.
-- `gui_set_window_title_bar` enables a kernel-drawn title bar of a given
-  height. Owner drawing through `gui_window_draw_rect/text` is shifted
-  down by `title_h` so apps keep a 0-based content coordinate space.
-- `gui_move_window`, `gui_focus_window`, and `gui_focus_window_ensure` update
-  window position, keyboard focus, and z-order raising.
-- `gui_window_draw_rect`, `gui_window_draw_text`, and `gui_window_clear` draw
-  directly into the framebuffer, clipped to the window bounds for rectangles.
-- `gui_draw` redraws the desktop background, all windows in z-order, focus
-  borders, and the cursor.
-- `gui_init_for_framebuffer`, `gui_render`, `gui_desktop`, `gui_handle_input`,
-  and the `gui_*dirty*` helpers expose the current QEMU framebuffer surface.
+- Shipping apps are C programs under `programs/apps/`: `panel`, `shell`,
+  `editor`, `monitor`, and `clock`.
+- Apps link against `programs/libkarm` and `programs/libkarmdesk`.
+- App images use the KLI1 flat format and are embedded in bootfs.
+- When `make qemu-blk` or `make qemu-fs-test` provides the generated FAT32
+  virtio-blk disk, the kernel can select FAT32-backed app images through VFS.
+- `make stack-check` measures per-function userland C stack usage.
 
-Current input/event functions:
+## GUI
 
-- `gui_hit_test` and `gui_window_contains` find the topmost window under a
-  point.
-- `gui_get_cursor`, `gui_set_cursor`, `gui_cursor_move`, and
-  `gui_cursor_button` track cursor position and button state.
-- The compositor draws a 16x16 cursor on top of the desktop. It uses the
-  arrow by default and switches to a hand over the topmost window's kernel
-  title bar/close decoration.
-- EL0 apps can call `sys_cursor_set_shape` to hint cursor shape for controls
-  they draw themselves; the panel uses it for launcher-button hover.
-- A left click on a window raises/focuses it; a left click on the desktop
-  clears keyboard focus.
-- The kernel debug console's `ps` command reads the GUI cursor state and
-  prints it as `cursor=x,y`.
-- `gui_drag_start`, `gui_drag_update`, `gui_drag_end`, and `gui_drag_active`
-  implement window dragging.
-- `gui_window_push_event` and `gui_window_pop_event` manage a fixed 32-event
-  queue per window.
-- `gui_dispatch_input` converts raw `input_event_t` keyboard and mouse motion
-  into GUI events.
+- The old `kernel/gui.c` monolith is gone.
+- GUI code is split across `kernel/gui_events`, `gui_cursor`, `gui_input`,
+  `gui_backing`, `gui_pool`, and `gui_compositor`.
+- `kernel/gui.h` is the public aggregate header and no longer includes the
+  framebuffer driver header directly.
+- The compositor is still kernel-owned. There is no separate desktop server.
+- Windows have per-process ownership, title bars, close/minimize/restore,
+  focus, z-order, drag, per-window backing buffers, and damage rectangles.
+- Cursor shape is arrow/hand, with per-window cursor-region registration for
+  owner-drawn controls.
 
-Current GUI event shape:
+## Input And Drivers
 
-```c
-typedef struct {
-    uint32_t type;
-    int32_t data1;
-    int32_t data2;
-} gui_event_t;
-```
+- UART, virtio-input, and USB HID feed the common input queue.
+- QEMU `virt` supports virtio-gpu, virtio-blk, virtio-net/DHCP, and xHCI USB
+  HID on the development path.
+- The network stack is hand-written under `kernel/net/`; DHCP option parsing
+  has focused host tests.
+- FAT32 parser/VFS behavior has host tests, and the storage integration path is
+  covered by `make qemu-fs-test`.
 
-Event types are `GUI_EVENT_KEY_PRESS`, `GUI_EVENT_KEY_RELEASE`,
-`GUI_EVENT_MOUSE_CLICK`, `GUI_EVENT_MOUSE_MOVE`, `GUI_EVENT_RESIZE`, and
-`GUI_EVENT_CLOSE`. The kernel now produces `GUI_EVENT_CLOSE` when a left
-click lands inside the close box of a window with a title bar
-(`title_h >= 10`) while the owner process is still alive. If the owner has
-already exited or been reclaimed, the close click destroys the window directly.
-Resize is still defined but not produced yet.
+## Syscalls And ABI
 
-## Framebuffer And Input
+- Syscall numbers are pinned in `kernel/syscall_numbers.h` with
+  `_Static_assert`s.
+- `SYSCALLS.md` is the syscall reference.
+- User-pointer validation funnels through `kernel/syscall_helpers.{c,h}`.
+- Owner-only window syscall lookup funnels through shared syscall helpers.
+- `tests/test_syscall_abi.c` and `tests/test_window_abi.c` pin the ABI details
+  that apps depend on.
 
-The framebuffer path is real enough for QEMU demos:
+## Known Product Gaps
 
-- `drivers/gpu/virtio_gpu.c` provides a 640x480 virtio-gpu scanout.
-- `drivers/fb/fb.c` provides scalar primitives and alpha-aware drawing.
-- `kernel/font.c` draws the current 5x7 bitmap font.
+These are not technical-debt blockers; they are future product work:
 
-Input is queued but still early:
-
-- `drivers/input/input.c` owns a fixed raw input queue.
-- `drivers/input/virtio_input.c` maps virtio keyboard and mouse events into
-  `input_event_t`.
-- UART key input is also mapped into `INPUT_EVENT_KEY_PRESS`.
-- During syscall dispatch, pending input is drained to the GUI for all calls
-  except `SYS_READ`, so legacy/debug serial readers can consume stdin while
-  focused GUI windows still receive key events during normal app event loops.
-
-## Userland And Apps
-
-The tree contains C app sources under `programs/apps/` for `shell`,
-`editor`, `monitor`, `clock`, and `panel`. The build embeds flat app blobs
-into the kernel and exposes them through bootfs/VFS under
-`/kolibri/<name>`. The first boot app is `panel`,
-which owns the taskbar window and launches other apps.
-
-`shell`, `clock`, `editor`, and `monitor` are windowed apps. The shell has a
-small fixed display, consumes key events from its window, and supports `help`,
-`ls`, `mem`, `ps`, `ticks`, `run <name>`, `kill last`, and `exit`; argv and a
-real terminal buffer are still future work. The editor is deliberately
-minimal: it loads `/tmp/note`, draws the visible prefix in its window, appends
-printable input, handles backspace/newline, saves with ctrl-s, and closes with
-ctrl-q or the title-bar close button. The monitor renders a compact
-`sys_meminfo`/`sys_timeinfo`/`sys_proclist` view and closes with `q` or the
-title-bar close button.
-
-There is no `programs/libkarm`, `programs/libkarmdesk`, or `programs/libkarmgui`
-yet. Current apps call syscalls directly from AArch64 assembly.
-
-## Implemented GUI Syscalls
-
-The current window syscall range starts at 70:
-
-- `70 sys_window_create`
-- `71 sys_window_destroy`
-- `72 sys_window_draw_text`
-- `73 sys_window_draw_rect`
-- `74 sys_window_event`
-- `75 sys_window_set_title`
-- `76 sys_window_redraw`
-- `77 sys_window_focus`
-- `78 sys_window_for_pid`
-- `79 sys_cursor_set_shape`
-
-These syscalls validate ownership by comparing the window owner pid with the
-calling process pid for owner-only operations. `sys_window_focus` and
-`sys_window_for_pid` are intentionally callable across pids so the panel can
-raise and list windows owned by app processes. `sys_window_event` returns
-packed triples of `type,data1,data2` and currently yields for a bounded number
-of scheduler turns before returning `ERR_AGAIN`. `sys_cursor_set_shape` accepts
-`0` for arrow and `1` for hand.
-
-## Missing Or Experimental
-
-- No stable userland C syscall wrapper library exists yet.
-- No draw list, theme system, or widget library exists yet.
-- Windows do not have separate backing buffers; drawing writes to the global
-  framebuffer path.
-- Redraw and expose handling are still demo-level.
-- Title-bar close clicks are routed as `GUI_EVENT_CLOSE` for titled windows,
-  but resize events are only defined in the ABI and are not produced yet.
-- There are no titlebar buttons beyond close; minimize/maximize and
-  taskbar-owned focus controls are not implemented yet.
-- Cursor hints are still global and minimal; there is no per-window cursor
-  region registry yet.
-- Text drawing is not clipped per glyph.
-- Mouse event coordinates are absolute framebuffer coordinates, not a final
-  normalized event ABI.
-- There is no `sys_window_move`, `sys_window_resize`, `sys_window_get_bounds`,
-  `sys_event_poll`, `sys_event_wait`, `sys_draw_line`, `sys_draw_bitmap`, theme,
-  clipboard, or notification syscall.
-
-## Desktop Ownership Decision
-
-For the first desktop milestone, keep window management in the kernel-owned
-GUI/compositor. The kernel owns framebuffer access, raw input, cursor state,
-focus, hit testing, z-order, clipping, and per-process window ownership.
-
-High-level desktop behavior should remain in userland. The panel, launcher,
-taskbar, settings, app registry UI, draw lists, themes, and widgets should sit
-above the syscall ABI in `programs/` libraries and apps. This keeps privileged
-hardware behavior small while preventing the kernel from growing a widget
-toolkit.
+- no TCP/HTTP client;
+- no USB hub support;
+- no automated framebuffer screenshot diff test;
+- no real Raspberry Pi hardware boot yet;
+- no audio or multimedia runtime yet;
+- no SMP.

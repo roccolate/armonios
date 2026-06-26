@@ -1,3 +1,4 @@
+/* KLI1 flat-image layout; see kernel/user_image_format.h. */
 SECTIONS {
     . = 0;
 

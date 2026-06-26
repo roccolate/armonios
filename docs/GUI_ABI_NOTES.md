@@ -1,36 +1,47 @@
 # GUI ABI Notes
 
-These notes document the current ABI and the intended next cleanup steps. They
-are not a promise of long-term binary compatibility yet.
+`SYSCALLS.md` is the authoritative syscall reference. This file records the GUI
+rules that are easy to forget while changing the compositor or userland wrappers.
 
-## Live Window Syscalls
+## Live Range
 
-The live window range is `70..79`. Do not reuse `60..69`; `60` and `61` are
-already used by fixed-message IPC.
+The live GUI/window range is `70..86`. Do not reuse `60..69`; that range is
+used by IPC.
 
-| # | Name | Arguments | Return |
-|---|------|-----------|--------|
-| 70 | `sys_window_create` | `x0=x, x1=y, x2=w, x3=h, x4=bg, x5=border, x6=title_ptr` | window id / error |
-| 71 | `sys_window_destroy` | `x0=window_id` | 0 / error |
-| 72 | `sys_window_draw_text` | `x0=window_id, x1=x, x2=y, x3=color, x4=str_ptr` | 0 / error |
-| 73 | `sys_window_draw_rect` | `x0=window_id, x1=x, x2=y, x3=w, x4=h, x5=color` | 0 / error |
-| 74 | `sys_window_event` | `x0=window_id, x1=buf_ptr, x2=event_capacity` | event count / error |
-| 75 | `sys_window_set_title` | `x0=window_id, x1=title_ptr, x2=title_h` | 0 / error |
-| 76 | `sys_window_redraw` | `x0=window_id` | 0 / error |
-| 77 | `sys_window_focus` | `x0=window_id` | 0 / error |
-| 78 | `sys_window_for_pid` | `x0=owner_pid, x1=index` | window id / `ERR_NOENT` |
-| 79 | `sys_cursor_set_shape` | `x0=shape` | 0 / error |
+Implemented calls:
 
-All draw / destroy / set-title window syscalls require the caller to own the
-target window. The kernel checks `gui_window_t.owner_pid` against the current
-process pid. The two new syscalls `sys_window_focus` and `sys_window_for_pid`
-are deliberately callable from any pid so the desktop taskbar (which does not
-own app windows) can raise and enumerate them. `sys_cursor_set_shape` lets
-EL0-drawn controls request `0=arrow` or `1=hand`.
+- `70 sys_window_create`
+- `71 sys_window_destroy`
+- `72 sys_window_draw_text`
+- `73 sys_window_draw_rect`
+- `74 sys_window_event`
+- `75 sys_window_set_title`
+- `76 sys_window_redraw`
+- `77 sys_window_focus`
+- `78 sys_window_for_pid`
+- `79 sys_cursor_set_shape`
+- `80 sys_window_flush`
+- `81 sys_window_get_bounds`
+- `82 sys_window_set_bounds`
+- `83 sys_window_minimize`
+- `84 sys_window_restore`
+- `85 sys_window_state`
+- `86 sys_cursor_register_region`
+
+## Ownership
+
+- Draw, destroy, title, bounds, minimize/restore, state, flush, event, and cursor
+  region operations are owner-checked.
+- `sys_window_focus` is intentionally cross-process so the panel can raise app
+  windows.
+- `sys_window_for_pid` is intentionally cross-process so the panel can enumerate
+  app windows.
+- Ownerless windows use `GUI_NO_OWNER` and are skipped by
+  `sys_window_for_pid`.
 
 ## Event Buffer
 
-`sys_window_event` writes one or more fixed 12-byte records:
+`sys_window_event` writes fixed 12-byte records:
 
 ```c
 typedef struct {
@@ -40,7 +51,7 @@ typedef struct {
 } gui_event_t;
 ```
 
-Current event types:
+Event ids are part of the ABI:
 
 | Type | Name | data1 | data2 |
 |------|------|-------|-------|
@@ -50,67 +61,32 @@ Current event types:
 | 4 | `GUI_EVENT_MOUSE_MOVE` | absolute x | absolute y |
 | 5 | `GUI_EVENT_RESIZE` | width | height |
 | 6 | `GUI_EVENT_CLOSE` | 0 | 0 |
+| 7 | `GUI_EVENT_MINIMIZE` | 0 | 0 |
+| 8 | `GUI_EVENT_MAXIMIZE` | 0 | 0 |
 
-Resize is still an ABI placeholder. The compositor does not yet
-produce them from decorations.
+`sys_window_event` is a bounded wait and returns `ERR_AGAIN` when no event is
+available.
 
-## Current Limitations
+## Drawing And Damage
 
-- `sys_window_create` exposes colors directly instead of using theme tokens.
-- There is no separate `sys_window_flush`; `sys_window_redraw` only marks the
-  demo desktop dirty.
-- `sys_window_event` is a bounded wait, not a clean poll/wait split.
-- Event records do not include a timestamp, modifiers, mouse button mask, or
-  target window id.
-- Mouse coordinates are absolute. A future library wrapper can normalize them
-  to window-local coordinates for apps.
-- Drawing syscalls operate immediately and directly; there is no draw-list
-  submission or per-window back buffer yet.
-- Cursor shape hints are global and minimal; there is no per-window cursor
-  region registry yet.
-- The optional `title_h` argument of `sys_window_set_title` is silently
-  ignored (`title_h == 0`) by apps that pre-date the title bar feature; the
-  kernel still validates `title_h >= window->h`.
+- Owner drawing goes into a per-window backing buffer.
+- `sys_window_flush` pushes a content-local dirty rectangle.
+- The compositor tracks framebuffer damage rectangles with a cap and a full
+  redraw sentinel.
+- Owner drawing coordinates are content-local; title-bar height is applied by
+  the kernel.
 
-## Missing ABI Surface
+## Cursor Regions
 
-Window management still needs:
+`sys_cursor_register_region` lets an owner register up to
+`GUI_MAX_CURSOR_REGIONS` content-local rectangles. Slots are walked in ascending
+order, and the first matching region wins over the default title-bar cursor
+shape. Passing `GUI_CURSOR_REGION_DELETE` clears a slot.
 
-- `sys_window_get_bounds`
-- `sys_window_set_bounds` or separate move/resize calls
-- `sys_window_show` and `sys_window_hide`
-- `sys_window_flush` with an explicit dirty rectangle
-- close/minimize/maximize decoration events
-- process-exit cleanup or orphan-window policy
+## Compatibility Rules
 
-Drawing still needs:
-
-- `sys_draw_begin` and `sys_draw_end`
-- `sys_draw_clear`
-- `sys_draw_rect_outline`
-- `sys_draw_line`
-- `sys_draw_bitmap`
-- `sys_draw_get_text_metrics`
-
-Events still need:
-
-- `sys_event_poll`
-- `sys_event_wait`
-- `sys_event_peek`
-- timer events or a separate timer syscall family
-
-Desktop integration can wait until the core window ABI is less fluid:
-
-- desktop info
-- theme get/set
-- clipboard get/set
-- notifications
-
-## Ownership Model
-
-Keep the compositor and low-level window state in the kernel for now. Userland
-apps and libraries should see handles, events, and drawing commands only.
-
-The desktop process should eventually own the taskbar, launcher, menu, themes,
-and high-level app lifecycle. Widgets belong in `libkarmgui`, not in the
-kernel.
+- Append new GUI syscalls; do not renumber existing calls.
+- Keep event struct size and event ids stable.
+- Keep owner-only checks centralized through syscall helpers.
+- Update `SYSCALLS.md`, `kernel/syscall_numbers.h`,
+  `programs/libkarmdesk/gui.h`, and ABI tests in the same change.

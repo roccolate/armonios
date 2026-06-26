@@ -1,4 +1,5 @@
 build/
+build-stack-check/
 *.o
 *.elf
 *.bin

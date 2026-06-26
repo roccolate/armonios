@@ -3,8 +3,6 @@
 
 #include <stdint.h>
 
-#include "kernel/panel_boot.h"
-
 /*
  * Maximum number of times the kernel will relaunch the panel taskbar
  * after it exits (cleanly via sys_exit or via a fault) before giving
@@ -20,8 +18,11 @@ typedef enum {
     PANEL_BOOT_RECOVERY_STOP_EXHAUSTED = 1,
 } panel_boot_recovery_action_t;
 
-uint64_t panel_boot_run_with_recovery(uint64_t memory_base, uint64_t memory_size,
-                                      panel_map_mmio_fn_t map_mmio);
+typedef uint64_t (*panel_boot_recovery_run_fn_t)(void *ctx);
+typedef void (*panel_boot_recovery_log_fn_t)(const char *line);
+
+uint64_t panel_boot_recovery_run(panel_boot_recovery_run_fn_t run, void *ctx,
+                                 panel_boot_recovery_log_fn_t log);
 
 /*
  * Pure helper extracted from the recovery loop so the host test

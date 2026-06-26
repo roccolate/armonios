@@ -3,7 +3,8 @@
 // Image header for the panel app. The panel logic now lives in
 // programs/apps/panel.c and enters through libkarm's _start, so the
 // only thing the header needs is the magic, the size, and the
-// entry_offsets[0] pointer at libkarm's _start.
+// entry_offsets[0] pointer at libkarm's _start. The KLI1 header
+// layout is defined in kernel/user_image_format.h.
 //
 // panel_image_end lives in panel_end.S so it sits at the very tail
 // of the flat image and panel_image_header's image_size field covers

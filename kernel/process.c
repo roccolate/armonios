@@ -221,6 +221,39 @@ process_t *process_next_runnable(process_t *after) {
     return 0;
 }
 
+int process_dispatch_next(process_t *current, exception_frame_t *frame,
+                          process_dispatch_policy_t policy) {
+    process_t *next;
+
+    if (frame == 0 ||
+        (policy != PROCESS_DISPATCH_EXIT &&
+         policy != PROCESS_DISPATCH_PREEMPT)) {
+        return 0;
+    }
+    if (current == 0 && policy == PROCESS_DISPATCH_PREEMPT) {
+        return 0;
+    }
+
+    next = process_next_runnable(current);
+    if (next == 0) {
+        return 0;
+    }
+
+    if (policy == PROCESS_DISPATCH_PREEMPT &&
+        current != 0 && current->state == PROCESS_RUNNING) {
+        current->state = PROCESS_READY;
+    }
+
+    next->state = PROCESS_RUNNING;
+    process_set_current(next);
+#ifdef KOLIBRIARM_TEST
+    process_load_context(next, frame);
+#else
+    process_activate_context(next, frame);
+#endif
+    return 1;
+}
+
 int process_wait_zombie(uint32_t pid, uint64_t *exit_code) {
     process_t *process = process_find(pid);
 

@@ -37,6 +37,7 @@ void vfs_reset(void);
 int vfs_mount_static(const vfs_node_t *nodes, uint32_t count);
 int vfs_mount_list(const char *path, vfs_list_fn_t list, void *context);
 const vfs_node_t *vfs_find(const char *path);
+const char *vfs_strip_prefix(const char *path, const char *prefix);
 int vfs_read(const char *path, uint64_t offset, uint8_t *buffer,
              uint64_t capacity, uint64_t *bytes_read);
 int vfs_write(const char *path, uint64_t offset, const uint8_t *buffer,

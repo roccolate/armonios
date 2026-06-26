@@ -43,9 +43,8 @@ Notes:
 - `sys_exit` marks the process as exited and switches to the next runnable EL0
   process when one exists.
 - `sys_yield` switches to the next runnable EL0 process when one exists.
-- `sys_spawn` is the first loader hook exposed to EL0. It currently loads a
-  flat image through VFS, starts the selected entry as a READY process, and
-  reclaims exited demo processes before allocating a slot.
+- `sys_spawn` loads a KLI1 flat image through VFS, starts the selected entry as
+  a READY process, and reclaims exited processes before allocating a slot.
 - `sys_spawn_argv` extends `sys_spawn` with an argv vector. `argv_ptr` must
   point at `argc` `uint64_t` entries inside the caller's registered user
   regions. The kernel copies each referenced string onto the new process's
@@ -127,9 +126,8 @@ Notes:
   not opened for writing.
 - `sys_write` validates that `buf..buf+len` is inside the current process's
   registered user regions before reading from it.
-- FAT32 writes are limited to existing root 8.3 files with already allocated
-  cluster chains. The current driver can overwrite or grow within that chain
-  and updates the directory entry size; it does not allocate new clusters.
+- FAT32 supports root 8.3 file read/write, create, delete, rename, and cluster
+  chain growth for the current simple VFS integration.
 
 ### IPC
 
@@ -154,7 +152,7 @@ Current limitations:
 | 73 | `sys_window_draw_rect` | `x0=window_id, x1=x, x2=y, x3=w, x4=h, x5=color` | 0 / error | Draw a clipped filled rectangle inside a window |
 | 74 | `sys_window_event` | `x0=window_id, x1=buf, x2=max_events` | event count / error | Read queued window events |
 | 75 | `sys_window_set_title` | `x0=window_id, x1=title_ptr, x2=title_h` | 0 / error | Replace a window title and optional kernel-drawn title bar height |
-| 76 | `sys_window_redraw` | `x0=window_id` | 0 / error | Mark the demo GUI desktop dirty |
+| 76 | `sys_window_redraw` | `x0=window_id` | 0 / error | Mark the GUI desktop dirty |
 | 77 | `sys_window_focus` | `x0=window_id` | 0 / error | Raise/focus a window by id (callable from any pid, not just the owner) |
 | 78 | `sys_window_for_pid` | `x0=owner_pid, x1=index` | window id / `ERR_NOENT` | Return the index-th window owned by the given pid, or `ERR_NOENT` when none |
 | 79 | `sys_cursor_set_shape` | `x0=shape` | 0 / error | Request the global cursor shape (`0=arrow`, `1=hand`) |
@@ -222,17 +220,17 @@ Current limitations:
 | -5 | `ERR_BADF` | Bad file descriptor |
 | -7 | `ERR_INVAL` | Invalid argument |
 | -11 | `ERR_AGAIN` | Try again later |
+| -13 | `ERR_PERM` | Permission denied |
 
 ### Memory Isolation Contract
 
 Every syscall that takes a user pointer validates the caller's registered
 user regions before reading or writing it. The contract is enforced by
-`process_user_range_contains(process_current(), start, size)` in
-`kernel/syscall.c` and pinned by `tests/test_syscall_abi.c` and
-`tests/test_process_isolation.c`.
+the helper layer in `kernel/syscall_helpers.{c,h}` and pinned by
+`tests/test_syscall_abi.c` and `tests/test_process_isolation.c`.
 
 - Each process owns up to `PROCESS_MAX_USER_REGIONS` (`kernel/process.h`,
-  default 4) disjoint regions.
+  currently 8) disjoint regions.
 - The kernel's user-region list is per-process. A region registered by
   process A is invisible to `process_user_range_contains` when called on
   process B.
@@ -251,7 +249,7 @@ user regions before reading or writing it. The contract is enforced by
 ### GUI / Window-Manager ABI
 
 The kernel exposes the desktop as a per-process set of windows. The
-contract below is enforced by `kernel/gui.c` and pinned by
+contract below is enforced by the `kernel/gui_*` modules and pinned by
 `tests/test_window_abi.c`.
 
 - Every window carries one `owner_pid`. `gui_window_t.owner_pid ==
@@ -267,7 +265,8 @@ contract below is enforced by `kernel/gui.c` and pinned by
   order are part of the ABI; apps size their event buffers as
   `count * sizeof(gui_event_t)`.
 - Event type IDs are frozen: `1=KEY_PRESS, 2=KEY_RELEASE,
-  3=MOUSE_CLICK, 4=MOUSE_MOVE, 5=RESIZE, 6=CLOSE`. Reordering them
+  3=MOUSE_CLICK, 4=MOUSE_MOVE, 5=RESIZE, 6=CLOSE, 7=MINIMIZE,
+  8=MAXIMIZE`. Reordering them
   silently breaks every windowed app.
 - `sys_window_focus` raises a window by bumping its `z` field. Window
   pool indices stay stable; z-order changes never move window structs.
@@ -359,9 +358,8 @@ Planned `open` flags:
 
 ### Planned GUI / Window System Extensions
 
-The live GUI range starts at 70. Future GUI numbers should be assigned after
-the current 70-82 ABI is cleaned up; do not move GUI calls into 60-69 because
-that range is already used for IPC.
+The live GUI range is 70..86. Future GUI numbers should be appended after 86;
+do not move GUI calls into 60-69 because that range is already used for IPC.
 
 Planned but not implemented yet:
 
@@ -411,20 +409,12 @@ renumbering those calls.
 
 ---
 
-## Planned Error Codes
+## Reserved Error Names
 
-| Code | Name | Meaning |
-|------|------|---------|
-| -1 | `ERR_GENERIC` | Unspecified error |
-| -2 | `ERR_NOMEM` | Out of memory |
-| -3 | `ERR_NOENT` | File or resource not found |
-| -4 | `ERR_PERM` | Permission denied |
-| -5 | `ERR_BADF` | Bad file descriptor |
-| -6 | `ERR_BUSY` | Resource busy |
-| -7 | `ERR_INVAL` | Invalid argument |
-| -8 | `ERR_OVERFLOW` | Buffer or value overflow |
-| -9 | `ERR_TIMEOUT` | Operation timed out |
-| -10 | `ERR_EXIST` | Resource already exists |
+The implemented error values are listed above. Future errors should be added
+only when a syscall returns them and the ABI tests pin the number. Candidate
+names that are not currently part of the ABI include `ERR_BUSY`,
+`ERR_OVERFLOW`, `ERR_TIMEOUT`, and `ERR_EXIST`.
 
 ---
 

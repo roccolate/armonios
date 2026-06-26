@@ -6,7 +6,7 @@
 #include "kernel/exceptions.h"
 
 #define PROCESS_MAX_PROCESSES    16U
-#define PROCESS_MAX_USER_REGIONS 4U
+#define PROCESS_MAX_USER_REGIONS 8U
 #define PROCESS_NAME_LEN         16U
 #define PROCESS_USER_MMAP_BASE   0x0000000100000000ULL
 #define PROCESS_USER_MMAP_LIMIT  0x0000000200000000ULL
@@ -19,6 +19,11 @@ typedef enum {
     PROCESS_BLOCKED,
     PROCESS_ZOMBIE,
 } process_state_t;
+
+typedef enum {
+    PROCESS_DISPATCH_EXIT = 0,
+    PROCESS_DISPATCH_PREEMPT = 1,
+} process_dispatch_policy_t;
 
 typedef struct {
     uint64_t start;
@@ -70,6 +75,8 @@ const process_t *process_at(uint32_t index);
 int process_index(const process_t *process, uint32_t *index);
 process_t *process_find(uint32_t pid);
 process_t *process_next_runnable(process_t *after);
+int process_dispatch_next(process_t *current, exception_frame_t *frame,
+                          process_dispatch_policy_t policy);
 void process_reclaim_zombies(void);
 int process_wait_zombie(uint32_t pid, uint64_t *exit_code);
 int process_kill(uint32_t pid, uint64_t exit_code);

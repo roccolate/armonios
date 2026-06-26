@@ -1,11 +1,13 @@
 #include <stdint.h>
 
 #include "unity/unity.h"
-#include "../kernel/panel_boot.h"
 #include "../kernel/panel_boot_recovery.h"
 
 void test_panel_boot_recovery_reset_stub(uint64_t next_exit);
 uint32_t test_panel_boot_recovery_call_count(void);
+uint64_t test_panel_boot_recovery_run_stub(void *ctx);
+void test_panel_boot_recovery_log_stub(const char *line);
+uint32_t test_panel_boot_recovery_log_count(void);
 
 void test_panel_boot_recovery_max_attempts_constant_is_sane(void) {
     /*
@@ -110,12 +112,14 @@ void test_panel_boot_recovery_wrapper_stops_after_budget(void) {
 
     test_panel_boot_recovery_reset_stub(sentinel);
 
-    uint64_t exit_code =
-        panel_boot_run_with_recovery(0U, 0U, 0);
+    uint64_t exit_code = panel_boot_recovery_run(
+        test_panel_boot_recovery_run_stub, 0, test_panel_boot_recovery_log_stub);
 
     TEST_ASSERT_EQUAL_UINT64(PANEL_BOOT_RECOVERY_MAX_ATTEMPTS,
                              (uint64_t)test_panel_boot_recovery_call_count());
     TEST_ASSERT_EQUAL_UINT64(sentinel, exit_code);
+    TEST_ASSERT_TRUE(test_panel_boot_recovery_log_count() >=
+                     PANEL_BOOT_RECOVERY_MAX_ATTEMPTS);
 }
 
 void test_panel_boot_recovery_wrapper_propagates_last_exit_code(void) {
@@ -128,10 +132,22 @@ void test_panel_boot_recovery_wrapper_propagates_last_exit_code(void) {
      */
     test_panel_boot_recovery_reset_stub(42U);
 
-    uint64_t exit_code =
-        panel_boot_run_with_recovery(0U, 0U, 0);
+    uint64_t exit_code = panel_boot_recovery_run(
+        test_panel_boot_recovery_run_stub, 0, 0);
 
     TEST_ASSERT_EQUAL_UINT64(42U, exit_code);
     TEST_ASSERT_EQUAL_UINT64(PANEL_BOOT_RECOVERY_MAX_ATTEMPTS,
                              (uint64_t)test_panel_boot_recovery_call_count());
+}
+
+void test_panel_boot_recovery_run_rejects_null_callback(void) {
+    test_panel_boot_recovery_reset_stub(7U);
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             panel_boot_recovery_run(0, 0,
+                                                     test_panel_boot_recovery_log_stub));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)test_panel_boot_recovery_call_count());
+    TEST_ASSERT_EQUAL_UINT64(1,
+                             (uint64_t)test_panel_boot_recovery_log_count());
 }

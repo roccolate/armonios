@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "kernel/kernel_compiler.h"
+
 #define VIRTIO_MMIO_MAGIC_VALUE 0x000
 #define VIRTIO_MMIO_VERSION     0x004
 #define VIRTIO_MMIO_DEVICE_ID   0x008
@@ -70,11 +72,11 @@ typedef struct {
     uint64_t sector;
 } virtio_blk_req_t;
 
-static virtq_desc_t g_desc[VIRTIO_BLK_QUEUE_SIZE] __attribute__((aligned(16)));
-static virtq_avail_t g_avail __attribute__((aligned(2)));
-static virtq_used_t g_used __attribute__((aligned(4)));
-static virtio_blk_req_t g_request __attribute__((aligned(8)));
-static uint8_t g_status __attribute__((aligned(1)));
+static virtq_desc_t g_desc[VIRTIO_BLK_QUEUE_SIZE] KERNEL_ALIGNED(16);
+static virtq_avail_t g_avail KERNEL_ALIGNED(2);
+static virtq_used_t g_used KERNEL_ALIGNED(4);
+static virtio_blk_req_t g_request KERNEL_ALIGNED(8);
+static uint8_t g_status KERNEL_ALIGNED(1);
 
 static volatile uint32_t *virtio_reg(uint64_t base, uint32_t offset) {
     return (volatile uint32_t *)(uintptr_t)(base + offset);

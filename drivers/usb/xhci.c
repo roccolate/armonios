@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "kernel/kernel_compiler.h"
 #include "kernel/mm/pmm.h"
 #include "usb/usb.h"
 
@@ -95,13 +96,13 @@ typedef struct {
     volatile uint64_t parameter;
     volatile uint32_t status;
     volatile uint32_t control;
-} __attribute__((aligned(16))) xhci_trb_t;
+} KERNEL_ALIGNED(16) xhci_trb_t;
 
 typedef struct {
     uint64_t ring_base;
     uint32_t ring_size;
     uint32_t reserved;
-} __attribute__((packed, aligned(16))) xhci_erst_entry_t;
+} KERNEL_PACKED_ALIGNED(16) xhci_erst_entry_t;
 
 typedef struct {
     xhci_trb_t *trbs;
@@ -118,25 +119,21 @@ typedef struct {
 } xhci_stashed_event_t;
 
 typedef struct {
-    xhci_trb_t command_ring[XHCI_COMMAND_RING_SIZE]
-        __attribute__((aligned(64)));
-    xhci_trb_t event_ring[XHCI_EVENT_RING_SIZE]
-        __attribute__((aligned(64)));
+    xhci_trb_t command_ring[XHCI_COMMAND_RING_SIZE] KERNEL_ALIGNED(64);
+    xhci_trb_t event_ring[XHCI_EVENT_RING_SIZE] KERNEL_ALIGNED(64);
     xhci_trb_t transfer_ring[XHCI_MAX_DEVICES][XHCI_MAX_ENDPOINTS]
-        [XHCI_TRANSFER_RING_SIZE] __attribute__((aligned(64)));
-    xhci_erst_entry_t erst[1] __attribute__((aligned(64)));
-    uint64_t dcbaa[XHCI_MAX_SLOTS + 1U] __attribute__((aligned(64)));
-    uint64_t scratchpad_ptrs[XHCI_MAX_SCRATCHPADS]
-        __attribute__((aligned(64)));
+        [XHCI_TRANSFER_RING_SIZE] KERNEL_ALIGNED(64);
+    xhci_erst_entry_t erst[1] KERNEL_ALIGNED(64);
+    uint64_t dcbaa[XHCI_MAX_SLOTS + 1U] KERNEL_ALIGNED(64);
+    uint64_t scratchpad_ptrs[XHCI_MAX_SCRATCHPADS] KERNEL_ALIGNED(64);
     uint8_t input_context[XHCI_CONTEXT_BYTES_MAX * XHCI_INPUT_CONTEXT_COUNT]
-        __attribute__((aligned(64)));
+        KERNEL_ALIGNED(64);
     uint8_t device_context[XHCI_MAX_DEVICES][XHCI_CONTEXT_BYTES_MAX *
-        XHCI_CONTEXT_COUNT] __attribute__((aligned(64)));
-    uint8_t control_buffer[XHCI_CONTROL_BUF_SIZE]
-        __attribute__((aligned(64)));
-    uint8_t setup_buffer[16] __attribute__((aligned(16)));
+        XHCI_CONTEXT_COUNT] KERNEL_ALIGNED(64);
+    uint8_t control_buffer[XHCI_CONTROL_BUF_SIZE] KERNEL_ALIGNED(64);
+    uint8_t setup_buffer[16] KERNEL_ALIGNED(16);
     uint8_t interrupt_buffer[XHCI_MAX_DEVICES][XHCI_MAX_ENDPOINTS]
-        [XHCI_INTR_BUF_SIZE] __attribute__((aligned(64)));
+        [XHCI_INTR_BUF_SIZE] KERNEL_ALIGNED(64);
     xhci_ring_t command;
     xhci_ring_t endpoint[XHCI_MAX_DEVICES][XHCI_MAX_ENDPOINTS];
     xhci_trb_t *pending_intr_trb[XHCI_MAX_DEVICES][XHCI_MAX_ENDPOINTS];

@@ -481,6 +481,11 @@ int main(int argc, char **argv) {
     refresh_running(&p);
     write_cstr(1, "panel: ready\n");
 
+#ifdef PANEL_FORCE_FAULT
+    write_cstr(1, "panel: forced fault\n");
+    *((volatile uint64_t *)(uintptr_t)0) = 0x50414e454c464c54ULL;
+#endif
+
 #ifdef PANEL_AUTO_TEST
     /*
      * Smoke test: launch every non-panel button once at boot so the

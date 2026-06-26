@@ -59,12 +59,11 @@ KolibriARM is a bare-metal operating system for ARM64 (AArch64) processors, writ
 
 ## Current Milestone
 
-The current milestone is **Phase 10 — a real desktop**. Read
+The current milestone is **alpha stabilization for the QEMU desktop**. Read
 [ROADMAP.md](ROADMAP.md) for the full breakdown. In short:
 
-- [x] Split `programs/user_demo.S` into one binary per app under
-      `programs/apps/`, registered by name in the loader and exposed under
-      `/kolibri/<name>`.
+- [x] Ship flat C userland apps under `programs/apps/`, registered by name in
+      the loader and exposed under `/kolibri/<name>`.
 - [x] Add window syscalls (`sys_window_create`, `sys_window_draw_text`,
       `sys_window_event`, `sys_window_destroy`) with per-process ownership.
 - [x] Consume the queued mouse events: visible cursor, click-to-raise,
@@ -74,9 +73,8 @@ The current milestone is **Phase 10 — a real desktop**. Read
 - [x] Ship four real apps: `shell`, `editor`, `monitor`, `clock`
       as windowed desktop apps.
 - [x] Port KolibriOS's 8x8 font (`8X8ISXP`-shaped, ASCII 32-126).
-- [x] Accept the `KOS` flat format (header magic `0x00534F4B`) as a synonym
-      for our native `KLI1` header. The KolibriOS-style KOS image loader is
-      exercised by the in-tree flat-image tests.
+- [x] Load native `KLI1` flat app images from bootfs; unknown image magic is
+      rejected instead of treated as a compatibility format.
 - [x] USB HID foundations: PCI ECAM scan + BAR auto-assignment,
       xHCI poll-mode driver with real control and interrupt-in transfers,
       boot-protocol HID report parser, descriptor walker, and a
@@ -134,13 +132,22 @@ cd kolibriarm
 # Build the default QEMU virt board
 make
 
+# List documented build and QEMU targets
+make help
+
+# Show full compiler/linker commands instead of compact build lines
+make V=1
+
+# Measure per-function C stack usage for userland apps
+make stack-check
+
 # Equivalent explicit board selection
 make BOARD=qemu_virt
 
 # Run in QEMU
 make qemu
 
-# In the windowed shell, try:
+# In the shell app, try:
 # help
 # ls
 # ps
@@ -156,7 +163,10 @@ make qemu
 # Run in QEMU with a generated FAT32 virtio-blk image
 make qemu-blk
 
-# Run in QEMU with virtio-gpu headless and draw the GUI window demo
+# Smoke-test the FAT32 storage/VFS boot path under QEMU
+make qemu-fs-test
+
+# Run in QEMU with virtio-gpu headless and boot the desktop
 make qemu-fb
 
 # Run in QEMU with a visible virtio-gpu window and a virtio-mouse-device.
@@ -200,7 +210,7 @@ kolibriarm/
 │   ├── mm/             # Memory management
 │   ├── sched/          # Scheduler
 │   ├── ipc.c           # Fixed-message IPC queue
-│   └── gui.c           # Early kernel-managed window compositor
+│   └── gui_*.c         # Kernel-managed GUI modules
 ├── drivers/            # Hardware drivers (C + minimal ASM)
 │   ├── board.h         # Generic board/platform interface
 │   ├── boards/         # Board/platform glue, starting with qemu_virt
@@ -210,11 +220,14 @@ kolibriarm/
 │   ├── usb/            # USB HID (keyboard, mouse)
 │   └── net/            # Ethernet driver
 ├── programs/           # Userland applications
-├── docs/               # Documentation
-│   ├── ARCHITECTURE.md
-│   ├── SYSCALLS.md
-│   ├── MEMORY_MAP.md
-│   └── PORTING.md
+├── docs/               # Focused project notes
+│   ├── CURRENT_STATE.md
+│   ├── GUI_ABI_NOTES.md
+│   └── TECH_DEBT_REVIEW.md
+├── ARCHITECTURE.md     # Kernel architecture overview
+├── SYSCALLS.md         # Syscall ABI reference
+├── MEMORY_MAP.md       # Fixed address/layout reference
+├── PORTING.md          # Board porting notes
 ├── linker.ld           # Linker script
 ├── Makefile            # Build system
 ├── ROADMAP.md          # Development roadmap

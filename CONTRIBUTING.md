@@ -8,9 +8,9 @@ First: thank you for considering contributing. KolibriARM is built on the idea t
 
 Read these documents first:
 
-1. [README.md](../README.md) — project overview and philosophy
-2. [docs/ARCHITECTURE.md](ARCHITECTURE.md) — how the system is structured
-3. [ROADMAP.md](../ROADMAP.md) — what's planned and in what order
+1. [README.md](README.md) — project overview and philosophy
+2. [ARCHITECTURE.md](ARCHITECTURE.md) — how the system is structured
+3. [ROADMAP.md](ROADMAP.md) — what's planned and in what order
 
 If you're new to OS development, the [OSDev Wiki](https://wiki.osdev.org) and the [ARM Architecture Reference Manual](https://developer.arm.com/documentation/ddi0487) are the two most important external references.
 
@@ -36,7 +36,7 @@ Check the issue tracker for open issues tagged:
 
 ## Development Setup
 
-See the [README](../README.md#building) for the full setup. Short version:
+See the [README](README.md#building) for the full setup. Short version:
 
 ```bash
 # WSL2 / Ubuntu
@@ -46,6 +46,8 @@ sudo apt install -y qemu-system-arm gcc-aarch64-linux-gnu \
 git clone https://github.com/yourname/kolibriarm
 cd kolibriarm
 make
+make size
+make -C tests test
 make qemu
 ```
 
@@ -57,7 +59,8 @@ make qemu
 
 - Kernel core: **C11** only. No C++.
 - Boot and context switch: **AArch64 ASM** (GNU assembler syntax, `.S` files).
-- No use of libc headers anywhere. Use `kernel/lib/` for string ops, memset, etc.
+- Kernel and userland code stay freestanding. Use the project's own helpers
+  instead of assuming libc/POSIX behavior.
 
 ### Style
 
@@ -139,7 +142,7 @@ feat(sched): implement round-robin preemptive scheduler
 
 1. **Fork** the repository and create a branch: `git checkout -b feat/your-feature`
 2. **Write your code** following the standards above
-3. **Test in QEMU**: your change must boot cleanly with `make qemu`
+3. **Test** with the relevant host and QEMU commands
 4. **Document** any new public APIs in the relevant `.h` file
 5. **Open a PR** with:
    - A clear title following the commit convention
@@ -149,8 +152,10 @@ feat(sched): implement round-robin preemptive scheduler
 
 ### PR Checklist
 
-- [ ] Code compiles with `make` without warnings
-- [ ] `make qemu` boots and produces expected output
+- [ ] `make` passes without warnings
+- [ ] `make size` passes
+- [ ] `make -C tests test` passes
+- [ ] Relevant QEMU smoke target passes (`qemu`, `qemu-fb`, `qemu-fs-test`, etc.)
 - [ ] No libc headers included
 - [ ] New public functions have doc comments
 - [ ] Commit messages follow the convention
@@ -179,4 +184,4 @@ feat(sched): implement round-robin preemptive scheduler
 
 ## License
 
-By contributing, you agree that your code will be licensed under [GPL-2.0](../LICENSE).
+By contributing, you agree that your code will be licensed under [GPL-2.0](LICENSE).

@@ -4,6 +4,7 @@
 
 #include "drivers/input/input.h"
 #include "kernel/gui.h"
+#include "kernel/init_status.h"
 #include "kernel/mm/pmm.h"
 #include "kernel/print.h"
 #include "kernel/process.h"
@@ -17,8 +18,6 @@ static char g_line[CONSOLE_LINE_MAX];
 static uint32_t g_line_len;
 static dtb_memory_t g_memory;
 static int g_have_memory;
-static int g_storage_ready;
-static int g_framebuffer_ready;
 static int g_interactive;
 // Last known absolute cursor position, used to synthesize relative
 // mouse_move events when the user drives the mouse from the serial
@@ -27,27 +26,95 @@ static int g_cursor_known;
 static int32_t g_cursor_x;
 static int32_t g_cursor_y;
 
-static int streq(const char *a, const char *b) {
-    while (*a != '\0' && *b != '\0') {
-        if (*a != *b) {
+typedef struct {
+    uint8_t name;
+    uint8_t help;
+    uint8_t id;
+} k_command_t;
+
+#define COMMAND_TEXT_HELP   0U
+#define COMMAND_TEXT_MEM    5U
+#define COMMAND_TEXT_PS     9U
+#define COMMAND_TEXT_TICKS  12U
+#define COMMAND_TEXT_STATUS 18U
+#define COMMAND_TEXT_MOUSE  25U
+#define COMMAND_TEXT_CLICK  31U
+#define COMMAND_TEXT_KEY    37U
+#define COMMAND_TEXT_EMPTY  41U
+#define COMMAND_TEXT_XY     42U
+#define COMMAND_TEXT_CHAR   50U
+
+#define COMMAND_ID_HELP   0U
+#define COMMAND_ID_MEM    1U
+#define COMMAND_ID_PS     2U
+#define COMMAND_ID_TICKS  3U
+#define COMMAND_ID_STATUS 4U
+#define COMMAND_ID_MOUSE  5U
+#define COMMAND_ID_CLICK  6U
+#define COMMAND_ID_KEY    7U
+
+static const char g_command_text[] =
+    "help\0mem\0ps\0ticks\0status\0mouse\0click\0key\0\0<x> <y>\0<char>";
+
+static const k_command_t g_commands[] = {
+    {COMMAND_TEXT_HELP, COMMAND_TEXT_EMPTY, COMMAND_ID_HELP},
+    {COMMAND_TEXT_MEM, COMMAND_TEXT_EMPTY, COMMAND_ID_MEM},
+    {COMMAND_TEXT_PS, COMMAND_TEXT_EMPTY, COMMAND_ID_PS},
+    {COMMAND_TEXT_TICKS, COMMAND_TEXT_EMPTY, COMMAND_ID_TICKS},
+    {COMMAND_TEXT_STATUS, COMMAND_TEXT_EMPTY, COMMAND_ID_STATUS},
+    {COMMAND_TEXT_MOUSE, COMMAND_TEXT_XY, COMMAND_ID_MOUSE},
+    {COMMAND_TEXT_CLICK, COMMAND_TEXT_XY, COMMAND_ID_CLICK},
+    {COMMAND_TEXT_KEY, COMMAND_TEXT_CHAR, COMMAND_ID_KEY},
+};
+
+static const uint32_t g_command_count =
+    (uint32_t)(sizeof(g_commands) / sizeof(g_commands[0]));
+
+static const char *command_text(uint8_t offset) {
+    return &g_command_text[offset];
+}
+
+static int command_matches(const char *line, const char *name,
+                           const char **out_args) {
+    while (*name != '\0') {
+        if (*line != *name) {
             return 0;
         }
-        a++;
-        b++;
+        line++;
+        name++;
     }
 
-    return *a == '\0' && *b == '\0';
+    if (*line == '\0') {
+        *out_args = line;
+        return 1;
+    }
+    if (*line == ' ') {
+        *out_args = line + 1;
+        return 1;
+    }
+    return 0;
 }
 
 static void print_prompt(void) {
     uart_puts("k> ");
 }
 
+static void print_usage(const k_command_t *command) {
+    const char *help = command_text(command->help);
+
+    uart_puts("usage: ");
+    uart_puts(command_text(command->name));
+    if (help[0] != '\0') {
+        uart_puts(" ");
+        uart_puts(help);
+    }
+    uart_puts("\n");
+}
+
 static void run_help(void) {
-    uart_puts("commands: help mem ps ticks storage fb\n");
-    uart_puts("          mouse <x> <y>   move cursor\n");
-    uart_puts("          click <x> <y>   left-click at cursor\n");
-    uart_puts("          key <c>         inject one ASCII key press\n");
+    for (uint32_t i = 0; i < g_command_count; i++) {
+        print_usage(&g_commands[i]);
+    }
 }
 
 static void run_mem(void) {
@@ -99,9 +166,19 @@ static void run_ticks(void) {
     uart_puts("\n");
 }
 
-static void run_status(const char *name, int ready) {
-    uart_puts(name);
-    uart_puts(ready != 0 ? ": ready\n" : ": absent\n");
+static void run_boot_status(void) {
+    for (uint32_t i = 0; i < init_status_count(); i++) {
+        const init_status_entry_t *entry = init_status_at(i);
+
+        if (entry == 0) {
+            continue;
+        }
+
+        uart_puts(entry->name);
+        uart_puts(": ");
+        uart_puts(init_status_label(entry->status));
+        uart_puts("\n");
+    }
 }
 
 // Read the current cursor position into *x/*y. Falls back to (0,0) if
@@ -147,7 +224,8 @@ static void queue_key_press(uint32_t key) {
     (void)input_queue_push(&event);
 }
 
-static int parse_signed(const char *s, int32_t *out) {
+static int parse_signed(const char **cursor, int32_t *out) {
+    const char *s = *cursor;
     int negative = 0;
     if (*s == '-') {
         negative = 1;
@@ -162,6 +240,7 @@ static int parse_signed(const char *s, int32_t *out) {
         s++;
     }
     *out = negative ? -(int32_t)value : (int32_t)value;
+    *cursor = s;
     return 0;
 }
 
@@ -192,76 +271,85 @@ static void run_key(char c) {
     uart_puts("\n");
 }
 
-static void run_two_arg(const char *line, const char *cmd,
+static void run_two_arg(const char *args, const k_command_t *cmd,
                       void (*handler)(int32_t, int32_t)) {
-    const char *args = line;
-    while (*args != '\0' && *args != ' ') {
-        args++;
-    }
-    if (*args == ' ') {
-        args++;
-    }
     int32_t a = 0;
     int32_t b = 0;
-    if (parse_signed(args, &a) != 0) {
-        uart_puts("usage: ");
-        uart_puts(cmd);
-        uart_puts(" <x> <y>\n");
+    if (parse_signed(&args, &a) != 0) {
+        print_usage(cmd);
         return;
-    }
-    while (*args != '\0' && *args != ' ') {
-        args++;
     }
     if (*args == ' ') {
         args++;
     }
-    if (parse_signed(args, &b) != 0) {
-        uart_puts("usage: ");
-        uart_puts(cmd);
-        uart_puts(" <x> <y>\n");
+    if (parse_signed(&args, &b) != 0 || *args != '\0') {
+        print_usage(cmd);
         return;
     }
     handler(a, b);
 }
 
+static void run_key_command(const char *args, const k_command_t *cmd) {
+    if (args[0] == '\0' || args[1] != '\0') {
+        print_usage(cmd);
+        return;
+    }
+    run_key(args[0]);
+}
+
 static void run_command(const char *line) {
+    const char *args = 0;
+
     if (line[0] == '\0') {
         return;
     }
 
-    if (streq(line, "help")) {
-        run_help();
-    } else if (streq(line, "mem")) {
-        run_mem();
-    } else if (streq(line, "ps")) {
-        run_ps();
-    } else if (streq(line, "ticks")) {
-        run_ticks();
-    } else if (streq(line, "storage")) {
-        run_status("storage", g_storage_ready);
-    } else if (streq(line, "fb")) {
-        run_status("fb", g_framebuffer_ready);
-    } else if (line[0] == 'm' && line[1] == 'o' && line[2] == 'u' &&
-               line[3] == 's' && line[4] == 'e' && line[5] == ' ') {
-        run_two_arg(line, "mouse", run_mouse);
-    } else if (line[0] == 'c' && line[1] == 'l' && line[2] == 'i' &&
-               line[3] == 'c' && line[4] == 'k' && line[5] == ' ') {
-        run_two_arg(line, "click", run_click);
-    } else if (line[0] == 'k' && line[1] == 'e' && line[2] == 'y' &&
-               line[3] == ' ' && line[4] != '\0' && line[5] == '\0') {
-        run_key(line[4]);
-    } else {
-        uart_puts("unknown command: ");
-        uart_puts(line);
-        uart_puts("\n");
-        run_help();
+    for (uint32_t i = 0; i < g_command_count; i++) {
+        const k_command_t *command = &g_commands[i];
+        if (command_matches(line, command_text(command->name), &args) != 0) {
+            if (command->id < COMMAND_ID_MOUSE && *args != '\0') {
+                print_usage(command);
+                return;
+            }
+
+            switch (command->id) {
+            case COMMAND_ID_HELP:
+                run_help();
+                break;
+            case COMMAND_ID_MEM:
+                run_mem();
+                break;
+            case COMMAND_ID_PS:
+                run_ps();
+                break;
+            case COMMAND_ID_TICKS:
+                run_ticks();
+                break;
+            case COMMAND_ID_STATUS:
+                run_boot_status();
+                break;
+            case COMMAND_ID_MOUSE:
+                run_two_arg(args, command, run_mouse);
+                break;
+            case COMMAND_ID_CLICK:
+                run_two_arg(args, command, run_click);
+                break;
+            default:
+                run_key_command(args, command);
+                break;
+            }
+            return;
+        }
     }
+
+    uart_puts("unknown command: ");
+    uart_puts(line);
+    uart_puts("\n");
+    run_help();
 }
 
 void console_init(const dtb_memory_t *memory) {
     g_line_len = 0;
-    g_storage_ready = 0;
-    g_framebuffer_ready = 0;
     g_interactive = 0;
 
     if (memory != 0) {
@@ -281,14 +369,6 @@ void console_start_interactive(void) {
     g_interactive = 1;
     uart_puts("Kernel console ready. Type 'help'.\n");
     print_prompt();
-}
-
-void console_set_storage_ready(int ready) {
-    g_storage_ready = ready != 0;
-}
-
-void console_set_framebuffer_ready(int ready) {
-    g_framebuffer_ready = ready != 0;
 }
 
 void console_poll_char(char ch) {

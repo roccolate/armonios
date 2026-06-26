@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "kernel/kernel_compiler.h"
+
 /*
  * USB 2.0 descriptor types. The kernel only parses what it needs to
  * find and configure an HID-class device: device, configuration,
@@ -56,7 +58,7 @@ typedef struct {
     uint16_t wValue;
     uint16_t wIndex;
     uint16_t wLength;
-} __attribute__((packed)) usb_setup_t;
+} KERNEL_PACKED usb_setup_t;
 
 /* Standard device descriptor (18 bytes). */
 typedef struct {
@@ -74,7 +76,7 @@ typedef struct {
     uint8_t iProduct;
     uint8_t iSerialNumber;
     uint8_t bNumConfigurations;
-} __attribute__((packed)) usb_device_descriptor_t;
+} KERNEL_PACKED usb_device_descriptor_t;
 
 /* Standard configuration descriptor (9 bytes, header only). */
 typedef struct {
@@ -86,7 +88,7 @@ typedef struct {
     uint8_t iConfiguration;
     uint8_t bmAttributes;
     uint8_t bMaxPower;
-} __attribute__((packed)) usb_config_descriptor_t;
+} KERNEL_PACKED usb_config_descriptor_t;
 
 /* Standard interface descriptor (9 bytes). */
 typedef struct {
@@ -99,7 +101,7 @@ typedef struct {
     uint8_t bInterfaceSubClass;
     uint8_t bInterfaceProtocol;
     uint8_t iInterface;
-} __attribute__((packed)) usb_interface_descriptor_t;
+} KERNEL_PACKED usb_interface_descriptor_t;
 
 /* Standard endpoint descriptor (7 bytes). */
 typedef struct {
@@ -109,7 +111,7 @@ typedef struct {
     uint8_t bmAttributes;
     uint16_t wMaxPacketSize;
     uint8_t bInterval;
-} __attribute__((packed)) usb_endpoint_descriptor_t;
+} KERNEL_PACKED usb_endpoint_descriptor_t;
 
 /* HID class descriptor (minimal). */
 typedef struct {
@@ -120,6 +122,6 @@ typedef struct {
     uint8_t bNumDescriptors;
     uint8_t bReportDescriptorType;
     uint16_t wReportDescriptorLength;
-} __attribute__((packed)) usb_hid_descriptor_t;
+} KERNEL_PACKED usb_hid_descriptor_t;
 
 #endif

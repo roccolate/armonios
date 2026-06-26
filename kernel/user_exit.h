@@ -1,0 +1,6 @@
+#ifndef KOLIBRIARM_KERNEL_USER_EXIT_H
+#define KOLIBRIARM_KERNEL_USER_EXIT_H
+
+#define KERNEL_USER_FAULT_EXIT_CODE 0xfffffffffffffff0ULL
+
+#endif

@@ -53,21 +53,6 @@ void uart_puts(const char *s) {
     }
 }
 
-void uart_put_hex(uint64_t value) {
-    uart_puts("0x");
-    for (int shift = 60; shift >= 0; shift -= 4) {
-        uint8_t nibble = (value >> shift) & 0xF;
-        uart_putc(nibble < 10 ? ('0' + nibble) : ('a' + nibble - 10));
-    }
-}
-
-void uart_put_hex_byte(uint8_t value) {
-    uint8_t nibble_high = (value >> 4) & 0xF;
-    uint8_t nibble_low = value & 0xF;
-    uart_putc(nibble_high < 10 ? ('0' + nibble_high) : ('a' + nibble_high - 10));
-    uart_putc(nibble_low < 10 ? ('0' + nibble_low) : ('a' + nibble_low - 10));
-}
-
 static uint32_t rx_next(uint32_t index) {
     return (index + 1U) % UART_RX_BUFFER_SIZE;
 }

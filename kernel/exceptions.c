@@ -2,18 +2,18 @@
 
 #include <stdint.h>
 
+#include "kernel/aarch64_state.h"
 #include "kernel/gui.h"
 #include "kernel/print.h"
 #include "kernel/process.h"
 #include "kernel/syscall.h"
 #include "kernel/panel_boot.h"
+#include "kernel/user_exit.h"
 #include "uart/pl011.h"
 
 #define ESR_EC_SHIFT 26U
 #define ESR_EC_MASK  0x3fULL
 #define ESR_EC_SVC64 0x15ULL
-#define USER_FAULT_EXIT_CODE 0xfffffffffffffff0ULL
-#define SPSR_EL1H_MASKED 0x3c5ULL
 
 static const char *exception_name(uint64_t kind) {
     switch (kind) {
@@ -73,7 +73,6 @@ void exception_handler(uint64_t esr, uint64_t far, uint64_t elr, uint64_t kind) 
 static void handle_user_fault(exception_frame_t *frame, uint64_t esr,
                               uint64_t far) {
     process_t *current = process_current();
-    process_t *next;
 
     if (current == 0 || frame == 0) {
         exception_handler(esr, far, frame == 0 ? 0 : frame->elr, 8);
@@ -82,7 +81,7 @@ static void handle_user_fault(exception_frame_t *frame, uint64_t esr,
 
     process_save_context(current, frame->x, frame->elr, frame->spsr,
                          frame->sp_el0);
-    process_mark_exited(current, USER_FAULT_EXIT_CODE);
+    process_mark_exited(current, KERNEL_USER_FAULT_EXIT_CODE);
 
     uart_puts("USER fault pid: ");
     print_hex64(current->pid);
@@ -98,17 +97,13 @@ static void handle_user_fault(exception_frame_t *frame, uint64_t esr,
      * not need to call gui_destroy_windows_for_pid here.
      */
 
-    next = process_next_runnable(current);
-    if (next != 0) {
-        next->state = PROCESS_RUNNING;
-        process_set_current(next);
-        process_activate_context(next, frame);
+    if (process_dispatch_next(current, frame, PROCESS_DISPATCH_EXIT) != 0) {
         return;
     }
 
-    frame->x[0] = USER_FAULT_EXIT_CODE;
+    frame->x[0] = KERNEL_USER_FAULT_EXIT_CODE;
     frame->elr = el0_return_address();
-    frame->spsr = SPSR_EL1H_MASKED;
+    frame->spsr = AARCH64_SPSR_EL1H_DAIF_MASKED;
 }
 
 void exception_lower_sync_handler(exception_frame_t *frame, uint64_t esr, uint64_t far) {

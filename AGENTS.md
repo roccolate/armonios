@@ -1,26 +1,37 @@
 # Codex Notes for KolibriARM
 
-This repo is an early AArch64 bare-metal OS inspired by KolibriOS/MenuetOS. Keep changes small, testable, and close to the existing C + AArch64 assembly style.
+KolibriARM is an early AArch64 bare-metal OS inspired by KolibriOS/MenuetOS.
+Keep changes small, testable, and close to the existing freestanding C plus
+small AArch64 assembly style.
 
 ## Current Direction
 
-The first userland hello world is implemented as an embedded EL0 demo:
+The QEMU `virt` target boots into a small graphical desktop:
 
-- Enter EL0 from the kernel with `eret`.
-- Handle `svc #0` exceptions from EL0.
-- Dispatch syscall number from `x8`.
-- `sys_write` forwards stdout/stderr to UART after validating the demo user range.
-- `sys_exit` returns control to the kernel through the EL0 exception frame.
-- Keep the embedded user program until a tiny loader-owned image exists.
+- EL0 apps are freestanding C programs under `programs/apps/`.
+- User images use the KLI1 flat format described by
+  `kernel/user_image_format.h` and are exposed through bootfs/VFS under
+  `/kolibri/<name>`.
+- The panel is the first user process. It owns the taskbar, launches shell,
+  editor, monitor, and clock, and recovers through the panel boot wrapper if it
+  faults.
+- Syscalls enter through `svc #0`, with the syscall number in `x8` and
+  arguments in `x0..x6`.
+- Process dispatch, syscall user-pointer validation, GUI ownership checks, and
+  boot init status have shared helpers; do not reintroduce local copies.
 
 ## Boundaries
 
-- Do not port KolibriOS x86 assembly literally. Port ideas, ABI shape, IPC/message concepts, GUI concepts, and small demos by reimplementing them for AArch64.
-- Keep QEMU-specific addresses out of generic kernel code when touching related areas.
-- Prefer a `drivers/boards/qemu_virt/` platform layer before adding Raspberry Pi support.
-- Avoid introducing libc, POSIX assumptions, hosted runtime behavior, or large abstractions.
-- No vendored third-party protocol stacks (lwIP, FreeRTOS, etc.). The kernel's net stack is hand-written in `kernel/net/`.
+- Do not port KolibriOS x86 assembly literally. Port ideas, ABI shape,
+  IPC/message concepts, GUI concepts, and small demos by reimplementing them
+  for AArch64.
+- Keep QEMU-specific addresses out of generic kernel code. Board-specific
+  details belong behind `drivers/boards/<board>/` and `drivers/board.h`.
+- Avoid libc, POSIX assumptions, hosted runtime behavior, or large abstractions.
+- No vendored protocol stacks. The kernel network stack is hand-written under
+  `kernel/net/`.
 - Keep the kernel readable enough to understand in one sitting.
+- Keep the kernel binary under `KERNEL_SIZE_LIMIT`; the size gate is tight.
 
 ## Build and Test
 
@@ -32,21 +43,33 @@ make size
 make -C tests test
 ```
 
-For boot/runtime checks, use:
+Useful runtime checks:
 
 ```bash
 make qemu
-make qemu-debug
+make qemu-fb
+make qemu-fs-test
+make qemu-usb
 ```
+
+Use `make stack-check` after userland app changes, and `make help` for the
+current target list.
 
 ## Implementation Style
 
 - C code is freestanding and compiled with `-ffreestanding -nostdlib`.
-- AArch64 assembly should be minimal, documented where control flow is subtle, and kept near the CPU boundary.
-- Use existing modules before adding new ones: `kernel/mm`, `kernel/sched`, `kernel/timer`, `drivers/irq`, `drivers/uart`.
-- Add focused host tests for pure C logic when possible, especially memory-management code.
-- Do not hide important hardware behavior behind vague abstractions; name the architectural thing being controlled.
+- AArch64 assembly should be minimal, documented where control flow is subtle,
+  and kept near the CPU boundary.
+- Use existing modules before adding new ones: `kernel/mm`, `kernel/sched`,
+  `kernel/timer`, `drivers/irq`, `drivers/uart`, `kernel/gui_*`.
+- Add focused host tests for pure C logic when possible, especially memory,
+  ABI, parser, and scheduler code.
+- Do not hide important hardware behavior behind vague abstractions; name the
+  architectural thing being controlled.
 
 ## Documentation
 
-When changing direction or milestones, update `ROADMAP.md`. When changing build/run expectations, update `README.md`. When moving board-specific code, update `PORTING.md`.
+When changing direction or milestones, update `ROADMAP.md`. When changing
+build/run expectations, update `README.md`. When moving board-specific code,
+update `PORTING.md`. When changing syscall numbers or ABI shapes, update
+`SYSCALLS.md` in the same change.

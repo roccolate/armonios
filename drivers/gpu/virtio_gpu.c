@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "fb/fb.h"
+#include "kernel/kernel_compiler.h"
 
 #define VIRTIO_MMIO_MAGIC_VALUE 0x000
 #define VIRTIO_MMIO_VERSION     0x004
@@ -126,12 +127,11 @@ typedef struct {
     uint32_t padding;
 } gpu_resource_flush_t;
 
-static virtq_desc_t g_desc[VIRTIO_GPU_QUEUE_SIZE] __attribute__((aligned(16)));
-static virtq_avail_t g_avail __attribute__((aligned(2)));
-static virtq_used_t g_used __attribute__((aligned(4)));
+static virtq_desc_t g_desc[VIRTIO_GPU_QUEUE_SIZE] KERNEL_ALIGNED(16);
+static virtq_avail_t g_avail KERNEL_ALIGNED(2);
+static virtq_used_t g_used KERNEL_ALIGNED(4);
 static uint16_t g_last_used_idx;
-static uint32_t g_pixels[VIRTIO_GPU_WIDTH * VIRTIO_GPU_HEIGHT]
-    __attribute__((aligned(4096)));
+static uint32_t g_pixels[VIRTIO_GPU_WIDTH * VIRTIO_GPU_HEIGHT] KERNEL_ALIGNED(4096);
 static uint64_t g_queue_base;
 static uint8_t g_queue_ready;
 static uint8_t g_resource_ready;
