@@ -1,3 +1,12 @@
+/*
+ * Kernel bootstrap and runtime pump.
+ *
+ * This file intentionally stays at the orchestration layer: board probing,
+ * core subsystem initialization, runtime input/redraw polling, and the final
+ * handoff into the scheduler. Device details live in drivers/ or the board
+ * layer; EL0 image loading and recovery policy live in panel_boot*.
+ */
+
 #include <stdint.h>
 
 #include "board.h"
@@ -37,6 +46,11 @@ void kernel_main(uint64_t dtb_addr);
 
 static fat32_fs_t g_fat32_fs;
 
+/*
+ * Serial console input runs as a kernel thread after the scheduler starts.
+ * It shares the input queue with the GUI path, so it peeks and consumes only
+ * key presses; mouse and key-release events remain available to the desktop.
+ */
 static void console_input_thread(void *arg) {
     (void)arg;
 
@@ -71,11 +85,17 @@ static void console_input_thread(void *arg) {
 
 static void init_memory_manager(const dtb_memory_t *memory, uint64_t dtb_addr) {
     pmm_init(memory->base, memory->size);
+    /* Keep the loaded kernel image and DTB out of the free page pool. */
     pmm_reserve_range(memory->base,
                       (uint64_t)((uintptr_t)__kernel_end - memory->base));
     pmm_reserve_range(dtb_addr, dtb_total_size(dtb_addr));
 }
 
+/*
+ * Mount the always-available bootfs and a small tmpfs smoke file. bootfs is
+ * required because it is the fallback app source; tmpfs is useful but not
+ * fatal, so failures there downgrade the phase to WARN.
+ */
 static init_status_t init_vfs(void) {
     static const uint8_t note[] = "KolibriARM tmpfs\n";
     uint8_t magic[4];
@@ -137,6 +157,7 @@ typedef struct {
     panel_map_mmio_fn_t map_mmio;
 } panel_boot_context_t;
 
+/* Adapter used by panel_boot_recovery_run so retry policy stays testable. */
 static uint64_t run_panel_boot_once(void *ctx) {
     panel_boot_context_t *boot = (panel_boot_context_t *)ctx;
 
@@ -151,6 +172,11 @@ static void panel_boot_log_line(const char *line) {
     uart_puts(line);
 }
 
+/*
+ * Start the panel under the recovery wrapper. A non-zero EL0 exit code is
+ * recorded as WARN rather than FAIL because the kernel can still keep the
+ * serial console and scheduler alive for debugging.
+ */
 static init_status_t start_panel_boot(const dtb_memory_t *memory) {
     panel_boot_context_t boot = {
         .memory_base = memory->base,
@@ -215,6 +241,11 @@ static int probe_fat32(void) {
     return 0;
 }
 
+/*
+ * Storage is optional at this stage. A valid FAT32 image lets apps load from
+ * /fat, but bootfs remains the fallback when the block device or filesystem is
+ * absent.
+ */
 static init_status_t probe_storage(void) {
     uint8_t sector[512] KERNEL_ALIGNED(8);
     int read_status;
@@ -249,6 +280,11 @@ static init_status_t probe_storage(void) {
 static uint64_t g_gpu_base;
 static uint8_t g_gpu_ready;
 
+/*
+ * Display is optional for serial-only boots. When a virtio GPU is present,
+ * gui_init_for_framebuffer owns desktop setup and later redraws reuse the
+ * saved MMIO base.
+ */
 static init_status_t init_display(void) {
     uint64_t gpu_base;
 
@@ -297,6 +333,7 @@ static void poll_input_events(void) {
     flush_dirty_redraw();
 }
 
+/* Timer IRQ work that must happen even when no userspace thread is running. */
 void kernel_on_timer_tick(void) {
     board_virtio_input_poll();
     poll_input_events();
@@ -308,6 +345,11 @@ static int enable_identity_mmu(const dtb_memory_t *memory, uint64_t dtb_addr) {
 
     (void)dtb_addr;
 
+    /*
+     * The early kernel still runs with identity addresses. Map all reported
+     * RAM and board MMIO before enabling the MMU so existing pointers remain
+     * valid while later EL0 page tables get their own address spaces.
+     */
     if (kernel_pgd != 0) {
         vmm_ok = vmm_map_range(kernel_pgd, memory->base, memory->base,
                                memory->size,
@@ -332,6 +374,7 @@ static int enable_identity_mmu(const dtb_memory_t *memory, uint64_t dtb_addr) {
     return 0;
 }
 
+/* Bring up IRQ delivery, timer ticks, UART RX interrupts, and scheduling. */
 static void init_timer_irq(void) {
     board_irq_init();
     (void)irq_register_handler(TIMER_IRQ, timer_handle_irq, 0);
@@ -354,6 +397,10 @@ static init_status_t init_network(void) {
     }
 }
 
+/*
+ * Initialize every input source the board can expose. Missing devices are not
+ * fatal: serial input alone is enough to keep the kernel console usable.
+ */
 static init_status_t init_input(void) {
     input_queue_init();
     if (board_virtio_input_init() == 0) {
@@ -411,6 +458,10 @@ static init_status_t init_input(void) {
     return INIT_STATUS_OK;
 }
 
+/*
+ * The scheduler does not return in normal operation. The return value exists
+ * for the thread-creation failure path before sched_start() takes over.
+ */
 static init_status_t start_scheduler(void) {
     if (sched_create_kernel_thread(console_input_thread, 0, "kconsole") != 0) {
         return INIT_STATUS_FAIL;
@@ -433,6 +484,11 @@ void kernel_main(uint64_t dtb_addr) {
     uart_puts(board_name());
     uart_puts("\n");
 
+    /*
+     * Boot is staged so each phase can report a stable status through
+     * `k> status`. Required phases mark FAIL and stop advancing; optional
+     * device phases use WARN and let bootfs/serial fallback keep working.
+     */
     if (dtb_get_memory(dtb_addr, &memory) == 0) {
         init_status_set(INIT_PHASE_DTB, INIT_STATUS_OK);
         init_memory_manager(&memory, dtb_addr);

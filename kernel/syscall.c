@@ -1,3 +1,12 @@
+/*
+ * EL0 syscall dispatcher and syscall bodies.
+ *
+ * This file owns ABI argument validation and dispatch from x8 syscall numbers
+ * to kernel subsystems. Shared user-pointer and window-ownership checks live
+ * in syscall_helpers.c so individual syscall bodies stay small and preserve
+ * consistent error returns.
+ */
+
 #include "kernel/syscall.h"
 
 #include <stdint.h>
@@ -15,8 +24,10 @@
 #include "kernel/sched/sched.h"
 #include "kernel/syscall_helpers.h"
 #include "kernel/syscall_numbers.h"
-#include "kernel/timer/timer.h"
 #include "kernel/panel_boot.h"
+#include "kernel/panel_boot_argv.h"
+#include "kernel/timer/timer.h"
+#include "kernel/user_exit.h"
 #include "kernel/user_vm.h"
 #include "kernel/vfs.h"
 #include "uart/pl011.h"
@@ -85,7 +96,7 @@ static int64_t sys_spawn(process_t *process, uint64_t path_ptr,
     char path[VFS_MAX_PATH];
     int pid;
 
-    if (entry_index > 0xffffffffULL ||
+    if (entry_index > UINT32_MAX ||
         sys_user_copy_cstr(process, path_ptr, path, sizeof(path)) != 0) {
         return ERR_INVAL;
     }
@@ -104,7 +115,7 @@ static int64_t sys_spawn_argv(process_t *process, uint64_t path_ptr,
     char path[VFS_MAX_PATH];
     int pid;
 
-    if (entry_index > 0xffffffffULL || argc > 0xffffffffULL ||
+    if (entry_index > UINT32_MAX || argc > PANEL_BOOT_ARGV_MAX_STRINGS ||
         sys_user_copy_cstr(process, path_ptr, path, sizeof(path)) != 0) {
         return ERR_INVAL;
     }
@@ -130,8 +141,8 @@ static int64_t sys_spawn_argv(process_t *process, uint64_t path_ptr,
     }
 
     pid = kolibri_spawn_vfs(path, (uint32_t)entry_index,
-                              (const uint64_t *)(uintptr_t)argv_ptr,
-                              (uint32_t)argc);
+                            (const uint64_t *)(uintptr_t)argv_ptr,
+                            (uint32_t)argc);
     if (pid < 0) {
         return ERR_NOENT;
     }
@@ -143,7 +154,7 @@ static int64_t sys_wait(uint64_t pid) {
     uint64_t exit_code = 0;
     process_t *process;
 
-    if (pid == 0 || pid > 0xffffffffULL) {
+    if (pid == 0 || pid > UINT32_MAX) {
         return ERR_INVAL;
     }
 
@@ -164,7 +175,7 @@ static int64_t sys_wait(uint64_t pid) {
 }
 
 static int64_t sys_kill(uint64_t pid) {
-    if (pid == 0 || pid > 0xffffffffULL) {
+    if (pid == 0 || pid > UINT32_MAX) {
         return ERR_INVAL;
     }
 
@@ -172,7 +183,7 @@ static int64_t sys_kill(uint64_t pid) {
         return ERR_NOENT;
     }
 
-    if (process_kill((uint32_t)pid, 0x80ULL) != 0) {
+    if (process_kill((uint32_t)pid, KERNEL_USER_KILL_EXIT_CODE) != 0) {
         return ERR_INVAL;
     }
 
@@ -359,19 +370,19 @@ static int64_t sys_proclist(process_t *process, uint64_t entries_ptr,
     }
 
     for (uint32_t i = 0; i < PROCESS_MAX_PROCESSES && written < max_entries; i++) {
-        const process_t *process = process_at(i);
+        const process_t *slot = process_at(i);
         syscall_proc_entry_t *entry;
         const char *name;
         uint32_t j;
 
-        if (process == 0) {
+        if (slot == 0) {
             continue;
         }
 
         entry = &entries[written];
-        entry->pid = process->pid;
-        entry->state = (uint32_t)process->state;
-        name = process->name != 0 ? process->name : "";
+        entry->pid = slot->pid;
+        entry->state = (uint32_t)slot->state;
+        name = slot->name != 0 ? slot->name : "";
 
         for (j = 0; j + 1U < sizeof(entry->name) && name[j] != '\0'; j++) {
             entry->name[j] = name[j];
@@ -391,7 +402,8 @@ static int64_t sys_munmap(process_t *process, uint64_t addr, uint64_t size) {
     return user_vm_unmap_anonymous(process, addr, size);
 }
 
-static int64_t sys_mmap(process_t *process, uint64_t hint, uint64_t size, uint64_t flags) {
+static int64_t sys_mmap(process_t *process, uint64_t hint, uint64_t size,
+                        uint64_t flags) {
     return user_vm_map_anonymous(process, hint, size, flags);
 }
 
@@ -400,7 +412,7 @@ static int64_t sys_ipc_send(process_t *process, uint64_t target_pid,
     int64_t status;
 
     if (process == 0 || target_pid == 0 || len == 0 ||
-        target_pid > 0xffffffffULL || len > IPC_MAX_MESSAGE_SIZE) {
+        target_pid > UINT32_MAX || len > IPC_MAX_MESSAGE_SIZE) {
         return ERR_INVAL;
     }
     status = sys_user_buf_in(process, buf, len);
@@ -457,12 +469,13 @@ static int sys_yield_process(exception_frame_t *frame) {
 static int64_t sys_window_create(process_t *process, uint64_t x, uint64_t y,
                                  uint64_t w, uint64_t h, uint64_t bg,
                                  uint64_t border, uint64_t title_ptr) {
+    gui_desktop_t *desktop;
     char title[GUI_TITLE_LEN];
     uint32_t window_id = GUI_NO_WINDOW;
 
-    if (process == 0 || x > 0xffffffffULL || y > 0xffffffffULL ||
-        w > 0xffffffffULL || h > 0xffffffffULL || w < 8 || h < 8 ||
-        bg > 0xffffffffULL || border > 0xffffffffULL) {
+    if (process == 0 || x > UINT32_MAX || y > UINT32_MAX ||
+        w > UINT32_MAX || h > UINT32_MAX || w < 8 || h < 8 ||
+        bg > UINT32_MAX || border > UINT32_MAX) {
         return ERR_INVAL;
     }
 
@@ -475,11 +488,12 @@ static int64_t sys_window_create(process_t *process, uint64_t x, uint64_t y,
         }
     }
 
-    if (gui_desktop() == 0) {
+    desktop = gui_desktop();
+    if (desktop == 0) {
         return ERR_AGAIN;
     }
 
-    if (gui_create_window_for_pid(gui_desktop(), process->pid,
+    if (gui_create_window_for_pid(desktop, process->pid,
                                   (uint32_t)x, (uint32_t)y, (uint32_t)w,
                                   (uint32_t)h, (uint32_t)bg,
                                   (uint32_t)border, title,
@@ -516,7 +530,8 @@ static int64_t sys_window_draw_text(process_t *process, uint64_t window_id,
     char text[128];
     int64_t status;
 
-    if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
+    if (process == 0 || window_id >= GUI_MAX_WINDOWS ||
+        x > INT32_MAX || y > INT32_MAX || color > UINT32_MAX) {
         return ERR_INVAL;
     }
     status = sys_owner_window_badf(process, window_id, &desktop, &window);
@@ -542,8 +557,8 @@ static int64_t sys_window_draw_rect(process_t *process, uint64_t window_id,
     int64_t status;
 
     if (process == 0 || window_id >= GUI_MAX_WINDOWS ||
-        x > 0x7fffffffULL || y > 0x7fffffffULL ||
-        w > 0xffffffffULL || h > 0xffffffffULL) {
+        x > INT32_MAX || y > INT32_MAX ||
+        w > UINT32_MAX || h > UINT32_MAX || color > UINT32_MAX) {
         return ERR_INVAL;
     }
     status = sys_owner_window_badf(process, window_id, &desktop, &window);
@@ -635,7 +650,7 @@ static int64_t sys_window_for_pid(process_t *process, uint64_t owner_pid,
     gui_desktop_t *desktop = gui_desktop();
     uint32_t window_id;
 
-    if (process == 0 || owner_pid > UINT32_MAX || index > GUI_MAX_WINDOWS) {
+    if (process == 0 || owner_pid > UINT32_MAX || index >= GUI_MAX_WINDOWS) {
         return ERR_INVAL;
     }
     if (desktop == 0) {
@@ -719,8 +734,8 @@ static int64_t sys_window_flush(process_t *process, uint64_t window_id,
     int64_t status;
 
     if (process == 0 || window_id >= GUI_MAX_WINDOWS ||
-        x > 0x7fffffffULL || y > 0x7fffffffULL ||
-        w > 0xffffffffULL || h > 0xffffffffULL) {
+        x > INT32_MAX || y > INT32_MAX ||
+        w > UINT32_MAX || h > UINT32_MAX) {
         return ERR_INVAL;
     }
     status = sys_owner_window_badf(process, window_id, &desktop, &window);
@@ -786,8 +801,8 @@ static int64_t sys_window_set_bounds(process_t *process, uint64_t window_id,
     int64_t status;
 
     if (process == 0 || window_id >= GUI_MAX_WINDOWS ||
-        x > 0x7fffffffU || y > 0x7fffffffU ||
-        w > 0xffffffffU || h > 0xffffffffU) {
+        x > INT32_MAX || y > INT32_MAX ||
+        w > UINT32_MAX || h > UINT32_MAX) {
         return ERR_INVAL;
     }
     status = sys_owner_window(process, window_id, &desktop, &window);
@@ -1020,7 +1035,8 @@ void syscall_dispatch(exception_frame_t *frame) {
                                          frame->x[2]);
         break;
     case SYS_MMAP:
-        frame->x[0] = (uint64_t)sys_mmap(current, frame->x[0], frame->x[1], frame->x[2]);
+        frame->x[0] = (uint64_t)sys_mmap(current, frame->x[0], frame->x[1],
+                                         frame->x[2]);
         break;
     case SYS_MUNMAP:
         frame->x[0] = (uint64_t)sys_munmap(current, frame->x[0], frame->x[1]);

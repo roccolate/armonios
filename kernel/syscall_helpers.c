@@ -1,3 +1,11 @@
+/*
+ * Shared syscall-boundary validation.
+ *
+ * Syscall bodies should not re-open-code user pointer checks or owner-window
+ * checks. Keeping those rules here preserves the exact error-code contract
+ * while giving host tests one small surface to exercise.
+ */
+
 #include "kernel/syscall_helpers.h"
 
 #include <stdint.h>
@@ -68,18 +76,23 @@ int64_t sys_user_buf_out(const process_t *process, uint64_t ptr, uint64_t len) {
 
 int64_t sys_user_copy_cstr(const process_t *process, uint64_t ptr,
                            char *out, uint64_t capacity) {
-    const char *src = (const char *)(uintptr_t)ptr;
-
     if (process == 0 || ptr == 0 || out == 0 || capacity == 0) {
         return ERR_INVAL;
     }
 
     for (uint64_t i = 0; i < capacity; i++) {
-        if (sys_user_buf_in(process, ptr + i, 1) != 0) {
+        uint64_t byte_ptr;
+
+        if (ptr > UINT64_MAX - i) {
+            return ERR_INVAL;
+        }
+        byte_ptr = ptr + i;
+
+        if (sys_user_buf_in(process, byte_ptr, 1) != 0) {
             return ERR_INVAL;
         }
 
-        out[i] = src[i];
+        out[i] = *(const char *)(uintptr_t)byte_ptr;
         if (out[i] == '\0') {
             return 0;
         }

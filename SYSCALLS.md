@@ -54,8 +54,9 @@ Notes:
   process's own stack memory. Cap: 8 strings, 256 bytes total payload.
 - `sys_wait` is non-blocking today: it succeeds only when the target process is
   already `ZOMBIE`; otherwise it returns `ERR_AGAIN`.
-- `sys_kill` marks another process exited with code `0x80`. It currently
-  rejects killing the calling process and already-exited processes.
+- `sys_kill` marks another process exited with
+  `KERNEL_USER_KILL_EXIT_CODE` (`0x80`). It currently rejects killing the
+  calling process and already-exited processes.
 
 ### Memory
 

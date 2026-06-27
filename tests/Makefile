@@ -30,7 +30,8 @@ SRCS=unity/unity.c main.c \
      test_gui.c test_fb.c test_dtb.c test_virtio_blk.c test_input.c \
      test_hid.c test_pci.c test_hid_driver.c test_usb_core.c \
      test_pci_assign.c test_hid_state.c test_hid_init.c \
-     test_syscall_abi.c test_process_isolation.c test_window_abi.c \
+     test_syscall_abi.c test_syscall_helpers.c \
+     test_process_isolation.c test_window_abi.c \
      ../kernel/mm/pmm.c ../kernel/mm/kheap.c ../kernel/mm/vmm.c \
      ../kernel/boot_program.c ../kernel/bootfs.c \
      ../kernel/panel_boot_argv.c ../kernel/panel_boot_recovery.c \

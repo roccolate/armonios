@@ -22,6 +22,7 @@
 
 #include "kernel/process.h"
 #include "kernel/syscall_numbers.h"
+#include "kernel/user_exit.h"
 
 void test_syscall_abi_implemented_numbers_match_dispatch(void) {
     /* Implemented numbers must match the rows in SYSCALLS.md under
@@ -97,6 +98,16 @@ void test_syscall_abi_error_codes_match_documented_constants(void) {
     TEST_ASSERT_TRUE((int64_t)-3 != (int64_t)-5);
     TEST_ASSERT_TRUE((int64_t)-5 != (int64_t)-7);
     TEST_ASSERT_TRUE((int64_t)-7 != (int64_t)-11);
+}
+
+void test_syscall_abi_user_exit_codes_match_documented_constants(void) {
+    /* sys_kill and lower-EL fault handling expose these exit codes to
+     * waiters. They are part of the observable process ABI, not just
+     * local implementation details. */
+    TEST_ASSERT_EQUAL_UINT64(0x80ULL, KERNEL_USER_KILL_EXIT_CODE);
+    TEST_ASSERT_EQUAL_UINT64(0xfffffffffffffff0ULL,
+                             KERNEL_USER_FAULT_EXIT_CODE);
+    TEST_ASSERT_TRUE(KERNEL_USER_KILL_EXIT_CODE != KERNEL_USER_FAULT_EXIT_CODE);
 }
 
 void test_syscall_abi_user_range_validation_rejects_out_of_region(void) {
