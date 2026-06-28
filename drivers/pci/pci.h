@@ -1,10 +1,10 @@
-#ifndef KOLIBRIARM_DRIVERS_PCI_PCI_H
-#define KOLIBRIARM_DRIVERS_PCI_PCI_H
+#ifndef ARMONIOS_DRIVERS_PCI_PCI_H
+#define ARMONIOS_DRIVERS_PCI_PCI_H
 
 #include <stdint.h>
 
 /*
- * Minimal PCI / PCIe enumeration for the KolibriARM kernel.
+ * Minimal PCI / PCIe enumeration for the ArmoniOS kernel.
  *
  * The code targets the PCIe Enhanced Configuration Access Mechanism
  * (ECAM). On QEMU's aarch64 virt machine ECAM lives at 0xF0000000

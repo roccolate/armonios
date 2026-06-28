@@ -1,7 +1,7 @@
 /*
  * test_window_abi.c
  *
- * Lock down the kernel window-manager ABI. SYSCALLS.md describes the
+ * Lock down the kernel window-manager ABI. docs/SYSCALLS.md describes the
  * event format (3 packed fields, 12 bytes total), the ownership rules
  * (each window has a single owner pid; cross-process use is rejected),
  * the focus rules (raise by bumping z; NO_FOCUS prevents focus), and
@@ -22,7 +22,7 @@
 #include "kernel/process.h"
 
 void test_window_abi_event_layout_is_12_bytes(void) {
-    /* SYSCALLS.md: "sys_window_event writes packed gui_event_t triples:
+    /* docs/SYSCALLS.md: "sys_window_event writes packed gui_event_t triples:
      * uint32_t type, int32_t data1, int32_t data2." The total must be
      * 12 bytes so apps can size their event buffers with a single
      * multiply. A struct field reorder or width change breaks every
@@ -97,7 +97,7 @@ void test_window_abi_create_window_for_pid_assigns_owner(void) {
 }
 
 void test_window_abi_focus_window_raises_z_order(void) {
-    /* SYSCALLS.md: "sys_window_focus updates the focus border and
+    /* docs/SYSCALLS.md: "sys_window_focus updates the focus border and
      * raises the target window above other windows by bumping its
      * z-order. Window ids remain stable pool indices; z-order
      * changes do not move window structs." */
@@ -163,7 +163,7 @@ void test_window_abi_focus_no_focus_window_rejected(void) {
 }
 
 void test_window_abi_window_for_pid_skips_no_owner(void) {
-    /* SYSCALLS.md: "sys_window_for_pid skips ownerless windows
+    /* docs/SYSCALLS.md: "sys_window_for_pid skips ownerless windows
      * (those whose owner_pid == GUI_NO_OWNER); only windows actually
      * owned by a process are visible through it." gui_window_for_pid
      * is the kernel side. */
@@ -233,7 +233,7 @@ void test_window_abi_window_for_pid_skips_skip_taskbar(void) {
 }
 
 void test_window_abi_get_bounds_returns_current_geometry(void) {
-    /* SYSCALLS.md: "sys_window_get_bounds copies the window's
+    /* docs/SYSCALLS.md: "sys_window_get_bounds copies the window's
      * (x, y, w, h) into the caller's 16-byte buffer." gui_window_get_bounds
      * is the kernel helper the syscall layer wraps; pinning it here
      * keeps the format and the ownership checks honest. */
@@ -270,7 +270,7 @@ void test_window_abi_get_bounds_returns_current_geometry(void) {
 }
 
 void test_window_abi_resize_window_updates_geometry_and_queues_event(void) {
-    /* SYSCALLS.md: "sys_window_set_bounds moves and/or resizes the
+    /* docs/SYSCALLS.md: "sys_window_set_bounds moves and/or resizes the
      * window in one step; if (w, h) changes the kernel reallocates
      * the per-window backing and pushes GUI_EVENT_RESIZE onto the
      * owner's event queue." gui_resize_window is the kernel helper
@@ -328,7 +328,7 @@ void test_window_abi_resize_window_updates_geometry_and_queues_event(void) {
 }
 
 void test_window_abi_event_types_includes_minimize_and_maximize(void) {
-    /* SYSCALLS.md: GUI_EVENT_MINIMIZE (7) and GUI_EVENT_MAXIMIZE (8)
+    /* docs/SYSCALLS.md: GUI_EVENT_MINIMIZE (7) and GUI_EVENT_MAXIMIZE (8)
      * are the synthetic events the kernel pushes when the user
      * clicks the kernel-drawn title-bar buttons (or the owner
      * calls sys_window_minimize / sys_window_restore). They are

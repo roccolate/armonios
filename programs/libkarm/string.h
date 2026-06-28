@@ -7,8 +7,8 @@
 // rolling their own. No printf-style formatting, no locales, no
 // heap.
 
-#ifndef KOLIBRIARM_PROGRAMS_LIBKARM_STRING_H
-#define KOLIBRIARM_PROGRAMS_LIBKARM_STRING_H
+#ifndef ARMONIOS_PROGRAMS_LIBKARM_STRING_H
+#define ARMONIOS_PROGRAMS_LIBKARM_STRING_H
 
 #include <stddef.h>
 #include <stdint.h>

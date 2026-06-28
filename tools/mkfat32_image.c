@@ -137,7 +137,7 @@ static void write_root_entries(uint8_t *image, uint32_t file_size_bytes,
     const char edit_name[11] = {
         'E', 'D', 'I', 'T', ' ', ' ', ' ', ' ', 'T', 'X', 'T',
     };
-    static const char edit_text[] = "KolibriARM editable FAT32 file\n";
+    static const char edit_text[] = "ArmoniOS editable FAT32 file\n";
 
     write_dir_entry(root, shell_name, FILE_FIRST_CLUSTER,
                     file_size_bytes);
@@ -157,7 +157,7 @@ static void write_edit_payload(uint8_t *image, uint32_t edit_first_cluster) {
     uint32_t data_start = RESERVED_SECTORS + FAT_COUNT * FAT_SECTORS;
     uint32_t file_lba = data_start + (edit_first_cluster - ROOT_CLUSTER);
     uint8_t *dest = &image[file_lba * SECTOR_SIZE];
-    static const char edit_text[] = "KolibriARM editable FAT32 file\n";
+    static const char edit_text[] = "ArmoniOS editable FAT32 file\n";
 
     for (uint32_t i = 0; i + 1U < sizeof(edit_text); i++) {
         dest[i] = (uint8_t)edit_text[i];

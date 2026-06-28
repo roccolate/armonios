@@ -87,7 +87,7 @@ void test_bootfs_finds_monitor_and_clock(void);
 void test_bootfs_read_copies_requested_range(void);
 void test_bootfs_read_clamps_at_end_of_file(void);
 void test_bootfs_read_rejects_invalid_inputs(void);
-void test_bootfs_mount_vfs_exposes_kolibri_paths(void);
+void test_bootfs_mount_vfs_exposes_armonios_paths(void);
 void test_bootfs_mount_vfs_exposes_editor_and_panel_paths(void);
 void test_bootfs_mount_vfs_exposes_remaining_app_paths(void);
 void test_bootfs_mount_vfs_reads_app_through_vfs(void);
@@ -436,7 +436,7 @@ int main(void) {
     RUN_TEST(test_bootfs_read_copies_requested_range);
     RUN_TEST(test_bootfs_read_clamps_at_end_of_file);
     RUN_TEST(test_bootfs_read_rejects_invalid_inputs);
-    RUN_TEST(test_bootfs_mount_vfs_exposes_kolibri_paths);
+    RUN_TEST(test_bootfs_mount_vfs_exposes_armonios_paths);
     RUN_TEST(test_bootfs_mount_vfs_exposes_editor_and_panel_paths);
     RUN_TEST(test_bootfs_mount_vfs_exposes_remaining_app_paths);
     RUN_TEST(test_bootfs_mount_vfs_reads_app_through_vfs);

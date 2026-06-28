@@ -1,5 +1,5 @@
-#ifndef KOLIBRIARM_KERNEL_TMPFS_H
-#define KOLIBRIARM_KERNEL_TMPFS_H
+#ifndef ARMONIOS_KERNEL_TMPFS_H
+#define ARMONIOS_KERNEL_TMPFS_H
 
 #include <stdint.h>
 

@@ -1,6 +1,6 @@
 CC=gcc
 OBJCOPY=objcopy
-CFLAGS=-I.. -I../drivers -Iunity -g -O0 -Wall -Wextra -DKOLIBRIARM_TEST
+CFLAGS=-I.. -I../drivers -Iunity -g -O0 -Wall -Wextra -DARMONIOS_TEST
 BUILD_DIR := ../build
 APPS_DIR  := programs/apps
 

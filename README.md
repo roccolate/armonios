@@ -1,4 +1,4 @@
-# KolibriARM
+# ArmoniOS
 
 > A minimal, fast, assembly-first operating system for AArch64 — inspired by KolibriOS and MenuetOS.
 
@@ -9,9 +9,13 @@
 
 ---
 
-## What is KolibriARM?
+## What is ArmoniOS?
 
-KolibriARM is a bare-metal operating system for ARM64 (AArch64) processors, written entirely in C and AArch64 assembly. It takes direct inspiration from [KolibriOS](https://kolibrios.org) and [MenuetOS](https://www.menuetos.net/) — two x86 operating systems celebrated for their extreme compactness, speed, and elegance — and brings those principles to modern ARM hardware.
+ArmoniOS is a bare-metal operating system for ARM64 (AArch64) processors,
+written entirely in C and AArch64 assembly. It takes direct inspiration from
+[KolibriOS](https://kolibrios.org) and [MenuetOS](https://www.menuetos.net/)
+— two x86 operating systems celebrated for their extreme compactness, speed,
+and elegance — and brings those principles to modern ARM hardware.
 
 **Core philosophy:**
 - Every byte is intentional. No unnecessary abstraction layers.
@@ -34,10 +38,11 @@ KolibriARM is a bare-metal operating system for ARM64 (AArch64) processors, writ
 > Userland apps are freestanding C programs built as flat AArch64 images under
 > `programs/apps/`, linked with `programs/libkarm` and
 > `programs/libkarmdesk`, embedded through bootfs, and exposed under
-> `/kolibri/<name>`. The QEMU desktop has per-process window ownership,
+> the `/armonios/<name>` app namespace. The QEMU desktop has
+> per-process window ownership,
 > a panel taskbar, shell / editor / monitor / clock apps, cursor/focus/drag
 > handling, per-window backing buffers, and rect-based redraw. See
-> [ROADMAP.md](ROADMAP.md) for what is still missing.
+> [ROADMAP.md](docs/ROADMAP.md) for what is still missing.
 
 | Component         | Status       | Notes                                  |
 |-------------------|-------------|----------------------------------------|
@@ -64,12 +69,12 @@ stable, debugged, repeatable QEMU kernel and desktop release. The first v1.1
 userland pass has started: app stack usage is measured by `make stack-check`,
 and app syscall callsites are being moved through shared libkarm helpers.
 Latest verified size: `kernel.bin: 89256 bytes (limit: 100000)`. Read
-[ROADMAP.md](ROADMAP.md) for the full breakdown.
+[ROADMAP.md](docs/ROADMAP.md) for the full breakdown.
 
 Baseline already in place:
 
 - [x] Ship flat C userland apps under `programs/apps/`, registered by name in
-      the loader and exposed under `/kolibri/<name>`.
+      the loader and exposed under the `/armonios/<name>` namespace.
 - [x] Add window syscalls (`sys_window_create`, `sys_window_draw_text`,
       `sys_window_event`, `sys_window_destroy`) with per-process ownership.
 - [x] Consume the queued mouse events: visible cursor, click-to-raise,
@@ -141,8 +146,8 @@ sudo apt update && sudo apt install -y \
 
 ```bash
 # Clone the repository
-git clone https://github.com/roccolate/kolibriarm
-cd kolibriarm
+git clone https://github.com/roccolate/armonios
+cd armonios
 
 # Build the default QEMU virt board
 make
@@ -217,7 +222,7 @@ gdb-multiarch build/kernel.elf
 ## Project Structure
 
 ```
-kolibriarm/
+armonios/
 ├── boot/               # Bootloader (AArch64 ASM only)
 │   └── start.S         # Entry point, early stack, BSS clear, jump to kernel
 ├── kernel/             # Kernel core (C + inline ASM)
@@ -236,17 +241,20 @@ kolibriarm/
 │   └── net/            # Ethernet driver
 ├── programs/           # Userland applications
 ├── docs/               # Focused project notes
+│   ├── ARCHITECTURE.md
+│   ├── CONTRIBUTING.md
 │   ├── CURRENT_STATE.md
+│   ├── ENGINE_MULTIMEDIA.md
 │   ├── GUI_ABI_NOTES.md
+│   ├── MEMORY_MAP.md
+│   ├── PORTING.md
+│   ├── ROADMAP.md
+│   ├── SYSCALLS.md
 │   └── TECH_DEBT_REVIEW.md
-├── ARCHITECTURE.md     # Kernel architecture overview
-├── SYSCALLS.md         # Syscall ABI reference
-├── MEMORY_MAP.md       # Fixed address/layout reference
-├── PORTING.md          # Board porting notes
-├── linker.ld           # Linker script
+├── linker/             # Kernel linker scripts
+│   ├── linker.ld       # QEMU kernel layout
+│   └── linker_rpi4.ld  # Raspberry Pi 4 kernel layout
 ├── Makefile            # Build system
-├── ROADMAP.md          # Development roadmap
-├── CONTRIBUTING.md     # Contribution guidelines
 └── LICENSE             # GPL-2.0
 ```
 
@@ -265,7 +273,11 @@ AArch64 (ARM64) is the cleanest ISA to write an OS in from scratch:
 
 ### Why no POSIX?
 
-POSIX compatibility layers add complexity without adding value for a purpose-built OS. KolibriARM defines its own minimal syscall ABI (inspired by KolibriOS's ~100-syscall design), using the `svc` instruction with function number in `x8` and arguments in `x0`–`x6`. This keeps the kernel small and the syscall path fast.
+POSIX compatibility layers add complexity without adding value for a
+purpose-built OS. ArmoniOS defines its own minimal syscall ABI (inspired by
+KolibriOS's ~100-syscall design), using the `svc` instruction with function
+number in `x8` and arguments in `x0`–`x6`. This keeps the kernel small and the
+syscall path fast.
 
 ### Why C + ASM and not Rust?
 
@@ -275,7 +287,8 @@ The goal is to keep the codebase readable to anyone who knows C and assembly. Ru
 
 ## License
 
-KolibriARM is licensed under the [GNU General Public License v2.0](LICENSE), the same license as KolibriOS.
+ArmoniOS is licensed under the [GNU General Public License v2.0](LICENSE), the
+same license as KolibriOS.
 
 ---
 

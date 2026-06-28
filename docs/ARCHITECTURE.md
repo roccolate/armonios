@@ -1,6 +1,6 @@
 # Architecture
 
-KolibriARM is a compact monolithic AArch64 kernel for the QEMU `virt` machine,
+ArmoniOS is a compact monolithic AArch64 kernel for the QEMU `virt` machine,
 with Raspberry Pi work kept behind board layers. This document describes the
 current architecture; detailed ABI tables live in `SYSCALLS.md`, and fixed
 addresses live in `MEMORY_MAP.md`.

@@ -141,13 +141,13 @@ void test_bootfs_read_rejects_invalid_inputs(void) {
                                                    sizeof(buffer), 0));
 }
 
-void test_bootfs_mount_vfs_exposes_kolibri_paths(void) {
+void test_bootfs_mount_vfs_exposes_armonios_paths(void) {
     const vfs_node_t *shell_node;
 
     vfs_reset();
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)bootfs_mount_vfs());
 
-    shell_node = vfs_find("/kolibri/shell");
+    shell_node = vfs_find("/armonios/shell");
     TEST_ASSERT_NOT_NULL(shell_node);
     TEST_ASSERT_EQUAL_UINT64((uint64_t)((uintptr_t)__app_shell_end -
                                         (uintptr_t)__app_shell_start),
@@ -159,8 +159,8 @@ void test_bootfs_mount_vfs_exposes_editor_and_panel_paths(void) {
     const vfs_node_t *panel_node;
 
     /*
-     * The panel click handler builds "/kolibri/editor" and passes it to
-     * sys_spawn. The lookup vfs_find("/kolibri/editor") is the same
+     * The panel click handler builds "/armonios/editor" and passes it to
+     * sys_spawn. The lookup vfs_find("/armonios/editor") is the same
      * path the spawn code uses, so if this assertion ever fails the
      * editor button is broken even though boot_program_find("editor")
      * may still succeed in isolation.
@@ -168,13 +168,13 @@ void test_bootfs_mount_vfs_exposes_editor_and_panel_paths(void) {
     vfs_reset();
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)bootfs_mount_vfs());
 
-    editor_node = vfs_find("/kolibri/editor");
+    editor_node = vfs_find("/armonios/editor");
     TEST_ASSERT_NOT_NULL(editor_node);
     TEST_ASSERT_EQUAL_UINT64((uint64_t)((uintptr_t)__app_editor_end -
                                         (uintptr_t)__app_editor_start),
                              editor_node->size);
 
-    panel_node = vfs_find("/kolibri/panel");
+    panel_node = vfs_find("/armonios/panel");
     TEST_ASSERT_NOT_NULL(panel_node);
     TEST_ASSERT_EQUAL_UINT64((uint64_t)((uintptr_t)__app_panel_end -
                                         (uintptr_t)__app_panel_start),
@@ -185,8 +185,8 @@ void test_bootfs_mount_vfs_exposes_remaining_app_paths(void) {
     vfs_reset();
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)bootfs_mount_vfs());
 
-    TEST_ASSERT_NOT_NULL(vfs_find("/kolibri/monitor"));
-    TEST_ASSERT_NOT_NULL(vfs_find("/kolibri/clock"));
+    TEST_ASSERT_NOT_NULL(vfs_find("/armonios/monitor"));
+    TEST_ASSERT_NOT_NULL(vfs_find("/armonios/clock"));
 }
 
 void test_bootfs_mount_vfs_reads_editor_through_vfs(void) {
@@ -195,7 +195,7 @@ void test_bootfs_mount_vfs_reads_editor_through_vfs(void) {
 
     /*
      * Mirrors what user_image_load_bootfs_flat does internally: open
-     * /kolibri/editor, read the first few bytes, and confirm the flat
+     * /armonios/editor, read the first few bytes, and confirm the flat
      * header magic 0x31494c4b ('KLI1') is the first uint32_t. Without
      * this, a typo in bootfs.c or a path mismatch would silently
      * corrupt the editor launcher.
@@ -203,7 +203,7 @@ void test_bootfs_mount_vfs_reads_editor_through_vfs(void) {
     vfs_reset();
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)bootfs_mount_vfs());
     TEST_ASSERT_EQUAL_UINT64(0,
-                             (uint64_t)vfs_read("/kolibri/editor", 0, buffer,
+                             (uint64_t)vfs_read("/armonios/editor", 0, buffer,
                                                 sizeof(buffer), &bytes_read));
     TEST_ASSERT_EQUAL_UINT64(sizeof(buffer), bytes_read);
 
@@ -220,7 +220,7 @@ void test_bootfs_mount_vfs_reads_app_through_vfs(void) {
     vfs_reset();
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)bootfs_mount_vfs());
     TEST_ASSERT_EQUAL_UINT64(0,
-                             (uint64_t)vfs_read("/kolibri/shell", 0, buffer,
+                             (uint64_t)vfs_read("/armonios/shell", 0, buffer,
                                                 sizeof(buffer), &bytes_read));
     TEST_ASSERT_EQUAL_UINT64(sizeof(buffer), bytes_read);
     TEST_ASSERT_EQUAL_UINT64((uint8_t)__app_shell_start[0], buffer[0]);

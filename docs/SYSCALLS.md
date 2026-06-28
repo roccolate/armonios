@@ -1,6 +1,6 @@
 # Syscall Reference
 
-KolibriARM defines its own syscall ABI. There is no POSIX compatibility.
+ArmoniOS defines its own syscall ABI. There is no POSIX compatibility.
 
 This document separates the syscalls implemented by the current kernel from
 numbers reserved for the planned ABI.
@@ -18,7 +18,7 @@ For a syscall that returns to the same process, all registers except `x0` are
 preserved. `x0` carries the return value.
 
 `x7` is caller-saved scratch under the AArch64 procedure-call ABI, but it is
-not a KolibriARM syscall argument register today.
+not an ArmoniOS syscall argument register today.
 
 ---
 

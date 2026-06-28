@@ -1,5 +1,5 @@
-#ifndef KOLIBRIARM_DRIVERS_FB_FB_H
-#define KOLIBRIARM_DRIVERS_FB_FB_H
+#ifndef ARMONIOS_DRIVERS_FB_FB_H
+#define ARMONIOS_DRIVERS_FB_FB_H
 
 #include <stdint.h>
 

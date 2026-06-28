@@ -1,10 +1,10 @@
-// KolibriARM app: panel (C version, on libkarm + libkarmdesk)
+// ArmoniOS app: panel (C version, on libkarm + libkarmdesk)
 //
 // Draws a taskbar at the bottom of the screen with one launcher
 // button per registered app and a running-apps row underneath.
 //
 // Click handling:
-//   - Launcher button   -> sys_spawn("/kolibri/<name>")
+//   - Launcher button   -> sys_spawn("/armonios/<name>")
 //   - Running-apps slot -> if the window is minimised, restore it
 //                          through gui_window_restore; otherwise raise
 //                          it through SYS_WINDOW_FOCUS.
@@ -217,9 +217,9 @@ static void redraw_all(panel_state_t *p) {
     (void)gui_window_flush(p->wid, 0, 0, PANEL_CONTENT_W, PANEL_CONTENT_H);
 }
 
-// Build "/kolibri/<label>" into out. Returns the length written.
+// Build "/armonios/<label>" into out. Returns the length written.
 static size_t build_path(char *out, size_t out_size, const char *label) {
-    static const char prefix[] = "/kolibri/";
+    static const char prefix[] = "/armonios/";
     size_t pi = 0;
     while (pi + 1 < out_size && prefix[pi] != '\0') {
         out[pi] = prefix[pi];

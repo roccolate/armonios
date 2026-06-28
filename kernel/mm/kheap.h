@@ -1,5 +1,5 @@
-#ifndef KOLIBRIARM_KERNEL_MM_KHEAP_H
-#define KOLIBRIARM_KERNEL_MM_KHEAP_H
+#ifndef ARMONIOS_KERNEL_MM_KHEAP_H
+#define ARMONIOS_KERNEL_MM_KHEAP_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -35,7 +35,7 @@ uint64_t kheap_total_bytes(void);
  */
 uint64_t kheap_free_bytes(void);
 
-#ifdef KOLIBRIARM_TEST
+#ifdef ARMONIOS_TEST
 /*
  * kheap_reset_for_tests - Clear kheap globals between isolated host tests.
  */

@@ -6,7 +6,7 @@
  * Pure DHCP option parser.
  *
  * The network driver feeds this helper the fixed DHCP options area from a
- * packet. It extracts only the options KolibriARM currently consumes and
+ * packet. It extracts only the options ArmoniOS currently consumes and
  * rejects truncated TLVs so packet handling never walks beyond the buffer.
  */
 

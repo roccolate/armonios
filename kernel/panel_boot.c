@@ -19,7 +19,7 @@
 /*
  * EL0 boot helpers. The kernel boots its first userland process (the
  * panel taskbar) through panel_boot_run; later apps come up via
- * kolibri_spawn_vfs from sys_spawn / sys_spawn_argv; el0_return_address
+ * app_spawn_vfs from sys_spawn / sys_spawn_argv; el0_return_address
  * points at the trampoline the lower-EL exception vector returns to
  * after sys_exit.
  *
@@ -251,8 +251,8 @@ static int place_argv_on_stack(uint64_t stack_paddr, uint32_t slot,
                                           argv_ptr, argc, out_argv_vaddr);
 }
 
-int kolibri_spawn_vfs(const char *path, uint32_t entry_index,
-                      const uint64_t *argv_ptr, uint32_t argc) {
+int app_spawn_vfs(const char *path, uint32_t entry_index,
+                  const uint64_t *argv_ptr, uint32_t argc) {
     process_t *process;
     user_image_t image;
     panel_user_storage_t storage = {0};
@@ -265,7 +265,7 @@ int kolibri_spawn_vfs(const char *path, uint32_t entry_index,
         return -1;
     }
 
-    app_name = vfs_strip_prefix(path, "/kolibri/");
+    app_name = vfs_strip_prefix(path, "/armonios/");
     if (app_name == 0) {
         return -1;
     }

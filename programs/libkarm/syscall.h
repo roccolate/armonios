@@ -1,6 +1,6 @@
 // libkarm/syscall.h
 //
-// Typed C wrappers for every KolibriARM syscall that is part of the
+// Typed C wrappers for every ArmoniOS syscall that is part of the
 // stable process / memory / I/O / IPC / system-info surface (numbers
 // 1..8, 20..21, 40..48, 60..61, 100..102). Each wrapper takes the
 // syscall number from <kernel/syscall_numbers.h> and dispatches
@@ -18,8 +18,8 @@
 // `write`/`open`/etc. would otherwise collide with anything that
 // might be brought in by an asm include.
 
-#ifndef KOLIBRIARM_PROGRAMS_LIBKARM_SYSCALL_H
-#define KOLIBRIARM_PROGRAMS_LIBKARM_SYSCALL_H
+#ifndef ARMONIOS_PROGRAMS_LIBKARM_SYSCALL_H
+#define ARMONIOS_PROGRAMS_LIBKARM_SYSCALL_H
 
 #include <stddef.h>
 #include <stdint.h>

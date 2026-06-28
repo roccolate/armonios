@@ -1,5 +1,5 @@
-#ifndef KOLIBRIARM_KERNEL_VFS_H
-#define KOLIBRIARM_KERNEL_VFS_H
+#ifndef ARMONIOS_KERNEL_VFS_H
+#define ARMONIOS_KERNEL_VFS_H
 
 #include <stdint.h>
 

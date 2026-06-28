@@ -1,12 +1,15 @@
 # Porting Guide
 
-KolibriARM is designed so that porting to a new ARM64 board requires changing **only the drivers** — the kernel, scheduler, memory manager, and syscall layer are board-agnostic.
+ArmoniOS is designed so that porting to a new ARM64 board requires changing
+**only the drivers** — the kernel, scheduler, memory manager, and syscall layer
+are board-agnostic.
 
 ---
 
 ## Architecture Goal
 
-KolibriARM should be structured so that the following components remain portable and avoid board-specific constants:
+ArmoniOS should be structured so that the following components remain portable
+and avoid board-specific constants:
 
 - `kernel/mm/` — physical and virtual memory management
 - `kernel/sched/` — scheduler and context switch
@@ -158,7 +161,7 @@ Work through this list in order. Each item depends on the previous.
 ### Phase A: Boot
 
 - [ ] Identify where your board's boot ROM loads the kernel (load address)
-- [ ] Update `linker.ld`: change `. = 0x40000000` to your load address
+- [ ] Update `linker/linker.ld`: change `. = 0x40000000` to your load address
 - [ ] Verify entry point: does your bootloader (U-Boot / firmware) jump to `_start`?
 - [ ] Check initial exception level: are you at EL2 or EL1? (EL2 needs a drop)
 
@@ -238,7 +241,8 @@ int emmc_write(uint32_t lba, uint32_t count, const void *buf);
 
 ## Device Tree (DTB)
 
-QEMU and most ARM boards pass a Device Tree Blob (DTB) to the kernel. KolibriARM reads the DTB to find:
+QEMU and most ARM boards pass a Device Tree Blob (DTB) to the kernel. ArmoniOS
+reads the DTB to find:
 
 - Available RAM regions
 - Framebuffer address and size

@@ -1,5 +1,5 @@
-#ifndef KOLIBRIARM_RPI4_BOARD_H
-#define KOLIBRIARM_RPI4_BOARD_H
+#ifndef ARMONIOS_RPI4_BOARD_H
+#define ARMONIOS_RPI4_BOARD_H
 
 #include <stdint.h>
 

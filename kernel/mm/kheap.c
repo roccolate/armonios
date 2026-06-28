@@ -232,7 +232,7 @@ uint64_t kheap_free_bytes(void) {
     return free_bytes;
 }
 
-#ifdef KOLIBRIARM_TEST
+#ifdef ARMONIOS_TEST
 void kheap_reset_for_tests(void) {
     g_heap_head = NULL;
     g_heap_tail = NULL;

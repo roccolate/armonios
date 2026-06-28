@@ -1,5 +1,5 @@
-#ifndef KOLIBRIARM_DRIVERS_NET_VIRTIO_NET_H
-#define KOLIBRIARM_DRIVERS_NET_VIRTIO_NET_H
+#ifndef ARMONIOS_DRIVERS_NET_VIRTIO_NET_H
+#define ARMONIOS_DRIVERS_NET_VIRTIO_NET_H
 
 #include <stdint.h>
 
@@ -24,7 +24,7 @@ int virtio_net_send(virtio_net_device_t *device, const void *data, uint32_t len)
 int virtio_net_recv(virtio_net_device_t *device, void *data, uint32_t max_len);
 int virtio_net_poll(virtio_net_device_t *device);
 
-#ifdef KOLIBRIARM_TEST
+#ifdef ARMONIOS_TEST
 uint32_t virtio_net_test_rx_buffer_bytes(void);
 uint32_t virtio_net_test_tx_buffer_bytes(void);
 uint16_t virtio_net_test_rx_available_idx(void);

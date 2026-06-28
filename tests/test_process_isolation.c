@@ -156,7 +156,7 @@ void test_process_isolation_mmap_rejects_hint_nonzero(void) {
 
     init_test_memory(&mem);
 
-    /* SYSCALLS.md says sys_mmap `hint` must be 0. Pin that contract
+    /* docs/SYSCALLS.md says sys_mmap `hint` must be 0. Pin that contract
      * here so a future "support MAP_FIXED" change has to acknowledge
      * the ABI break. */
     process_init(&process, 5105U, "iso_hint");
@@ -180,7 +180,7 @@ void test_process_isolation_mmap_rejects_unknown_flags(void) {
     init_test_memory(&mem);
 
     /* Only USER_VM_PROT_* flags are accepted; anything else returns
-     * USER_VM_ERR_INVAL. The SYSCALLS.md contract is "flags=0 maps RW"
+     * USER_VM_ERR_INVAL. The docs/SYSCALLS.md contract is "flags=0 maps RW"
      * and "PROT_READ/PROT_WRITE/PROT_EXEC are supported". MAP_SHARED
      * and MAP_FIXED are reserved and must be rejected. */
     process_init(&process, 5106U, "iso_flags");

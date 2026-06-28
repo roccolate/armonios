@@ -1,5 +1,5 @@
-#ifndef KOLIBRIARM_KERNEL_MM_PMM_H
-#define KOLIBRIARM_KERNEL_MM_PMM_H
+#ifndef ARMONIOS_KERNEL_MM_PMM_H
+#define ARMONIOS_KERNEL_MM_PMM_H
 
 #include <stdint.h>
 

@@ -82,7 +82,7 @@ void switch_context(sched_context_t *old_context, sched_context_t *new_context);
 void sched_thread_trampoline(void);
 
 static void sched_wait_for_event(void) {
-#ifndef KOLIBRIARM_TEST
+#ifndef ARMONIOS_TEST
     __asm__ volatile("wfe");
 #endif
 }

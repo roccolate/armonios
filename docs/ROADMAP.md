@@ -1,6 +1,6 @@
 # Roadmap
 
-Honest trajectory for KolibriARM. The first desktop milestone (Phase 10.0–10.5)
+Honest trajectory for ArmoniOS. The first desktop milestone (Phase 10.0–10.5)
 is functionally complete on QEMU `virt`: the kernel boots into a graphical
 desktop, the panel owns the taskbar, and shell / editor / monitor / clock are
 real per-process EL0 apps that own windows, take input, and redraw through the
@@ -30,9 +30,9 @@ userland process is the panel taskbar at the bottom of the screen.
 Per-app, per-process windowing is real:
 
 - Each app under `programs/apps/` builds as a flat AArch64 image, is
-  registered in `kernel/boot_program.c`, exposed through bootfs under
-  `/kolibri/<name>`, and is launched as its own process with its own page
-  table and stack.
+  registered in `kernel/boot_program.c`, exposed through bootfs under the
+  `/armonios/<name>` namespace, and is launched as its own process with its own
+  page table and stack.
 - `SYS_SPAWN_ARGV` (8) places `argc` in `x0` and `&argv[0]` in `x1` per the
   AArch64 procedure-call ABI. The shell splits `run X Y Z` on whitespace and
   forwards the tokens; the editor prints the received argv.
@@ -105,7 +105,7 @@ Keep these in sync:
 - `kernel/syscall_numbers.h` keeps `_Static_assert` pins for every syscall.
 - `programs/libkarm/syscall.S` exposes `__syscall0` through `__syscall7`.
 - `programs/libkarmdesk/gui.h` wraps every implemented window/compositor call.
-- `README.md` describes QEMU desktop support as the current state and RPi as
+- `../README.md` describes QEMU desktop support as the current state and RPi as
   planned hardware work.
 
 New syscalls should be avoided unless they close a real runtime gap. If one is

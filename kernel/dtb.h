@@ -1,5 +1,5 @@
-#ifndef KOLIBRIARM_KERNEL_DTB_H
-#define KOLIBRIARM_KERNEL_DTB_H
+#ifndef ARMONIOS_KERNEL_DTB_H
+#define ARMONIOS_KERNEL_DTB_H
 
 #include <stdint.h>
 

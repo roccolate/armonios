@@ -1,11 +1,11 @@
-#ifndef KOLIBRIARM_KERNEL_SYSCALL_HELPERS_H
-#define KOLIBRIARM_KERNEL_SYSCALL_HELPERS_H
+#ifndef ARMONIOS_KERNEL_SYSCALL_HELPERS_H
+#define ARMONIOS_KERNEL_SYSCALL_HELPERS_H
 
 /*
  * Public helper contract for syscall implementations.
  *
  * Error values are shared by all syscall bodies and documented in
- * SYSCALLS.md. The helper functions below keep user-buffer validation and
+ * docs/SYSCALLS.md. The helper functions below keep user-buffer validation and
  * GUI window ownership checks centralized instead of duplicated in each
  * syscall case.
  */

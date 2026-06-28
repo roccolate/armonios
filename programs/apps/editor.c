@@ -1,4 +1,4 @@
-// KolibriARM app: editor (C version, on libkarm + libkarmdesk)
+// ArmoniOS app: editor (C version, on libkarm + libkarmdesk)
 //
 // Minimal GUI editor for /tmp/note (or argv[1] if the shell passed a
 // path). It owns a window, displays the line the caret is on (capped

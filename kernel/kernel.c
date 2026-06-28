@@ -97,7 +97,7 @@ static void init_memory_manager(const dtb_memory_t *memory, uint64_t dtb_addr) {
  * fatal, so failures there downgrade the phase to WARN.
  */
 static init_status_t init_vfs(void) {
-    static const uint8_t note[] = "KolibriARM tmpfs\n";
+    static const uint8_t note[] = "ArmoniOS tmpfs\n";
     uint8_t magic[4];
     uint64_t bytes_read = 0;
     uint64_t bytes_written = 0;
@@ -134,7 +134,7 @@ static init_status_t init_vfs(void) {
     }
 
     bytes_read = 0;
-    if (vfs_read("/kolibri/shell", 0, magic, sizeof(magic),
+    if (vfs_read("/armonios/shell", 0, magic, sizeof(magic),
                  &bytes_read) == 0 && bytes_read == sizeof(magic)) {
         uart_puts("VFS read: ok\n");
         vfs_read_ok = 1;
@@ -481,7 +481,7 @@ void kernel_main(uint64_t dtb_addr) {
     board_early_init();
     init_status_set(INIT_PHASE_BOARD, INIT_STATUS_OK);
 
-    uart_puts("\nKolibriARM ");
+    uart_puts("\nArmoniOS ");
     uart_puts(board_name());
     uart_puts("\n");
 

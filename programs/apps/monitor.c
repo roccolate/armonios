@@ -1,4 +1,4 @@
-// KolibriARM app: monitor (C version, on libkarm + libkarmdesk)
+// ArmoniOS app: monitor (C version, on libkarm + libkarmdesk)
 //
 // Windowed process monitor. It owns a desktop window, redraws memory
 // and tick counters plus a short process list once every REDRAW_WAIT

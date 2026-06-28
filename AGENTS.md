@@ -1,6 +1,6 @@
-# Codex Notes for KolibriARM
+# Codex Notes for ArmoniOS
 
-KolibriARM is an early AArch64 bare-metal OS inspired by KolibriOS/MenuetOS.
+ArmoniOS is an early AArch64 bare-metal OS inspired by KolibriOS/MenuetOS.
 Keep changes small, testable, and close to the existing freestanding C plus
 small AArch64 assembly style.
 
@@ -11,7 +11,7 @@ The QEMU `virt` target boots into a small graphical desktop:
 - EL0 apps are freestanding C programs under `programs/apps/`.
 - User images use the KLI1 flat format described by
   `kernel/user_image_format.h` and are exposed through bootfs/VFS under
-  `/kolibri/<name>`.
+  the `/armonios/<name>` app namespace.
 - The panel is the first user process. It owns the taskbar, launches shell,
   editor, monitor, and clock, and recovers through the panel boot wrapper if it
   faults.
@@ -19,7 +19,7 @@ The QEMU `virt` target boots into a small graphical desktop:
   arguments in `x0..x6`.
 - Process dispatch, syscall user-pointer validation, GUI ownership checks, and
   boot init status have shared helpers; do not reintroduce local copies.
-- The original technical-debt review is closed. Track new debt in `ROADMAP.md`,
+- The original technical-debt review is closed. Track new debt in `docs/ROADMAP.md`,
   focused issues, or a fresh review document. The current quick-return cleanup
   target for v1.0 is `kernel/net/` plus `drivers/net/virtio_net.c`; leave
   `programs/apps/` stack/syscall-callsite review for v1.1 unless an app bug
@@ -74,7 +74,7 @@ current target list.
 
 ## Documentation
 
-When changing direction or milestones, update `ROADMAP.md`. When changing
+When changing direction or milestones, update `docs/ROADMAP.md`. When changing
 build/run expectations, update `README.md`. When moving board-specific code,
-update `PORTING.md`. When changing syscall numbers or ABI shapes, update
-`SYSCALLS.md` in the same change.
+update `docs/PORTING.md`. When changing syscall numbers or ABI shapes, update
+`docs/SYSCALLS.md` in the same change.

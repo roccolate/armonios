@@ -1,4 +1,4 @@
-// KolibriARM app: clock (C version, on programs/libkarm + libkarmdesk)
+// ArmoniOS app: clock (C version, on programs/libkarm + libkarmdesk)
 //
 // Creates a window that displays the current uptime as HH:MM:SS, reads
 // timer ticks via SYS_TIMEINFO, and redraws once per second using a

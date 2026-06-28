@@ -1,6 +1,6 @@
 // programs/libkarmdesk/gui.h
 //
-// Typed wrappers for the KolibriARM window/compositor syscalls
+// Typed wrappers for the ArmoniOS window/compositor syscalls
 // (numbers 70..86). This directory is deliberately separate from
 // programs/libkarm so desktop-facing wrappers can grow without
 // touching the stable process / memory / I/O / IPC surface.
@@ -27,11 +27,11 @@
 // Return value: raw `long` from the kernel; >= 0 on success,
 // negative error code from <libkarm/errno.h> on failure.
 //
-// gui_event_t is the packed triple layout documented in SYSCALLS.md.
+// gui_event_t is the packed triple layout documented in docs/SYSCALLS.md.
 // Its 12-byte size is frozen — see the matching static_assert below.
 
-#ifndef KOLIBRIARM_PROGRAMS_LIBKARMDESK_GUI_H
-#define KOLIBRIARM_PROGRAMS_LIBKARMDESK_GUI_H
+#ifndef ARMONIOS_PROGRAMS_LIBKARMDESK_GUI_H
+#define ARMONIOS_PROGRAMS_LIBKARMDESK_GUI_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -48,7 +48,7 @@ typedef struct {
 
 _Static_assert(sizeof(gui_event_t) == 12,
                "ABI drift: gui_event_t must be packed 12 bytes "
-               "— see SYSCALLS.md GUI event layout");
+               "— see docs/SYSCALLS.md GUI event layout");
 
 // gui_event_t types, matching kernel/gui.h.
 #define GUI_EVENT_KEY_PRESS   1U

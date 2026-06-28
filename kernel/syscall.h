@@ -1,5 +1,5 @@
-#ifndef KOLIBRIARM_KERNEL_SYSCALL_H
-#define KOLIBRIARM_KERNEL_SYSCALL_H
+#ifndef ARMONIOS_KERNEL_SYSCALL_H
+#define ARMONIOS_KERNEL_SYSCALL_H
 
 #include "kernel/exceptions.h"
 

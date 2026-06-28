@@ -79,16 +79,18 @@ APP_LIBS_shell := $(LIBKARM_STRING_OBJ)
 
 LOAD_ADDR := 0x40080000
 LOAD_ADDR_HEX := 40080000
-LDFLAGS := -T linker.ld -nostdlib
+KERNEL_LINKER_SCRIPT := linker/linker.ld
 
 ifeq ($(BOARD),rpi4)
 LOAD_ADDR := 0x80000
 LOAD_ADDR_HEX := 80000
-LDFLAGS := -T linker_rpi4.ld -nostdlib
+KERNEL_LINKER_SCRIPT := linker/linker_rpi4.ld
 STORAGE_DEV := $(BUILD_DIR)/drivers/storage/emmc.o
 else
 STORAGE_DEV := $(BUILD_DIR)/drivers/storage/virtio_blk.o
 endif
+
+LDFLAGS := -T $(KERNEL_LINKER_SCRIPT) -nostdlib
 
 DEPFLAGS := -MMD -MP
 ASFLAGS := -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -mcpu=cortex-a72 -g
@@ -172,7 +174,7 @@ DEPS := $(OBJS:.o=.d) $(APP_IMAGE_OBJS:.o=.d) $(LIBKARM_OBJS:.o=.d)
 all: toolchain-check $(KERNEL_ELF) $(KERNEL_BIN)
 
 help:
-	@printf "KolibriARM make targets:\n"
+	@printf "ArmoniOS make targets:\n"
 	@printf "  %-18s %s\n" "qemu" "run the serial QEMU target"
 	@printf "  %-18s %s\n" "qemu-debug" "run QEMU paused with a GDB server"
 	@printf "  %-18s %s\n" "qemu-blk" "run QEMU with a generated FAT32 virtio-blk image"
@@ -293,7 +295,7 @@ $(BUILD_DIR)/$(APPS_DIR)/%_blob.o: $(BUILD_DIR)/$(APPS_DIR)/%.bin
 	    --rename-section .data=.app_$*_blob,alloc,load,readonly,data,contents \
 	    $< $@
 
-$(KERNEL_ELF): $(OBJS) linker.ld
+$(KERNEL_ELF): $(OBJS) $(KERNEL_LINKER_SCRIPT)
 	$(LOG_LD)$(LD) $(LDFLAGS) $(OBJS) -o $@
 
 $(KERNEL_BIN): $(KERNEL_ELF)

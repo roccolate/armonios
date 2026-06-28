@@ -1,5 +1,5 @@
-#ifndef KOLIBRIARM_KERNEL_AARCH64_STATE_H
-#define KOLIBRIARM_KERNEL_AARCH64_STATE_H
+#ifndef ARMONIOS_KERNEL_AARCH64_STATE_H
+#define ARMONIOS_KERNEL_AARCH64_STATE_H
 
 /*
  * Saved Program Status Register values used when returning through

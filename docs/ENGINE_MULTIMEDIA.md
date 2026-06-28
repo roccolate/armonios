@@ -1,7 +1,7 @@
 # Engine and Multimedia Plan
 
 This document captures the accepted long-term direction for graphics, input,
-audio, resources, and interactive multimedia applications in KolibriARM.
+audio, resources, and interactive multimedia applications in ArmoniOS.
 
 Status: accepted as a post-v1.5 direction. It does not replace the current
 loader, filesystem, GUI, networking, or Raspberry Pi port milestones in

@@ -1,5 +1,5 @@
-#ifndef KOLIBRIARM_KERNEL_LAYOUT_H
-#define KOLIBRIARM_KERNEL_LAYOUT_H
+#ifndef ARMONIOS_KERNEL_LAYOUT_H
+#define ARMONIOS_KERNEL_LAYOUT_H
 
 #include "kernel/mm/pmm.h"
 #include "kernel/process.h"
@@ -9,8 +9,8 @@
  * slots. These values describe virtual addresses only; backing pages are
  * allocated per process by panel_boot/user_vm code.
  *
- * The kernel link base and boot stack size still live in linker.ld because the
- * linker script is not generated from C headers.
+ * The kernel link base and boot stack size still live in linker/linker*.ld
+ * because the linker scripts are not generated from C headers.
  */
 #define KERNEL_USER_IMAGE_VA_BASE 0x400000ULL
 #define KERNEL_USER_IMAGE_VA_STRIDE 0x10000ULL

@@ -1,6 +1,6 @@
 // libkarm/crt0.S
 //
-// Shared `_start` for every KolibriARM userland app.
+// Shared `_start` for every ArmoniOS userland app.
 //
 // The kernel delivers `x0 = argc` and `x1 = &argv[0]` for
 // sys_spawn_argv (8) per the AArch64 procedure-call ABI. Apps spawned

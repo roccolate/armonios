@@ -1,7 +1,7 @@
 /*
  * test_syscall_abi.c
  *
- * Lock down the KolibriARM syscall ABI. The header
+ * Lock down the ArmoniOS syscall ABI. The header
  * kernel/syscall_numbers.h carries one _Static_assert per implemented
  * syscall number; that catches ABI drift at compile time. This test
  * file re-asserts the contract at runtime so a regression on a
@@ -26,7 +26,7 @@
 #include "kernel/user_vm.h"
 
 void test_syscall_abi_implemented_numbers_match_dispatch(void) {
-    /* Implemented numbers must match the rows in SYSCALLS.md under
+    /* Implemented numbers must match the rows in docs/SYSCALLS.md under
      * "Implemented Now". A drift here means a number was renumbered
      * without updating the docs and breaks every userland image. */
     TEST_ASSERT_EQUAL_UINT64(1ULL, SYS_EXIT);
@@ -84,7 +84,7 @@ void test_syscall_abi_ranges_do_not_overlap(void) {
 }
 
 void test_syscall_abi_error_codes_match_documented_constants(void) {
-    /* SYSCALLS.md lists these as the implemented negative error codes. If
+    /* docs/SYSCALLS.md lists these as the implemented negative error codes. If
      * they drift, every app that checks errno by hand breaks silently. */
     TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)-2,
                              (uint64_t)(int64_t)USER_VM_ERR_NOMEM);

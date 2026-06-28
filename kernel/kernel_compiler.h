@@ -1,5 +1,5 @@
-#ifndef KOLIBRIARM_KERNEL_COMPILER_H
-#define KOLIBRIARM_KERNEL_COMPILER_H
+#ifndef ARMONIOS_KERNEL_COMPILER_H
+#define ARMONIOS_KERNEL_COMPILER_H
 
 #define KERNEL_ALIGNED(n) __attribute__((aligned(n)))
 #define KERNEL_ALWAYS_INLINE inline __attribute__((always_inline))

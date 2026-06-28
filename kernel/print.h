@@ -1,5 +1,5 @@
-#ifndef KOLIBRIARM_KERNEL_PRINT_H
-#define KOLIBRIARM_KERNEL_PRINT_H
+#ifndef ARMONIOS_KERNEL_PRINT_H
+#define ARMONIOS_KERNEL_PRINT_H
 
 #include <stdint.h>
 

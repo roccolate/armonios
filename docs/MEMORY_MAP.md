@@ -1,8 +1,8 @@
 # Memory Map
 
-This is the current fixed-address reference for KolibriARM. C-owned user layout
+This is the current fixed-address reference for ArmoniOS. C-owned user layout
 constants live in `kernel/layout.h`; kernel link addresses still live in
-`linker.ld`.
+the kernel linker scripts under `linker/`.
 
 ## QEMU virt Physical Layout
 

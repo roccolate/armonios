@@ -8,9 +8,9 @@
 /*
  * Boot filesystem over embedded KLI1 app images.
  *
- * bootfs exposes the boot_program registry as read-only files under
- * /kolibri/<name>. It is the always-available app source used when storage is
- * absent or FAT32 probing fails.
+ * bootfs exposes the boot_program registry as read-only files under the
+ * /armonios/<name> namespace. It is the always-available app source used when
+ * storage is absent or FAT32 probing fails.
  */
 
 typedef struct {
@@ -19,11 +19,11 @@ typedef struct {
 } bootfs_entry_t;
 
 static const bootfs_entry_t g_bootfs_entries[] = {
-    { "shell", "/kolibri/shell" },
-    { "editor", "/kolibri/editor" },
-    { "monitor", "/kolibri/monitor" },
-    { "panel", "/kolibri/panel" },
-    { "clock", "/kolibri/clock" },
+    { "shell", "/armonios/shell" },
+    { "editor", "/armonios/editor" },
+    { "monitor", "/armonios/monitor" },
+    { "panel", "/armonios/panel" },
+    { "clock", "/armonios/clock" },
 };
 
 #define BOOTFS_ENTRY_COUNT \

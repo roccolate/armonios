@@ -102,7 +102,7 @@ static int64_t sys_spawn(process_t *process, uint64_t path_ptr,
         return ERR_INVAL;
     }
 
-    pid = kolibri_spawn_vfs(path, (uint32_t)entry_index, 0, 0);
+    pid = app_spawn_vfs(path, (uint32_t)entry_index, 0, 0);
     if (pid < 0) {
         return ERR_NOENT;
     }
@@ -124,7 +124,7 @@ static int64_t sys_spawn_argv(process_t *process, uint64_t path_ptr,
     /*
      * argv_ptr must point at `argc` uint64_t entries inside the
      * caller's registered user regions when argc > 0. The strings
-     * they reference are validated by kolibri_spawn_vfs (it walks
+     * they reference are validated by app_spawn_vfs (it walks
      * each one until '\0'). argc == 0 with argv_ptr == 0 is the
      * "no argv" path and is always accepted; any other combination
      * of argc and argv_ptr is rejected.
@@ -141,7 +141,7 @@ static int64_t sys_spawn_argv(process_t *process, uint64_t path_ptr,
         }
     }
 
-    pid = kolibri_spawn_vfs(path, (uint32_t)entry_index,
+    pid = app_spawn_vfs(path, (uint32_t)entry_index,
                             (const uint64_t *)(uintptr_t)argv_ptr,
                             (uint32_t)argc);
     if (pid < 0) {

@@ -271,7 +271,7 @@ int process_dispatch_next(process_t *current, exception_frame_t *frame,
 
     next->state = PROCESS_RUNNING;
     process_set_current(next);
-#ifdef KOLIBRIARM_TEST
+#ifdef ARMONIOS_TEST
     process_load_context(next, frame);
 #else
     process_activate_context(next, frame);

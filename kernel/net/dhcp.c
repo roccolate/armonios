@@ -1,5 +1,5 @@
 /*
- * Minimal from-scratch DHCP/ARP client for KolibriARM.
+ * Minimal from-scratch DHCP/ARP client for ArmoniOS.
  *
  * Speaks just enough UDP/IP/Ethernet to obtain an IPv4 lease from a
  * QEMU -netdev user backend. Implemented directly on top of

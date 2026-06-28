@@ -1,5 +1,5 @@
-#ifndef KOLIBRIARM_UART_PL011_H
-#define KOLIBRIARM_UART_PL011_H
+#ifndef ARMONIOS_UART_PL011_H
+#define ARMONIOS_UART_PL011_H
 
 #include <stdint.h>
 

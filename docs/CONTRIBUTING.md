@@ -1,6 +1,8 @@
-# Contributing to KolibriARM
+# Contributing to ArmoniOS
 
-First: thank you for considering contributing. KolibriARM is built on the idea that an OS can be understood by a single person — and that only works if the code stays clean, minimal, and well-documented.
+First: thank you for considering contributing. ArmoniOS is built on the idea
+that an OS can be understood by a single person — and that only works if the
+code stays clean, minimal, and well-documented.
 
 ---
 
@@ -8,7 +10,7 @@ First: thank you for considering contributing. KolibriARM is built on the idea t
 
 Read these documents first:
 
-1. [README.md](README.md) — project overview and philosophy
+1. [README.md](../README.md) — project overview and philosophy
 2. [ARCHITECTURE.md](ARCHITECTURE.md) — how the system is structured
 3. [ROADMAP.md](ROADMAP.md) — what's planned and in what order
 
@@ -36,15 +38,15 @@ Check the issue tracker for open issues tagged:
 
 ## Development Setup
 
-See the [README](README.md#building) for the full setup. Short version:
+See the [README](../README.md#building) for the full setup. Short version:
 
 ```bash
 # WSL2 / Ubuntu
 sudo apt install -y qemu-system-arm gcc-aarch64-linux-gnu \
                     binutils-aarch64-linux-gnu gdb-multiarch make
 
-git clone https://github.com/yourname/kolibriarm
-cd kolibriarm
+git clone https://github.com/yourname/armonios
+cd armonios
 make
 make size
 make -C tests test

@@ -123,7 +123,7 @@ void test_boot_program_find_resolves_editor_and_panel(void) {
 
     /*
      * The panel taskbar launches each registered app via
-     *   sys_spawn("/kolibri/<name>", 0)
+     *   sys_spawn("/armonios/<name>", 0)
      * which routes through boot_program_find("<name>"). The editor
      * button specifically must resolve, otherwise the panel click path
      * silently fails when the user clicks the editor launcher.

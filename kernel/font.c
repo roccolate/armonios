@@ -5,7 +5,7 @@
 #include "kernel/kernel_compiler.h"
 
 /*
- * 8x8 bitmap font for the KolibriARM kernel.
+ * 8x8 bitmap font for the ArmoniOS kernel.
  *
  * Ported from the KolibriOS 8X8ISXP layout: 8 bytes per glyph, one byte
  * per scanline, MSB on the left. Only printable ASCII glyphs are stored.

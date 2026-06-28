@@ -165,7 +165,7 @@ static void xhci_write64(uint64_t base, uint32_t off, uint64_t value) {
 }
 
 static void xhci_sync(void) {
-#ifndef KOLIBRIARM_TEST
+#ifndef ARMONIOS_TEST
     __asm__ volatile("dsb sy" ::: "memory");
 #endif
 }

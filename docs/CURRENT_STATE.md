@@ -1,7 +1,7 @@
 # Current State
 
 This is the short live snapshot of the QEMU desktop and its kernel support.
-Historical cleanup details live in `docs/TECH_DEBT_REVIEW.md`.
+Historical cleanup details live in `TECH_DEBT_REVIEW.md`.
 
 ## Baseline
 

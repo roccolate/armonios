@@ -390,7 +390,7 @@ int virtio_net_poll(virtio_net_device_t *device) {
     return (g_rx_used.idx != device->last_used_idx) ? 1 : 0;
 }
 
-#ifdef KOLIBRIARM_TEST
+#ifdef ARMONIOS_TEST
 uint32_t virtio_net_test_rx_buffer_bytes(void) {
     return (uint32_t)sizeof(g_rx_buf);
 }

@@ -1,4 +1,4 @@
-// KolibriARM app: shell (C version, on libkarm + libkarmdesk)
+// ArmoniOS app: shell (C version, on libkarm + libkarmdesk)
 //
 // Windowed command shell with a circular log buffer, scrollback,
 // bottom-anchored prompt, and command history. Reads key events
@@ -270,7 +270,7 @@ static void cmd_run(shell_state_t *s, const char *input) {
         return;
     }
     char path[32];
-    const char *prefix = "/kolibri/";
+    const char *prefix = "/armonios/";
     size_t pi = 0;
     while (prefix[pi] != '\0') {
         path[pi] = prefix[pi];

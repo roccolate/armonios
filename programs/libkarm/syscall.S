@@ -7,7 +7,7 @@
 // assembly helpers such as io.S may issue fixed syscalls directly when that
 // keeps every freestanding app smaller than calling through a C wrapper.
 //
-// KolibriARM syscall ABI (kernel/syscall.c):
+// ArmoniOS syscall ABI (kernel/syscall.c):
 //   x0..x6 = arguments
 //   x8     = syscall number
 //   x0     = return value (negative on error)
