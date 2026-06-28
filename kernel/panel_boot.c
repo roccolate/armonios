@@ -69,16 +69,22 @@ static void zero_memory(uint64_t paddr, uint64_t size) {
     }
 }
 
+static void free_image_pages(uint64_t image_paddr) {
+    if (image_paddr == 0) {
+        return;
+    }
+
+    for (uint64_t i = 0; i < KERNEL_USER_IMAGE_SLOT_PAGES; i++) {
+        pmm_free_page(image_paddr + i * PAGE_SIZE);
+    }
+}
+
 static void free_user_storage(panel_user_storage_t *storage) {
     if (storage == 0) {
         return;
     }
 
-    if (storage->image_paddr != 0) {
-        for (uint64_t i = 0; i < KERNEL_USER_IMAGE_SLOT_PAGES; i++) {
-            pmm_free_page(storage->image_paddr + i * PAGE_SIZE);
-        }
-    }
+    free_image_pages(storage->image_paddr);
     if (storage->stack_paddr != 0) {
         pmm_free_page(storage->stack_paddr);
     }
@@ -90,23 +96,32 @@ static void free_user_storage(panel_user_storage_t *storage) {
 static int load_named_image(const char *name, user_image_t *image,
                             uint32_t slot, uint32_t entry_index,
                             panel_user_storage_t *storage) {
-    if (storage == 0) {
+    uint64_t image_paddr;
+
+    if (storage == 0 || storage->image_paddr != 0) {
         return -1;
     }
 
-    storage->image_paddr = pmm_alloc_pages(KERNEL_USER_IMAGE_SLOT_PAGES);
-    if (storage->image_paddr == 0) {
+    image_paddr = pmm_alloc_pages(KERNEL_USER_IMAGE_SLOT_PAGES);
+    if (image_paddr == 0) {
         return -1;
     }
-    zero_memory(storage->image_paddr, KERNEL_USER_IMAGE_SLOT_SIZE);
+    zero_memory(image_paddr, KERNEL_USER_IMAGE_SLOT_SIZE);
 
     if (user_image_load_bootfs_flat(image, name, name,
-                                    storage->image_paddr,
+                                    image_paddr,
                                     KERNEL_USER_IMAGE_SLOT_SIZE,
                                     entry_index) != 0) {
+        free_image_pages(image_paddr);
         return -1;
     }
 
+    /*
+     * The image region maps the full slot, not only the declared KLI1 byte
+     * count, because the process owns and later frees the whole PMM allocation.
+     * The unused tail was zeroed above before the KLI1 payload was copied.
+     */
+    storage->image_paddr = image_paddr;
     image->base = panel_image_vaddr(slot);
     image->size = KERNEL_USER_IMAGE_SLOT_SIZE;
     return 0;

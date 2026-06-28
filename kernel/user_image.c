@@ -17,14 +17,26 @@
  * mappings through user_vm_map_physical.
  */
 
+static int add_u64_checked(uint64_t a, uint64_t b, uint64_t *out) {
+    if (out == 0 || a > UINT64_MAX - b) {
+        return -1;
+    }
+    *out = a + b;
+    return 0;
+}
+
 uint64_t user_image_entry(const user_image_t *image) {
     if (image == 0 || image->base == 0 || image->size == 0 ||
-        image->entry_offset >= image->size ||
-        image->base > UINT64_MAX - image->entry_offset) {
+        image->entry_offset >= image->size) {
         return 0;
     }
 
-    return image->base + image->entry_offset;
+    uint64_t entry;
+    if (add_u64_checked(image->base, image->entry_offset, &entry) != 0) {
+        return 0;
+    }
+
+    return entry;
 }
 
 int user_image_load_copy(user_image_t *image, const char *name,
@@ -74,7 +86,7 @@ int user_image_load_flat(user_image_t *image, const char *name,
      */
     if (header->magic == USER_IMAGE_MAGIC) {
         if (source_capacity < sizeof(*header) ||
-            header->header_size < sizeof(*header) ||
+            header->header_size != USER_IMAGE_HEADER_SIZE ||
             header->header_size > header->image_size ||
             header->entry_count == 0 ||
             header->entry_count > USER_IMAGE_MAX_ENTRIES ||
@@ -93,13 +105,13 @@ int user_image_load_flat(user_image_t *image, const char *name,
         return -1;
     }
 
-    if (source_base > UINT64_MAX - entry_offset) {
+    uint64_t source_entry;
+    if (add_u64_checked(source_base, entry_offset, &source_entry) != 0) {
         return -1;
     }
 
     return user_image_load_copy(image, name, load_base, load_capacity,
-                                source_base, image_size,
-                                source_base + entry_offset);
+                                source_base, image_size, source_entry);
 }
 
 int user_image_load_bootfs_flat(user_image_t *image, const char *image_name,
@@ -121,13 +133,13 @@ int user_image_prepare_process(process_t *process, const user_image_t *image,
                                uint64_t stack_start, uint64_t stack_size,
                                uint64_t pstate) {
     uint64_t entry = user_image_entry(image);
-    uint64_t stack_top = stack_start + stack_size;
+    uint64_t stack_top;
     uint64_t old_pc;
     uint64_t old_sp;
     uint64_t old_pstate;
 
     if (process == 0 || entry == 0 || stack_start == 0 || stack_size == 0 ||
-        stack_top < stack_start) {
+        add_u64_checked(stack_start, stack_size, &stack_top) != 0) {
         return -1;
     }
 

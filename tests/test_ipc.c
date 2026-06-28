@@ -39,6 +39,33 @@ void test_ipc_keeps_messages_by_target_pid(void) {
     TEST_ASSERT_EQUAL_UINT64('a', message.data[0]);
 }
 
+void test_ipc_preserves_fifo_after_slot_reuse(void) {
+    const uint8_t first_target[] = { 'a' };
+    const uint8_t old_for_target[] = { 'b' };
+    const uint8_t new_for_target[] = { 'c' };
+    ipc_message_t message;
+
+    ipc_init();
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)ipc_send(1, 3, first_target,
+                                                sizeof(first_target)));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)ipc_send(2, 4, old_for_target,
+                                                sizeof(old_for_target)));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)ipc_recv(3, &message));
+    TEST_ASSERT_EQUAL_UINT64('a', message.data[0]);
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)ipc_send(3, 4, new_for_target,
+                                                sizeof(new_for_target)));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)ipc_recv(4, &message));
+    TEST_ASSERT_EQUAL_UINT64(2, message.sender_pid);
+    TEST_ASSERT_EQUAL_UINT64('b', message.data[0]);
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)ipc_recv(4, &message));
+    TEST_ASSERT_EQUAL_UINT64(3, message.sender_pid);
+    TEST_ASSERT_EQUAL_UINT64('c', message.data[0]);
+}
+
 void test_ipc_recv_zeroes_unused_payload_tail(void) {
     uint8_t full[IPC_MAX_MESSAGE_SIZE];
     const uint8_t short_payload[] = { 0x7e };

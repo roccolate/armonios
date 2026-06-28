@@ -80,3 +80,17 @@ void test_fb_draw_line_rect_circle_and_alpha(void) {
     fb_putpixel_alpha(&fb, 0, 6, 0x80ffffffU);
     TEST_ASSERT_EQUAL_UINT64(0xff808080U, pixels[6 * 7]);
 }
+
+void test_fb_draw_rect_clips_huge_dimensions_without_wrapping(void) {
+    fb_t fb;
+    uint32_t pixels[16] = { 0 };
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 4, 4, 4));
+
+    fb_draw_rect(&fb, 3, 3, UINT32_MAX, UINT32_MAX, 0xff123456U);
+
+    TEST_ASSERT_EQUAL_UINT64(0xff123456U, pixels[3 * 4 + 3]);
+    TEST_ASSERT_EQUAL_UINT64(0, pixels[0]);
+    TEST_ASSERT_EQUAL_UINT64(0, pixels[0 * 4 + 3]);
+    TEST_ASSERT_EQUAL_UINT64(0, pixels[3 * 4 + 0]);
+}

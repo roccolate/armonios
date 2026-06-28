@@ -148,3 +148,18 @@ void test_dtb_get_framebuffer_rejects_incomplete_node(void) {
                              (uint64_t)dtb_get_framebuffer(
                                  build_framebuffer_dtb(dtb, 0), &framebuffer));
 }
+
+void test_dtb_get_framebuffer_rejects_header_offsets_outside_blob(void) {
+    uint8_t dtb[512] = { 0 };
+    dtb_framebuffer_t framebuffer = { 0 };
+
+    (void)build_framebuffer_dtb(dtb, 1);
+    dtb[8] = 0xffU;
+    dtb[9] = 0xffU;
+    dtb[10] = 0xffU;
+    dtb[11] = 0xf0U;
+
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)dtb_get_framebuffer(
+                                 (uint64_t)(uintptr_t)dtb, &framebuffer));
+}

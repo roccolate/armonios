@@ -13,8 +13,6 @@
  * absent or FAT32 probing fails.
  */
 
-#define BOOTFS_MAX_NODES 5U
-
 typedef struct {
     const char *name;
     const char *path;
@@ -31,11 +29,11 @@ static const bootfs_entry_t g_bootfs_entries[] = {
 #define BOOTFS_ENTRY_COUNT \
     (sizeof(g_bootfs_entries) / sizeof(g_bootfs_entries[0]))
 
-_Static_assert(BOOTFS_ENTRY_COUNT <= BOOTFS_MAX_NODES,
+_Static_assert(BOOTFS_ENTRY_COUNT <= VFS_MAX_NODES,
                "bootfs entries must fit mounted VFS nodes");
 
 static bootfs_file_t g_found_files[BOOTFS_ENTRY_COUNT];
-static vfs_node_t g_bootfs_vfs_nodes[BOOTFS_MAX_NODES];
+static vfs_node_t g_bootfs_vfs_nodes[BOOTFS_ENTRY_COUNT];
 
 static int bootfs_name_equals(const char *left, const char *right) {
     if (left == 0 || right == 0) {
@@ -116,7 +114,12 @@ int bootfs_read(const char *name, uint64_t offset, uint8_t *buffer,
 int bootfs_mount_vfs(void) {
     uint32_t mounted = 0;
 
-    for (uint32_t i = 0; i < BOOTFS_MAX_NODES; i++) {
+    /*
+     * Rebuild the static node array from the entry table each mount attempt.
+     * The array is sized from BOOTFS_ENTRY_COUNT, so adding a new boot app
+     * cannot leave a stale hard-coded node limit behind.
+     */
+    for (uint32_t i = 0; i < BOOTFS_ENTRY_COUNT; i++) {
         g_bootfs_vfs_nodes[i].path = 0;
         g_bootfs_vfs_nodes[i].size = 0;
         g_bootfs_vfs_nodes[i].read = 0;

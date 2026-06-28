@@ -97,10 +97,10 @@ static void virtio_barrier(void) {
 #endif
 }
 
-static void memcpy32(void *dst, const void *src, uint32_t len) {
-    uint32_t *d = (uint32_t *)dst;
-    const uint32_t *s = (const uint32_t *)src;
-    for (uint32_t i = 0; i < (len + 3) / 4; i++) {
+static void copy_bytes(void *dst, const void *src, uint32_t len) {
+    uint8_t *d = (uint8_t *)dst;
+    const uint8_t *s = (const uint8_t *)src;
+    for (uint32_t i = 0; i < len; i++) {
         d[i] = s[i];
     }
 }
@@ -168,9 +168,9 @@ int virtio_net_init(virtio_net_device_t *device, uint64_t base) {
         VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER;
 
     *virtio_reg(base, VIRTIO_MMIO_DRIVER_FEATURES_SEL) = 0;
-    *virtio_reg(base, VIRTIO_MMIO_DRIVER_FEATURES) = VIRTIO_F_VERSION_1_HIGH;
-    *virtio_reg(base, VIRTIO_MMIO_DRIVER_FEATURES_SEL) = 1;
     *virtio_reg(base, VIRTIO_MMIO_DRIVER_FEATURES) = VIRTIO_NET_F_MAC;
+    *virtio_reg(base, VIRTIO_MMIO_DRIVER_FEATURES_SEL) = 1;
+    *virtio_reg(base, VIRTIO_MMIO_DRIVER_FEATURES) = VIRTIO_F_VERSION_1_HIGH;
     status = VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER |
              VIRTIO_STATUS_FEATURES_OK;
     *virtio_reg(base, VIRTIO_MMIO_STATUS) = status;
@@ -264,11 +264,11 @@ int virtio_net_send(virtio_net_device_t *device, const void *data, uint32_t len)
     avail_idx = g_tx_avail.idx;
     desc_idx = avail_idx % device->queue_size;
 
-    memcpy32(g_tx_buf[desc_idx], data, len);
+    copy_bytes(g_tx_buf[desc_idx], data, len);
 
     g_tx_desc[desc_idx].addr = (uint64_t)(uintptr_t)g_tx_buf[desc_idx];
     g_tx_desc[desc_idx].len = len;
-    g_tx_desc[desc_idx].flags = VIRTQ_DESC_F_NEXT;
+    g_tx_desc[desc_idx].flags = 0;
     g_tx_desc[desc_idx].next = 0;
 
     g_tx_avail.ring[avail_idx % device->queue_size] = desc_idx;
@@ -319,7 +319,7 @@ int virtio_net_recv(virtio_net_device_t *device, void *data, uint32_t max_len) {
     }
 
     if (copy_len > 0) {
-        memcpy32(data, g_rx_buf[desc_idx], copy_len);
+        copy_bytes(data, g_rx_buf[desc_idx], copy_len);
     }
 
     g_rx_desc[desc_idx].addr = (uint64_t)(uintptr_t)g_rx_buf[desc_idx];

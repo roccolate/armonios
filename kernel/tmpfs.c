@@ -24,6 +24,9 @@ static vfs_node_t g_tmpfs_vfs_nodes[TMPFS_MAX_FILES];
 static char g_tmpfs_vfs_names[TMPFS_MAX_FILES][TMPFS_MAX_NAME];
 static uint32_t g_tmpfs_vfs_node_count;
 
+_Static_assert(TMPFS_MAX_FILES <= VFS_MAX_NODES,
+               "tmpfs files must fit the VFS static node table");
+
 static void tmpfs_clear_file(tmpfs_file_t *file) {
     if (file == 0) {
         return;
@@ -37,6 +40,22 @@ static void tmpfs_clear_file(tmpfs_file_t *file) {
     }
     file->size = 0;
     file->used = 0;
+}
+
+static void tmpfs_clear_vfs_slot(uint32_t index) {
+    if (index >= TMPFS_MAX_FILES) {
+        return;
+    }
+
+    g_tmpfs_vfs_nodes[index].path = 0;
+    g_tmpfs_vfs_nodes[index].size = 0;
+    g_tmpfs_vfs_nodes[index].read = 0;
+    g_tmpfs_vfs_nodes[index].write = 0;
+    g_tmpfs_vfs_nodes[index].stat = 0;
+    g_tmpfs_vfs_nodes[index].context = 0;
+    for (uint32_t j = 0; j < TMPFS_MAX_NAME; j++) {
+        g_tmpfs_vfs_names[index][j] = '\0';
+    }
 }
 
 static int tmpfs_name_equals(const char *left, const char *right) {
@@ -117,15 +136,7 @@ static int tmpfs_vfs_stat(void *context, vfs_stat_t *stat) {
 void tmpfs_reset(void) {
     for (uint32_t i = 0; i < TMPFS_MAX_FILES; i++) {
         tmpfs_clear_file(&g_tmpfs_files[i]);
-        g_tmpfs_vfs_nodes[i].path = 0;
-        g_tmpfs_vfs_nodes[i].size = 0;
-        g_tmpfs_vfs_nodes[i].read = 0;
-        g_tmpfs_vfs_nodes[i].write = 0;
-        g_tmpfs_vfs_nodes[i].stat = 0;
-        g_tmpfs_vfs_nodes[i].context = 0;
-        for (uint32_t j = 0; j < TMPFS_MAX_NAME; j++) {
-            g_tmpfs_vfs_names[i][j] = '\0';
-        }
+        tmpfs_clear_vfs_slot(i);
     }
     g_tmpfs_vfs_node_count = 0;
 }
@@ -239,6 +250,10 @@ int tmpfs_mount_vfs(const char *path, const char *name) {
         return -1;
     }
 
+    /*
+     * VFS copies `path` into VFS-owned storage during vfs_mount_static. tmpfs
+     * only needs to keep a stable copy of the file name for callback context.
+     */
     g_tmpfs_vfs_nodes[index].path = path;
     g_tmpfs_vfs_nodes[index].size = file->size;
     g_tmpfs_vfs_nodes[index].read = tmpfs_vfs_read;
@@ -247,15 +262,7 @@ int tmpfs_mount_vfs(const char *path, const char *name) {
     g_tmpfs_vfs_nodes[index].context = g_tmpfs_vfs_names[index];
 
     if (vfs_mount_static(&g_tmpfs_vfs_nodes[index], 1) != 0) {
-        g_tmpfs_vfs_nodes[index].path = 0;
-        g_tmpfs_vfs_nodes[index].size = 0;
-        g_tmpfs_vfs_nodes[index].read = 0;
-        g_tmpfs_vfs_nodes[index].write = 0;
-        g_tmpfs_vfs_nodes[index].stat = 0;
-        g_tmpfs_vfs_nodes[index].context = 0;
-        for (uint32_t i = 0; i < TMPFS_MAX_NAME; i++) {
-            g_tmpfs_vfs_names[index][i] = '\0';
-        }
+        tmpfs_clear_vfs_slot(index);
         return -1;
     }
 

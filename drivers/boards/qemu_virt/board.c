@@ -10,13 +10,39 @@ static virtio_blk_device_t g_blk_dev;
 static virtio_input_device_t g_input_dev;
 
 int board_storage_read(uint32_t lba, uint32_t count, void *buffer) {
-    (void)count;
-    return virtio_blk_read_sector(&g_blk_dev, lba, buffer);
+    uint8_t *bytes = (uint8_t *)buffer;
+
+    if (buffer == 0 && count != 0) {
+        return -1;
+    }
+    if (count != 0 && lba > UINT32_MAX - (count - 1U)) {
+        return -1;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        if (virtio_blk_read_sector(&g_blk_dev, lba + i,
+                                   bytes + i * 512U) != 0) {
+            return -1;
+        }
+    }
+    return 0;
 }
 
 int board_storage_write(uint32_t lba, uint32_t count, const void *buffer) {
-    (void)count;
-    return virtio_blk_write_sector(&g_blk_dev, lba, buffer);
+    const uint8_t *bytes = (const uint8_t *)buffer;
+
+    if (buffer == 0 && count != 0) {
+        return -1;
+    }
+    if (count != 0 && lba > UINT32_MAX - (count - 1U)) {
+        return -1;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        if (virtio_blk_write_sector(&g_blk_dev, lba + i,
+                                    bytes + i * 512U) != 0) {
+            return -1;
+        }
+    }
+    return 0;
 }
 
 int board_storage_init(void) {

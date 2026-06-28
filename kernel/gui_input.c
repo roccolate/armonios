@@ -16,14 +16,19 @@ static int gui_window_owner_dead(const gui_window_t *window) {
 }
 
 int gui_window_contains(gui_window_t *window, int32_t x, int32_t y) {
+    int64_t x1;
+    int64_t y1;
+
     if (window == 0 || window->used == 0) {
         return 0;
     }
 
+    x1 = (int64_t)window->x + (int64_t)window->w;
+    y1 = (int64_t)window->y + (int64_t)window->h;
     return x >= (int32_t)window->x &&
-           x < (int32_t)(window->x + window->w) &&
+           (int64_t)x < x1 &&
            y >= (int32_t)window->y &&
-           y < (int32_t)(window->y + window->h);
+           (int64_t)y < y1;
 }
 
 int gui_hit_test(gui_desktop_t *desktop, int32_t x, int32_t y) {
@@ -167,10 +172,13 @@ int gui_handle_desktop_input(gui_desktop_t *desktop,
 
 static int gui_rect_contains(uint32_t rx, uint32_t ry, uint32_t rw,
                              uint32_t rh, int32_t x, int32_t y) {
+    int64_t x1 = (int64_t)rx + (int64_t)rw;
+    int64_t y1 = (int64_t)ry + (int64_t)rh;
+
     return x >= (int32_t)rx &&
-           x <  (int32_t)(rx + rw) &&
+           (int64_t)x < x1 &&
            y >= (int32_t)ry &&
-           y <  (int32_t)(ry + rh);
+           (int64_t)y < y1;
 }
 
 int gui_close_box_rect(const gui_window_t *window, uint32_t *out_x,

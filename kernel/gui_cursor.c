@@ -3,6 +3,27 @@
 #include "fb/fb.h"
 #include "kernel/gui_internal.h"
 
+static int gui_cursor_region_contains(const gui_window_t *window,
+                                      uint32_t slot,
+                                      int32_t content_x,
+                                      int32_t content_y) {
+    const int32_t rx = window->cursor_regions[slot].x;
+    const int32_t ry = window->cursor_regions[slot].y;
+    const int32_t rw = window->cursor_regions[slot].w;
+    const int32_t rh = window->cursor_regions[slot].h;
+    int64_t x1;
+    int64_t y1;
+
+    if (rw <= 0 || rh <= 0) {
+        return 0;
+    }
+
+    x1 = (int64_t)rx + (int64_t)rw;
+    y1 = (int64_t)ry + (int64_t)rh;
+    return content_x >= rx && (int64_t)content_x < x1 &&
+           content_y >= ry && (int64_t)content_y < y1;
+}
+
 void gui_refresh_cursor_shape(gui_desktop_t *desktop) {
     int32_t hit;
     gui_window_t *window;
@@ -28,12 +49,7 @@ void gui_refresh_cursor_shape(gui_desktop_t *desktop) {
         if (window->cursor_regions[i].used == 0U) {
             continue;
         }
-        int32_t rx = window->cursor_regions[i].x;
-        int32_t ry = window->cursor_regions[i].y;
-        int32_t rw = window->cursor_regions[i].w;
-        int32_t rh = window->cursor_regions[i].h;
-        if (content_x >= rx && content_x < rx + rw &&
-            content_y >= ry && content_y < ry + rh) {
+        if (gui_cursor_region_contains(window, i, content_x, content_y)) {
             desktop->cursor.shape =
                 (uint8_t)window->cursor_regions[i].shape;
             return;
@@ -97,6 +113,11 @@ int gui_register_cursor_region(gui_desktop_t *desktop, uint32_t window_id,
     }
 
     if (shape != GUI_CURSOR_ARROW && shape != GUI_CURSOR_HAND) {
+        return -1;
+    }
+
+    if (w == 0U || h == 0U || w > (uint32_t)INT32_MAX ||
+        h > (uint32_t)INT32_MAX) {
         return -1;
     }
 

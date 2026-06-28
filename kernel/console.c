@@ -27,9 +27,11 @@ static uint32_t g_line_len;
 static dtb_memory_t g_memory;
 static int g_have_memory;
 static int g_interactive;
-// Last known absolute cursor position, used to synthesize relative
-// mouse_move events when the user drives the mouse from the serial
-// console. Initialized on the first cursor query.
+/*
+ * Last known absolute cursor position, used to synthesize relative mouse_move
+ * events when the user drives the mouse from the serial console. Initialized
+ * on the first cursor query.
+ */
 static int g_cursor_known;
 static int32_t g_cursor_x;
 static int32_t g_cursor_y;
@@ -216,8 +218,10 @@ static void run_boot_status(void) {
     }
 }
 
-// Read the current cursor position into *x/*y. Falls back to (0,0) if
-// the GUI desktop is not yet up.
+/*
+ * Read the current cursor position into the output pointers. Falls back to
+ * (0,0) if the GUI desktop is not yet up.
+ */
 static void read_cursor(int32_t *x, int32_t *y) {
     gui_desktop_t *desktop = gui_desktop();
     if (desktop != 0) {
@@ -262,6 +266,9 @@ static void queue_key_press(uint32_t key) {
 static int parse_signed(const char **cursor, int32_t *out) {
     const char *s = *cursor;
     int negative = 0;
+    uint32_t max_abs;
+    uint32_t value = 0;
+
     if (*s == '-') {
         negative = 1;
         s++;
@@ -269,12 +276,21 @@ static int parse_signed(const char **cursor, int32_t *out) {
     if (*s < '0' || *s > '9') {
         return -1;
     }
-    uint32_t value = 0;
+    max_abs = negative != 0 ? 2147483648U : 2147483647U;
     while (*s >= '0' && *s <= '9') {
-        value = value * 10U + (uint32_t)(*s - '0');
+        uint32_t digit = (uint32_t)(*s - '0');
+
+        if (value > (max_abs - digit) / 10U) {
+            return -1;
+        }
+        value = value * 10U + digit;
         s++;
     }
-    *out = negative ? -(int32_t)value : (int32_t)value;
+    if (negative != 0 && value == 2147483648U) {
+        *out = INT32_MIN;
+    } else {
+        *out = negative != 0 ? -(int32_t)value : (int32_t)value;
+    }
     *cursor = s;
     return 0;
 }

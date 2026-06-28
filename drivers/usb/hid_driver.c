@@ -157,7 +157,7 @@ uint8_t usb_hid_mouse_report(usb_hid_device_t *dev,
             break;
         }
         out[produced].type = INPUT_EVENT_MOUSE_BUTTON;
-        out[produced].data.mouse_button.button = mask;
+        out[produced].data.mouse_button.button = i;
         out[produced].data.mouse_button.pressed =
             (report->buttons & mask) != 0U ? 1U : 0U;
         produced++;

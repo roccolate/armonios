@@ -93,7 +93,11 @@ static void virtio_write64(uint64_t base, uint32_t offset_low, uint32_t offset_h
 }
 
 static void mb(void) {
+#if defined(__aarch64__)
     __asm__ volatile("dmb sy" ::: "memory");
+#else
+    __sync_synchronize();
+#endif
 }
 
 int virtio_input_probe(uint64_t base) {
@@ -132,11 +136,11 @@ int virtio_input_probe_range(uint64_t base, uint64_t size, uint64_t stride,
     return -1;
 }
 
-static int setup_event_queue(uint64_t base) {
+static int setup_event_queue(uint64_t base, uint32_t *out_queue_size) {
     virtio_write32(base, VIRTIO_MMIO_QUEUE_SEL, VIRTIO_INPUT_EVENTQ);
 
     uint32_t qsize = virtio_read32(base, VIRTIO_MMIO_QUEUE_NUM_MAX);
-    if (qsize == 0) {
+    if (qsize == 0 || out_queue_size == 0) {
         return -1;
     }
     if (qsize > VIRTIO_INPUT_QUEUE_SIZE) {
@@ -178,13 +182,18 @@ static int setup_event_queue(uint64_t base) {
     virtio_write32(base, VIRTIO_MMIO_QUEUE_READY, 1);
     virtio_write32(base, VIRTIO_MMIO_QUEUE_NOTIFY, VIRTIO_INPUT_EVENTQ);
 
+    *out_queue_size = qsize;
     return 0;
 }
 
 int virtio_input_init(virtio_input_device_t *device, uint64_t base) {
+    if (device == 0 || base == 0 || virtio_input_probe(base) != 0) {
+        return -1;
+    }
+
     device->base = base;
     device->ready = 0;
-    device->queue_size = VIRTIO_INPUT_QUEUE_SIZE;
+    device->queue_size = 0;
     device->last_used_idx = 0;
 
     uint8_t status = 0;
@@ -194,7 +203,8 @@ int virtio_input_init(virtio_input_device_t *device, uint64_t base) {
     status |= VIRTIO_STATUS_DRIVER;
     virtio_write32(base, VIRTIO_MMIO_STATUS, status);
 
-    if (setup_event_queue(base) != 0) {
+    uint32_t qsize = 0;
+    if (setup_event_queue(base, &qsize) != 0) {
         return -1;
     }
 
@@ -203,12 +213,13 @@ int virtio_input_init(virtio_input_device_t *device, uint64_t base) {
     virtio_write32(base, VIRTIO_MMIO_QUEUE_NOTIFY, VIRTIO_INPUT_EVENTQ);
 
     device->ready = 1;
+    device->queue_size = qsize;
 
     return 0;
 }
 
 int virtio_input_has_events(virtio_input_device_t *device) {
-    if (!device->ready) {
+    if (device == 0 || !device->ready) {
         return 0;
     }
 
@@ -217,7 +228,7 @@ int virtio_input_has_events(virtio_input_device_t *device) {
 }
 
 int virtio_input_poll(virtio_input_device_t *device) {
-    if (!device->ready) {
+    if (device == 0 || !device->ready) {
         return -1;
     }
 

@@ -1,0 +1,68 @@
+#include "unity/unity.h"
+
+#include "input/virtio_input.h"
+
+#include <stdint.h>
+
+#define VIRTIO_MMIO_MAGIC_VALUE 0x000U
+#define VIRTIO_MMIO_VERSION     0x004U
+#define VIRTIO_MMIO_DEVICE_ID   0x008U
+#define VIRTIO_MMIO_QUEUE_NUM_MAX 0x034U
+#define VIRTIO_MMIO_QUEUE_NUM   0x038U
+#define VIRTIO_MMIO_QUEUE_READY 0x044U
+#define VIRTIO_MMIO_STATUS      0x070U
+
+#define VIRTIO_MMIO_MAGIC       0x74726976U
+
+static void write_reg(uint32_t *mmio, uint32_t offset, uint32_t value) {
+    mmio[offset / sizeof(uint32_t)] = value;
+}
+
+static void setup_input_mmio(uint32_t *mmio, uint32_t queue_size) {
+    write_reg(mmio, VIRTIO_MMIO_MAGIC_VALUE, VIRTIO_MMIO_MAGIC);
+    write_reg(mmio, VIRTIO_MMIO_VERSION, 2);
+    write_reg(mmio, VIRTIO_MMIO_DEVICE_ID, 18);
+    write_reg(mmio, VIRTIO_MMIO_QUEUE_NUM_MAX, queue_size);
+}
+
+void test_virtio_input_probe_rejects_wrong_device(void) {
+    uint32_t mmio[128] = { 0 };
+
+    setup_input_mmio(mmio, 16);
+    write_reg(mmio, VIRTIO_MMIO_DEVICE_ID, 2);
+
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)virtio_input_probe(
+                                 (uint64_t)(uintptr_t)mmio));
+}
+
+void test_virtio_input_init_records_negotiated_queue_size(void) {
+    uint32_t mmio[128] = { 0 };
+    virtio_input_device_t device = { 0 };
+
+    setup_input_mmio(mmio, 8);
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)virtio_input_init(
+                                  &device, (uint64_t)(uintptr_t)mmio));
+    TEST_ASSERT_EQUAL_UINT64(1, device.ready);
+    TEST_ASSERT_EQUAL_UINT64(8, device.queue_size);
+    TEST_ASSERT_EQUAL_UINT64(8, mmio[VIRTIO_MMIO_QUEUE_NUM / sizeof(uint32_t)]);
+    TEST_ASSERT_EQUAL_UINT64(1, mmio[VIRTIO_MMIO_QUEUE_READY / sizeof(uint32_t)]);
+    TEST_ASSERT_EQUAL_UINT64(7, mmio[VIRTIO_MMIO_STATUS / sizeof(uint32_t)]);
+}
+
+void test_virtio_input_rejects_invalid_inputs(void) {
+    uint32_t mmio[128] = { 0 };
+    virtio_input_device_t device = { 0 };
+
+    setup_input_mmio(mmio, 16);
+
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)virtio_input_init(0,
+                                 (uint64_t)(uintptr_t)mmio));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)virtio_input_init(&device, 0));
+    TEST_ASSERT_EQUAL_UINT64(0, virtio_input_has_events(0));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)virtio_input_poll(0));
+}

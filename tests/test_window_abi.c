@@ -442,6 +442,15 @@ void test_window_abi_resize_window_rejects_out_of_bounds(void) {
     TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
                              (uint64_t)gui_resize_window(&desktop, window_id,
                                                           0U, 60U, 16U, 16U));
+    /* Overflowing x+w/y+h must fail like any other off-screen rectangle. */
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)gui_resize_window(
+                                 &desktop, window_id, 1U, 0U,
+                                 UINT32_MAX, 16U));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)gui_resize_window(
+                                 &desktop, window_id, 0U, 1U,
+                                 16U, UINT32_MAX));
     /* Below the 2x2 minimum. */
     TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
                              (uint64_t)gui_resize_window(&desktop, window_id,

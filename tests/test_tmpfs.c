@@ -207,3 +207,34 @@ void test_tmpfs_mount_vfs_rejects_missing_and_invalid_inputs(void) {
                              (uint64_t)tmpfs_mount_vfs("/tmp/note",
                                                        "note"));
 }
+
+void test_tmpfs_failed_mount_does_not_consume_slot(void) {
+    const char *names[TMPFS_MAX_FILES] = {
+        "0", "1", "2", "3", "4", "5", "6", "7",
+    };
+    const char *paths[TMPFS_MAX_FILES] = {
+        "/tmp/0", "/tmp/1", "/tmp/2", "/tmp/3",
+        "/tmp/4", "/tmp/5", "/tmp/6", "/tmp/7",
+    };
+
+    /*
+     * A failed vfs_mount_static call must leave g_tmpfs_vfs_node_count
+     * unchanged. Otherwise a duplicate-path mount attempt could exhaust the
+     * fixed tmpfs mount table even though no VFS node was installed.
+     */
+    vfs_reset();
+    tmpfs_reset();
+    for (uint32_t i = 0; i < TMPFS_MAX_FILES; i++) {
+        TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)tmpfs_create(names[i]));
+    }
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)tmpfs_mount_vfs(paths[0], names[0]));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)tmpfs_mount_vfs(paths[0], names[1]));
+
+    for (uint32_t i = 1; i < TMPFS_MAX_FILES; i++) {
+        TEST_ASSERT_EQUAL_UINT64(0,
+                                 (uint64_t)tmpfs_mount_vfs(paths[i],
+                                                           names[i]));
+    }
+}

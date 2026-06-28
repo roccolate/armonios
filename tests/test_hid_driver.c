@@ -128,7 +128,7 @@ void test_hid_mouse_report_emits_button_press_and_release(void) {
     uint8_t n = usb_hid_mouse_report(&dev, &press, events, 4);
     TEST_ASSERT_EQUAL_UINT64(1, n);
     TEST_ASSERT_EQUAL_UINT64(INPUT_EVENT_MOUSE_BUTTON, events[0].type);
-    TEST_ASSERT_EQUAL_UINT64(HID_BTN_LEFT, events[0].data.mouse_button.button);
+    TEST_ASSERT_EQUAL_UINT64(0, events[0].data.mouse_button.button);
     TEST_ASSERT_EQUAL_UINT64(1, events[0].data.mouse_button.pressed);
 
     hid_boot_mouse_report_t release = { 0, 0, 0 };

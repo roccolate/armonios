@@ -821,6 +821,16 @@ void test_gui_cursor_register_region_rejects_invalid_inputs(void) {
                                  &desktop, window_id, GUI_MAX_CURSOR_REGIONS,
                                  0, 0, 10, 10, GUI_CURSOR_HAND));
 
+    /* dimensions that do not fit the int32 containment math */
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)gui_register_cursor_region(
+                                 &desktop, window_id, 0U, 0, 0, 0, 10,
+                                 GUI_CURSOR_HAND));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)gui_register_cursor_region(
+                                 &desktop, window_id, 0U, 0, 0,
+                                 UINT32_MAX, 10, GUI_CURSOR_HAND));
+
     /* null desktop */
     TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
                              (uint64_t)gui_register_cursor_region(
@@ -1711,6 +1721,21 @@ void test_gui_damage_draw_rect_pushes_content_rect(void) {
     TEST_ASSERT_EQUAL_UINT64((uint64_t)(uint32_t)2,
                              (uint64_t)(uint32_t)desktop.damage_rects[0].w);
     TEST_ASSERT_EQUAL_UINT64((uint64_t)(uint32_t)2,
+                             (uint64_t)(uint32_t)desktop.damage_rects[0].h);
+
+    gui_damage_clear(&desktop);
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_window_draw_rect(
+                                 &desktop, window_id, -2, -2,
+                                 UINT32_MAX, UINT32_MAX, 0xff00ff00U));
+    TEST_ASSERT_EQUAL_UINT64(1U, desktop.damage_count);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(uint32_t)2,
+                             (uint64_t)(uint32_t)desktop.damage_rects[0].x);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(uint32_t)2,
+                             (uint64_t)(uint32_t)desktop.damage_rects[0].y);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(uint32_t)4,
+                             (uint64_t)(uint32_t)desktop.damage_rects[0].w);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(uint32_t)4,
                              (uint64_t)(uint32_t)desktop.damage_rects[0].h);
 }
 

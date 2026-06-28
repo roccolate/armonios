@@ -148,5 +148,10 @@ int board_storage_write(uint32_t lba, uint32_t count, const void *buffer) {
 }
 
 int board_storage_init(void) {
-    return emmc_init(&g_emmc_dev, RPI4_EMMC_BASE);
+    if (emmc_init(&g_emmc_dev, RPI4_EMMC_BASE) != 0) {
+        g_emmc_initialized = 0;
+        return -1;
+    }
+    g_emmc_initialized = 1;
+    return 0;
 }

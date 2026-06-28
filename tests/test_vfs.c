@@ -109,6 +109,52 @@ static int test_rw_file_stat(void *context, vfs_stat_t *stat) {
     return 0;
 }
 
+static int test_list_static(void *context, uint8_t *buffer, uint64_t capacity,
+                            uint64_t *bytes_written) {
+    const char *text = (const char *)context;
+    uint64_t count = 0;
+
+    if (bytes_written != 0) {
+        *bytes_written = 0;
+    }
+    if (text == 0 || buffer == 0 || bytes_written == 0) {
+        return -1;
+    }
+
+    while (text[count] != '\0' && count < capacity) {
+        buffer[count] = (uint8_t)text[count];
+        count++;
+    }
+    *bytes_written = count;
+    return 0;
+}
+
+static int test_bad_read_overreports(void *context, uint64_t offset,
+                                     uint8_t *buffer, uint64_t capacity,
+                                     uint64_t *bytes_read) {
+    (void)context;
+    (void)offset;
+    (void)buffer;
+
+    if (bytes_read != 0) {
+        *bytes_read = capacity + 1U;
+    }
+    return 0;
+}
+
+static int test_bad_write_overreports(void *context, uint64_t offset,
+                                      const uint8_t *buffer, uint64_t size,
+                                      uint64_t *bytes_written) {
+    (void)context;
+    (void)offset;
+    (void)buffer;
+
+    if (bytes_written != 0) {
+        *bytes_written = size + 1U;
+    }
+    return 0;
+}
+
 void test_vfs_mount_and_find_static_node(void) {
     uint8_t data[] = { 1, 2, 3 };
     test_file_t file = {
@@ -578,6 +624,45 @@ void test_vfs_list_truncates_to_capacity(void) {
     }
 }
 
+void test_vfs_mount_list_validates_paths_and_duplicates(void) {
+    uint8_t buffer[8] = { 0 };
+    uint64_t bytes_written = 0;
+    char long_path[VFS_MAX_PATH + 1U];
+
+    long_path[0] = '/';
+    for (uint32_t i = 1; i < VFS_MAX_PATH; i++) {
+        long_path[i] = 'l';
+    }
+    long_path[VFS_MAX_PATH] = '\0';
+
+    vfs_reset();
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)vfs_mount_list(
+                                 0, test_list_static, "bad\n"));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)vfs_mount_list(
+                                 "relative", test_list_static, "bad\n"));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)vfs_mount_list(
+                                 long_path, test_list_static, "bad\n"));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)vfs_mount_list("/fat", 0, "bad\n"));
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)vfs_mount_list(
+                                 "/fat", test_list_static, "ok\n"));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)vfs_mount_list(
+                                 "/fat", test_list_static, "dup\n"));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_list("/fat", buffer,
+                                                  sizeof(buffer),
+                                                  &bytes_written));
+    TEST_ASSERT_EQUAL_UINT64(3, bytes_written);
+    TEST_ASSERT_EQUAL_UINT64('o', buffer[0]);
+    TEST_ASSERT_EQUAL_UINT64('k', buffer[1]);
+    TEST_ASSERT_EQUAL_UINT64('\n', buffer[2]);
+}
+
 void test_vfs_seek_sets_descriptor_offset(void) {
     uint8_t data[] = { 0x11, 0x22, 0x33, 0x44 };
     uint8_t buffer[2] = { 0 };
@@ -695,6 +780,41 @@ void test_vfs_open_write_fd_updates_offset_and_size(void) {
     TEST_ASSERT_EQUAL_UINT64(3, output[2]);
     TEST_ASSERT_EQUAL_UINT64(4, output[3]);
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_close(fd));
+}
+
+void test_vfs_rejects_overreported_io_counts(void) {
+    uint8_t buffer[4] = { 0 };
+    uint64_t count = 99;
+    vfs_node_t read_node = {
+        .path = "/bad-read",
+        .size = sizeof(buffer),
+        .read = test_bad_read_overreports,
+    };
+    vfs_node_t write_node = {
+        .path = "/bad-write",
+        .size = 0,
+        .write = test_bad_write_overreports,
+    };
+
+    /*
+     * Filesystem callbacks must not report more bytes than VFS requested.
+     * Rejecting impossible counts keeps descriptor offsets from advancing
+     * past the caller-visible operation size if a backend misbehaves.
+     */
+    vfs_reset();
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_mount_static(&read_node, 1));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)vfs_read("/bad-read", 0, buffer,
+                                                sizeof(buffer), &count));
+    TEST_ASSERT_EQUAL_UINT64(0, count);
+
+    vfs_reset();
+    count = 99;
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)vfs_mount_static(&write_node, 1));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)vfs_write("/bad-write", 0, buffer,
+                                                 sizeof(buffer), &count));
+    TEST_ASSERT_EQUAL_UINT64(0, count);
 }
 
 /*

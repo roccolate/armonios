@@ -129,6 +129,25 @@ void test_fat32_mount_reads_geometry(void) {
     TEST_ASSERT_EQUAL_UINT64(2, fs.root_cluster);
 }
 
+void test_fat32_default_fs_tracks_successful_mount_only(void) {
+    test_fat32_disk_t disk;
+    fat32_fs_t fs;
+    fat32_fs_t bad_fs;
+
+    test_setup_fat32_disk(&disk);
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fat32_mount(
+                                  &fs, test_disk_read_sector, &disk));
+    TEST_ASSERT_TRUE(fat32_default_fs() == &fs);
+
+    test_setup_fat32_disk(&disk);
+    test_write_le16(&disk.sectors[0][11], 1024);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)fat32_mount(&bad_fs,
+                                                   test_disk_read_sector,
+                                                   &disk));
+    TEST_ASSERT_NULL(fat32_default_fs());
+}
+
 void test_fat32_open_root_finds_8_3_file(void) {
     test_fat32_disk_t disk;
     fat32_fs_t fs;
@@ -599,6 +618,24 @@ void test_fat32_delete_frees_chain_and_removes_entry(void) {
     /* The directory entry's first byte is now the deletion marker. */
     TEST_ASSERT_EQUAL_UINT64(0xe5U,
                              disk.sectors[file.dir_lba][file.dir_offset]);
+}
+
+void test_fat32_delete_allows_empty_file_without_cluster(void) {
+    test_fat32_disk_t disk;
+    fat32_fs_t fs;
+    uint8_t *entry;
+
+    test_setup_fat32_disk_writable(&disk, &fs);
+    entry = &disk.sectors[2][32];
+    test_dir_name(entry, "EMPTY   TXT");
+    entry[11] = 0x20;
+    test_write_le16(&entry[20], 0);
+    test_write_le16(&entry[26], 0);
+    test_write_le32(&entry[28], 0);
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)fat32_delete(&fs, "EMPTY.TXT"));
+    TEST_ASSERT_EQUAL_UINT64(0xe5U, disk.sectors[2][32]);
 }
 
 void test_fat32_rename_updates_short_name_in_place(void) {

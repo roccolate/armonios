@@ -201,10 +201,10 @@ int gui_window_draw_rect(gui_desktop_t *desktop, uint32_t window_id,
                          uint32_t color) {
     gui_window_t *window;
     uint32_t content_h;
-    int32_t x0;
-    int32_t y0;
-    int32_t x1;
-    int32_t y1;
+    int64_t x0;
+    int64_t y0;
+    int64_t x1;
+    int64_t y1;
     fb_t fb;
 
     if (desktop == 0 || window_id >= GUI_MAX_WINDOWS ||
@@ -224,30 +224,31 @@ int gui_window_draw_rect(gui_desktop_t *desktop, uint32_t window_id,
     content_h = window->h > window->title_h ? window->h - window->title_h : 0U;
     x0 = x;
     y0 = y;
-    x1 = x0 + (int32_t)w;
-    y1 = y0 + (int32_t)h;
+    x1 = x0 + (int64_t)w;
+    y1 = y0 + (int64_t)h;
     if (x0 < 0) {
         x0 = 0;
     }
     if (y0 < 0) {
         y0 = 0;
     }
-    if (x1 > (int32_t)window->w) {
-        x1 = (int32_t)window->w;
+    if (x1 > (int64_t)window->w) {
+        x1 = (int64_t)window->w;
     }
-    if (y1 > (int32_t)content_h) {
-        y1 = (int32_t)content_h;
+    if (y1 > (int64_t)content_h) {
+        y1 = (int64_t)content_h;
     }
     if (x1 <= x0 || y1 <= y0) {
         return 0;
     }
 
     fb = gui_window_backing_fb(window);
-    fb_fillrect(&fb, (uint32_t)x0, (uint32_t)y0,
-                (uint32_t)(x1 - x0), (uint32_t)(y1 - y0), color);
-    gui_damage_add(desktop, (int32_t)window->x + x0,
-                   (int32_t)window->y + (int32_t)window->title_h + y0,
-                   x1 - x0, y1 - y0);
+    fb_fillrect(&fb, (uint32_t)x0, (uint32_t)y0, (uint32_t)(x1 - x0),
+                (uint32_t)(y1 - y0), color);
+    gui_damage_add(desktop, (int32_t)window->x + (int32_t)x0,
+                   (int32_t)window->y + (int32_t)window->title_h +
+                       (int32_t)y0,
+                   (int32_t)(x1 - x0), (int32_t)(y1 - y0));
     return 0;
 }
 
@@ -584,6 +585,9 @@ void gui_request_redraw(void) {
 
 void gui_damage_add(gui_desktop_t *desktop, int32_t x, int32_t y,
                     int32_t w, int32_t h) {
+    int64_t x1;
+    int64_t y1;
+
     if (desktop == 0 || desktop->fb == 0) {
         return;
     }
@@ -606,10 +610,12 @@ void gui_damage_add(gui_desktop_t *desktop, int32_t x, int32_t y,
     if (x >= fb_w || y >= fb_h) {
         return;
     }
-    if (x + w > fb_w) {
+    x1 = (int64_t)x + (int64_t)w;
+    y1 = (int64_t)y + (int64_t)h;
+    if (x1 > fb_w) {
         w = fb_w - x;
     }
-    if (y + h > fb_h) {
+    if (y1 > fb_h) {
         h = fb_h - y;
     }
     if (w <= 0 || h <= 0) {

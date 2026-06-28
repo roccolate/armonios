@@ -28,6 +28,10 @@ typedef struct {
 static fat32_vfs_file_t g_fat32_vfs_files[FAT32_MAX_VFS_FILES];
 static vfs_node_t g_fat32_vfs_nodes[FAT32_MAX_VFS_FILES];
 static uint32_t g_fat32_vfs_count;
+
+_Static_assert(FAT32_MAX_VFS_FILES <= VFS_MAX_NODES,
+               "FAT32 VFS files must fit the VFS static node table");
+
 /*
  * Default filesystem handle for callers that don't go through a
  * mounted VFS node. Set by fat32_mount; used by vfs_unlink /
@@ -508,7 +512,7 @@ int fat32_mount(fat32_fs_t *fs, fat32_read_sector_fn_t read_sector_cb,
         return -1;
     }
 
-    g_fat32_default_fs = fs;
+    g_fat32_default_fs = 0;
     fs->read_sector = read_sector_cb;
     fs->write_sector = 0;
     fs->context = context;
@@ -556,6 +560,7 @@ int fat32_mount(fat32_fs_t *fs, fat32_read_sector_fn_t read_sector_cb,
     fs->data_start_lba = data_start;
     fs->root_cluster = root_cluster;
     fs->mounted = 1;
+    g_fat32_default_fs = fs;
     return 0;
 }
 
@@ -1052,7 +1057,14 @@ int fat32_delete(fat32_fs_t *fs, const char *name) {
         return -1;
     }
 
-    if (free_cluster_chain(fs, file.first_cluster) != 0) {
+    /*
+     * FAT32 permits an empty regular file to have first_cluster == 0. In that
+     * case there is no chain to release; deleting the directory entry is
+     * enough. Non-empty files with first_cluster < 2 are rejected earlier by
+     * fat32_open_root.
+     */
+    if (file.first_cluster >= 2U &&
+        free_cluster_chain(fs, file.first_cluster) != 0) {
         return -1;
     }
 

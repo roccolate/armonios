@@ -19,6 +19,7 @@ fb_t gui_window_backing_fb(const gui_window_t *window) {
 static int gui_window_backing_size(const gui_window_t *window,
                                    uint32_t *out_bytes) {
     uint32_t content_h;
+    uint64_t bytes;
 
     if (window == 0 || window->w == 0U || window->h == 0U ||
         out_bytes == 0) {
@@ -30,7 +31,12 @@ static int gui_window_backing_size(const gui_window_t *window,
         return -1;
     }
 
-    *out_bytes = window->w * content_h * sizeof(uint32_t);
+    bytes = (uint64_t)window->w * (uint64_t)content_h * sizeof(uint32_t);
+    if (bytes > UINT32_MAX) {
+        return -1;
+    }
+
+    *out_bytes = (uint32_t)bytes;
     return 0;
 }
 

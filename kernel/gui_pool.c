@@ -29,6 +29,16 @@ static uint32_t gui_window_effective_flags(const gui_window_t *window) {
     return window->flags;
 }
 
+static int gui_rect_fits_framebuffer(const fb_t *fb, uint32_t x, uint32_t y,
+                                     uint32_t w, uint32_t h) {
+    if (fb == 0 || w == 0U || h == 0U ||
+        x >= fb->width || y >= fb->height) {
+        return 0;
+    }
+
+    return w <= fb->width - x && h <= fb->height - y;
+}
+
 static void gui_apply_builtin_policy(gui_window_t *window) {
     if (window == 0 || window->used == 0) {
         return;
@@ -322,8 +332,7 @@ int gui_resize_window(gui_desktop_t *desktop, uint32_t window_id, uint32_t x,
 
     if (desktop == 0 || desktop->fb == 0 || window_id >= GUI_MAX_WINDOWS ||
         w < 2U || h < 2U ||
-        x >= desktop->fb->width || y >= desktop->fb->height ||
-        x + w > desktop->fb->width || y + h > desktop->fb->height ||
+        gui_rect_fits_framebuffer(desktop->fb, x, y, w, h) == 0 ||
         desktop->windows[window_id].used == 0) {
         return -1;
     }

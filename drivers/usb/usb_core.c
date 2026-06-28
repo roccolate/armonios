@@ -212,6 +212,9 @@ int usb_walk_configuration(const void *buffer, uint16_t buffer_len,
             return -1;
         }
         if (type == USB_DESC_INTERFACE) {
+            if (len < sizeof(usb_interface_descriptor_t)) {
+                return -1;
+            }
             /* If we have already filled the interface array, stop
              * tracking the current interface (endpoints and HID
              * descriptors after this point are ignored). */
@@ -234,6 +237,9 @@ int usb_walk_configuration(const void *buffer, uint16_t buffer_len,
                 /* Silently drop endpoints beyond the cap. */
                 ;
             } else {
+                if (len < sizeof(usb_endpoint_descriptor_t)) {
+                    return -1;
+                }
                 usb_endpoint_ref_t *ep =
                     &cur_iface->endpoints[cur_iface->endpoint_count++];
                 ep->desc = (const usb_endpoint_descriptor_t *)cursor;
@@ -242,6 +248,9 @@ int usb_walk_configuration(const void *buffer, uint16_t buffer_len,
                 ep->max_packet = ep->desc->wMaxPacketSize;
             }
         } else if (type == USB_DESC_HID) {
+            if (len < sizeof(usb_hid_descriptor_t)) {
+                return -1;
+            }
             if (cur_iface != 0) {
                 cur_iface->hid = (const usb_hid_descriptor_t *)cursor;
             }

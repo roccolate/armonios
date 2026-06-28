@@ -2,6 +2,7 @@
 
 #include "unity/unity.h"
 #include "../kernel/boot_program.h"
+#include "../kernel/user_image_format.h"
 
 extern char __app_shell_start[];
 extern char __app_shell_end[];
@@ -166,6 +167,33 @@ void test_boot_program_image_points_to_flat_header_magic(void) {
         *(const uint32_t *)(const void *)editor->image;
 
     TEST_ASSERT_EQUAL_UINT64(0x31494c4bU, magic);
+}
+
+static void assert_boot_program_kli1_header(const char *name) {
+    const boot_program_t *program = boot_program_find(name);
+    const user_flat_image_header_t *header;
+
+    TEST_ASSERT_NOT_NULL(program);
+    TEST_ASSERT_TRUE(program->size >= USER_IMAGE_HEADER_SIZE);
+    header = (const user_flat_image_header_t *)(const void *)program->image;
+
+    TEST_ASSERT_EQUAL_UINT64(USER_IMAGE_MAGIC, header->magic);
+    TEST_ASSERT_EQUAL_UINT64(USER_IMAGE_HEADER_SIZE, header->header_size);
+    TEST_ASSERT_TRUE(header->image_size <= program->size);
+    TEST_ASSERT_TRUE(header->entry_count > 0);
+    TEST_ASSERT_TRUE(header->entry_count <= USER_IMAGE_MAX_ENTRIES);
+    for (uint32_t i = 0; i < header->entry_count; i++) {
+        TEST_ASSERT_TRUE(header->entry_offsets[i] >= header->header_size);
+        TEST_ASSERT_TRUE(header->entry_offsets[i] < header->image_size);
+    }
+}
+
+void test_boot_program_registered_apps_have_canonical_kli1_headers(void) {
+    assert_boot_program_kli1_header("shell");
+    assert_boot_program_kli1_header("editor");
+    assert_boot_program_kli1_header("monitor");
+    assert_boot_program_kli1_header("panel");
+    assert_boot_program_kli1_header("clock");
 }
 
 void test_boot_program_editor_image_size_matches_assembly_blob(void) {

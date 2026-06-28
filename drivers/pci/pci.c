@@ -152,6 +152,8 @@ uint32_t pci_assign_bars(pci_device_t *devices, uint32_t device_count,
                                0xFFFFFFFFU);
             uint32_t probe = pci_config_read32(d->bus, d->device,
                                                 d->function, reg);
+            pci_config_write32(d->bus, d->device, d->function, reg,
+                               d->bar[b]);
             /* Unimplemented BARs return 0. */
             if (probe == 0U) {
                 continue;
@@ -162,17 +164,24 @@ uint32_t pci_assign_bars(pci_device_t *devices, uint32_t device_count,
             if (mem_type != 0x00U && mem_type != 0x04U) {
                 continue;
             }
+            if (mem_type == 0x04U && b + 1U >= 6U) {
+                continue;
+            }
             uint32_t size_mask = probe & 0xFFFFFFF0U;
             uint32_t size = (~size_mask) + 1U;
             if (size == 0U || size > 0x10000000U) {
                 /* Skip BARs with absurd sizes (alignment to 256MB
                  * suggests we read garbage). */
-                pci_config_write32(d->bus, d->device, d->function, reg,
-                                   d->bar[b]);
                 continue;
             }
             /* Align the cursor to the size. */
+            if (cursor > UINT32_MAX - (size - 1U)) {
+                continue;
+            }
             uint32_t aligned = (cursor + size - 1U) & ~(size - 1U);
+            if (aligned > UINT32_MAX - size) {
+                continue;
+            }
             pci_config_write32(d->bus, d->device, d->function, reg,
                                aligned | flags);
             d->bar[b] = aligned | flags;

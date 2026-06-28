@@ -218,11 +218,17 @@ void sched_thread_exit(void) {
     irq_disable();
 
     old_thread = g_current_thread;
-    if (old_thread != 0) {
-        old_thread->state = THREAD_ZOMBIE;
-        if (g_thread_count > 0) {
-            g_thread_count--;
+    if (old_thread == 0) {
+        uart_puts("SCHED idle: no current thread\n");
+        irq_enable();
+        for (;;) {
+            sched_wait_for_event();
         }
+    }
+
+    old_thread->state = THREAD_ZOMBIE;
+    if (g_thread_count > 0) {
+        g_thread_count--;
     }
 
     next_thread = next_runnable_thread();

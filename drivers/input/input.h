@@ -41,6 +41,7 @@ typedef struct {
             int32_t dy;
         } mouse_move;
         struct {
+            /* Button index: 0 = left, 1 = right, 2 = middle. */
             uint32_t button;
             uint32_t pressed;
         } mouse_button;

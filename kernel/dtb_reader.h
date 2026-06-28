@@ -33,6 +33,14 @@ typedef struct {
     uint32_t total_size;
 } fdt_view_t;
 
+/*
+ * Shared flattened-device-tree reader.
+ *
+ * Callers still interpret the token stream themselves, but fdt_view_init owns
+ * the common header validation so malformed offsets cannot make parsers walk
+ * outside the declared FDT blob.
+ */
+
 static inline uint32_t fdt_be32(const void *ptr) {
     const uint8_t *bytes = ptr;
 
@@ -82,10 +90,20 @@ static inline int fdt_starts_with(const char *value, const char *prefix) {
     return 1;
 }
 
+static inline int fdt_range_valid(uint32_t offset, uint32_t size,
+                                  uint32_t total_size) {
+    return offset <= total_size && size <= total_size - offset;
+}
+
 static KERNEL_ALWAYS_INLINE int fdt_view_init(uint64_t dtb_addr,
                                               fdt_view_t *view) {
     const fdt_header_t *header = (const fdt_header_t *)(uintptr_t)dtb_addr;
     const uint8_t *base = (const uint8_t *)(uintptr_t)dtb_addr;
+    uint32_t total_size;
+    uint32_t struct_offset;
+    uint32_t struct_size;
+    uint32_t strings_offset;
+    uint32_t strings_size;
     uintptr_t cursor;
 
     if (dtb_addr == 0 || view == NULL ||
@@ -93,11 +111,23 @@ static KERNEL_ALWAYS_INLINE int fdt_view_init(uint64_t dtb_addr,
         return -1;
     }
 
-    cursor = (uintptr_t)(base + fdt_be32(&header->off_dt_struct));
-    view->strings = (const char *)(base + fdt_be32(&header->off_dt_strings));
+    total_size = fdt_be32(&header->totalsize);
+    struct_offset = fdt_be32(&header->off_dt_struct);
+    struct_size = fdt_be32(&header->size_dt_struct);
+    strings_offset = fdt_be32(&header->off_dt_strings);
+    strings_size = fdt_be32(&header->size_dt_strings);
+
+    if (total_size < sizeof(fdt_header_t) ||
+        fdt_range_valid(struct_offset, struct_size, total_size) == 0 ||
+        fdt_range_valid(strings_offset, strings_size, total_size) == 0) {
+        return -1;
+    }
+
+    cursor = (uintptr_t)(base + struct_offset);
+    view->strings = (const char *)(base + strings_offset);
     view->cursor = cursor;
-    view->struct_end = cursor + fdt_be32(&header->size_dt_struct);
-    view->total_size = fdt_be32(&header->totalsize);
+    view->struct_end = cursor + struct_size;
+    view->total_size = total_size;
     return 0;
 }
 

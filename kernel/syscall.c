@@ -688,8 +688,8 @@ static int64_t sys_cursor_register_region(process_t *process, uint64_t win,
     const gui_window_t *window;
 
     if (process == 0 || win > UINT32_MAX || slot > UINT32_MAX ||
-        x > INT32_MAX || y > INT32_MAX || w > UINT32_MAX ||
-        h > UINT32_MAX || shape > UINT32_MAX) {
+        x > INT32_MAX || y > INT32_MAX || w > INT32_MAX ||
+        h > INT32_MAX || shape > UINT32_MAX) {
         return ERR_INVAL;
     }
     if (desktop == 0) {
@@ -735,7 +735,7 @@ static int64_t sys_window_flush(process_t *process, uint64_t window_id,
 
     if (process == 0 || window_id >= GUI_MAX_WINDOWS ||
         x > INT32_MAX || y > INT32_MAX ||
-        w > UINT32_MAX || h > UINT32_MAX) {
+        w > INT32_MAX || h > INT32_MAX) {
         return ERR_INVAL;
     }
     status = sys_owner_window_badf(process, window_id, &desktop, &window);

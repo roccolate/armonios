@@ -78,9 +78,25 @@ void fb_fillrect(fb_t *fb, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
 
 void fb_draw_rect(fb_t *fb, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                   uint32_t color) {
-    if (w == 0 || h == 0) {
+    uint64_t x1;
+    uint64_t y1;
+
+    if (fb == 0 || fb->pixels == 0 || w == 0 || h == 0 ||
+        x >= fb->width || y >= fb->height) {
         return;
     }
+
+    x1 = (uint64_t)x + (uint64_t)w;
+    y1 = (uint64_t)y + (uint64_t)h;
+    if (x1 > fb->width) {
+        x1 = fb->width;
+    }
+    if (y1 > fb->height) {
+        y1 = fb->height;
+    }
+
+    w = (uint32_t)(x1 - x);
+    h = (uint32_t)(y1 - y);
 
     for (uint32_t col = 0; col < w; col++) {
         fb_putpixel(fb, x + col, y, color);

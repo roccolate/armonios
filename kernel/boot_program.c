@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include "kernel/user_image_format.h"
+
 /*
  * Embedded boot-program registry.
  *
@@ -78,6 +80,54 @@ static int boot_program_name_equals(const char *left, const char *right) {
     return *left == *right;
 }
 
+static int boot_program_source_is_kli1(const boot_program_source_t *program,
+                                       uint64_t *out_size) {
+    uintptr_t start;
+    uintptr_t end;
+    uint64_t size;
+    const user_flat_image_header_t *header;
+
+    if (program == 0 || out_size == 0) {
+        return 0;
+    }
+
+    start = (uintptr_t)program->image_start;
+    end = (uintptr_t)program->image_end;
+    if (start == 0 || end <= start) {
+        return 0;
+    }
+
+    size = (uint64_t)(end - start);
+    if (size < USER_IMAGE_HEADER_SIZE) {
+        return 0;
+    }
+
+    header =
+        (const user_flat_image_header_t *)(const void *)program->image_start;
+    if (header->magic != USER_IMAGE_MAGIC ||
+        header->header_size != USER_IMAGE_HEADER_SIZE ||
+        header->image_size > size ||
+        header->entry_count == 0 ||
+        header->entry_count > USER_IMAGE_MAX_ENTRIES) {
+        return 0;
+    }
+
+    /*
+     * The registry only exposes KLI1 images with entry points inside the
+     * declared image range. The blob may be larger than image_size because the
+     * linked app blob can carry non-runtime metadata after the KLI1 payload.
+     */
+    for (uint32_t i = 0; i < header->entry_count; i++) {
+        if (header->entry_offsets[i] < header->header_size ||
+            header->entry_offsets[i] >= header->image_size) {
+            return 0;
+        }
+    }
+
+    *out_size = size;
+    return 1;
+}
+
 const boot_program_t *boot_program_find(const char *name) {
     if (name == 0 || name[0] == '\0') {
         return 0;
@@ -85,16 +135,15 @@ const boot_program_t *boot_program_find(const char *name) {
 
     for (uint32_t i = 0; i < BOOT_PROGRAM_COUNT; i++) {
         const boot_program_source_t *program = &g_boot_programs[i];
-        uintptr_t start = (uintptr_t)program->image_start;
-        uintptr_t end = (uintptr_t)program->image_end;
+        uint64_t size;
 
-        if (start != 0 && end > start &&
-            boot_program_name_equals(program->name, name)) {
+        if (boot_program_name_equals(program->name, name) &&
+            boot_program_source_is_kli1(program, &size)) {
             boot_program_t *found = &g_found_programs[i];
 
             found->name = program->name;
             found->image = program->image_start;
-            found->size = (uint64_t)(end - start);
+            found->size = size;
             return found;
         }
     }

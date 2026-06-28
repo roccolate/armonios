@@ -117,6 +117,24 @@ static int vfs_node_size(const vfs_node_t *node, uint64_t *size) {
     return 0;
 }
 
+static int vfs_read_result_valid(uint64_t offset, uint64_t file_size,
+                                 uint64_t capacity, uint64_t count) {
+    if (offset > file_size || count > capacity) {
+        return 0;
+    }
+
+    return count <= file_size - offset;
+}
+
+static int vfs_write_result_valid(uint64_t offset, uint64_t requested,
+                                  uint64_t count) {
+    if (count > requested || offset > UINT64_MAX - count) {
+        return 0;
+    }
+
+    return 1;
+}
+
 void vfs_reset(void) {
     for (uint32_t i = 0; i < VFS_MAX_NODES; i++) {
         g_vfs_nodes[i].path = 0;
@@ -183,7 +201,7 @@ int vfs_mount_static(const vfs_node_t *nodes, uint32_t count) {
 }
 
 int vfs_mount_list(const char *path, vfs_list_fn_t list, void *context) {
-    if (path == 0 || path[0] != '/' || list == 0) {
+    if (!vfs_path_is_mountable(path) || list == 0) {
         return -1;
     }
 
@@ -243,6 +261,7 @@ int vfs_read(const char *path, uint64_t offset, uint8_t *buffer,
              uint64_t capacity, uint64_t *bytes_read) {
     const vfs_node_t *node = vfs_find(path);
     uint64_t size;
+    int status;
 
     if (bytes_read != 0) {
         *bytes_read = 0;
@@ -253,13 +272,21 @@ int vfs_read(const char *path, uint64_t offset, uint8_t *buffer,
         return -1;
     }
 
-    return node->read(node->context, offset, buffer, capacity, bytes_read);
+    status = node->read(node->context, offset, buffer, capacity, bytes_read);
+    if (status != 0 ||
+        !vfs_read_result_valid(offset, size, capacity, *bytes_read)) {
+        *bytes_read = 0;
+        return status != 0 ? status : -1;
+    }
+
+    return 0;
 }
 
 int vfs_write(const char *path, uint64_t offset, const uint8_t *buffer,
               uint64_t size, uint64_t *bytes_written) {
     const vfs_node_t *node = vfs_find(path);
     uint64_t current_size;
+    int status;
 
     if (bytes_written != 0) {
         *bytes_written = 0;
@@ -271,7 +298,14 @@ int vfs_write(const char *path, uint64_t offset, const uint8_t *buffer,
         return -1;
     }
 
-    return node->write(node->context, offset, buffer, size, bytes_written);
+    status = node->write(node->context, offset, buffer, size, bytes_written);
+    if (status != 0 ||
+        !vfs_write_result_valid(offset, size, *bytes_written)) {
+        *bytes_written = 0;
+        return status != 0 ? status : -1;
+    }
+
+    return 0;
 }
 
 int vfs_stat(const char *path, vfs_stat_t *stat) {
@@ -388,9 +422,10 @@ int vfs_read_fd(int fd, uint8_t *buffer, uint64_t capacity,
 
     status = file->node->read(file->node->context, file->offset, buffer,
                               capacity, bytes_read);
-    if (status != 0) {
+    if (status != 0 ||
+        !vfs_read_result_valid(file->offset, size, capacity, *bytes_read)) {
         *bytes_read = 0;
-        return status;
+        return status != 0 ? status : -1;
     }
 
     file->offset += *bytes_read;
@@ -421,9 +456,10 @@ int vfs_write_fd(int fd, const uint8_t *buffer, uint64_t size,
 
     status = file->node->write(file->node->context, file->offset, buffer,
                                size, bytes_written);
-    if (status != 0) {
+    if (status != 0 ||
+        !vfs_write_result_valid(file->offset, size, *bytes_written)) {
         *bytes_written = 0;
-        return status;
+        return status != 0 ? status : -1;
     }
 
     file->offset += *bytes_written;

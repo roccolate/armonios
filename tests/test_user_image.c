@@ -235,6 +235,34 @@ void test_user_image_load_flat_rejects_invalid_headers(void) {
                                  0));
 }
 
+void test_user_image_load_flat_rejects_noncanonical_header_size(void) {
+    struct {
+        user_flat_image_header_t header;
+        uint8_t reserved[8];
+        uint8_t code[4];
+    } source;
+    uint8_t loaded[sizeof(source)] = { 0 };
+    user_image_t image;
+
+    source.header.magic = USER_IMAGE_MAGIC;
+    source.header.header_size = USER_IMAGE_HEADER_SIZE + 8U;
+    source.header.entry_count = 1;
+    source.header.image_size = sizeof(source);
+    source.header.entry_offsets[0] = USER_IMAGE_HEADER_SIZE + 8U;
+
+    /*
+     * KLI1 currently has one canonical 80-byte header. A larger header_size
+     * with the same magic would describe an incompatible format revision, so
+     * the loader must reject it instead of guessing how to execute it.
+     */
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)user_image_load_flat(
+                                 &image, "future-header",
+                                 (uint64_t)(uintptr_t)loaded, sizeof(loaded),
+                                 (uint64_t)(uintptr_t)&source, sizeof(source),
+                                 0));
+}
+
 void test_user_image_load_bootfs_flat_rejects_missing_file(void) {
     uint8_t loaded[128] = { 0 };
     user_image_t image;

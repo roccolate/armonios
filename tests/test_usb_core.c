@@ -116,6 +116,37 @@ void test_usb_walk_configuration_rejects_wrong_descriptor_type(void) {
                             (uint64_t)usb_walk_configuration(buf, 9, &walk));
 }
 
+void test_usb_walk_configuration_rejects_short_typed_descriptors(void) {
+    usb_config_walk_t walk;
+    uint8_t short_interface[] = {
+        9, USB_DESC_CONFIGURATION, 12, 0, 1, 1, 0, 0x80U, 50,
+        3, USB_DESC_INTERFACE, 0,
+    };
+    uint8_t short_endpoint[] = {
+        9, USB_DESC_CONFIGURATION, 21, 0, 1, 1, 0, 0x80U, 50,
+        9, USB_DESC_INTERFACE, 0, 0, 1, USB_CLASS_HID, 1, 1, 0,
+        3, USB_DESC_ENDPOINT, 0x81U,
+    };
+    uint8_t short_hid[] = {
+        9, USB_DESC_CONFIGURATION, 21, 0, 1, 1, 0, 0x80U, 50,
+        9, USB_DESC_INTERFACE, 0, 0, 1, USB_CLASS_HID, 1, 1, 0,
+        3, USB_DESC_HID, 0,
+    };
+
+    TEST_ASSERT_EQUAL_UINT64(
+        (uint64_t)-1,
+        (uint64_t)usb_walk_configuration(short_interface,
+                                         sizeof(short_interface), &walk));
+    TEST_ASSERT_EQUAL_UINT64(
+        (uint64_t)-1,
+        (uint64_t)usb_walk_configuration(short_endpoint,
+                                         sizeof(short_endpoint), &walk));
+    TEST_ASSERT_EQUAL_UINT64(
+        (uint64_t)-1,
+        (uint64_t)usb_walk_configuration(short_hid, sizeof(short_hid),
+                                         &walk));
+}
+
 void test_usb_find_interface_returns_null_when_no_match(void) {
     uint8_t buf[64];
     uint32_t len = make_keyboard_config(buf);

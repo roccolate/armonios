@@ -1,4 +1,11 @@
 .section .text
+
+// EL1-to-EL0 launch trampoline.
+//
+// The caller passes entry, stack_top, and the SPSR value prepared for EL0t.
+// Callee-saved EL1 registers are parked on the kernel stack before eret so
+// el0_return_address() can later return through user_enter_el0_return and
+// restore the original kernel context after the user process exits or faults.
 .global user_enter_el0
 .type user_enter_el0, %function
 

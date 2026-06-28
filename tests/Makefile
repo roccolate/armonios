@@ -27,7 +27,8 @@ SRCS=unity/unity.c main.c \
      test_panel_boot_recovery.c \
      test_irq.c test_sched.c test_vfs.c test_tmpfs.c test_fat32.c test_dhcp_options.c \
      test_ipc.c test_font.c \
-     test_gui.c test_fb.c test_dtb.c test_virtio_blk.c test_input.c \
+     test_gui.c test_fb.c test_dtb.c test_virtio_blk.c test_virtio_net.c \
+     test_input.c test_virtio_input.c \
      test_hid.c test_pci.c test_hid_driver.c test_usb_core.c \
      test_pci_assign.c test_hid_state.c test_hid_init.c \
      test_syscall_abi.c test_syscall_helpers.c \
@@ -47,7 +48,8 @@ SRCS=unity/unity.c main.c \
      ../kernel/user_image.c ../kernel/user_vm.c ../kernel/vfs.c \
      ../kernel/dtb.c ../kernel/dtb_framebuffer.c \
      ../drivers/fb/fb.c ../drivers/storage/virtio_blk.c \
-     ../drivers/input/input.c \
+     ../drivers/net/virtio_net.c \
+     ../drivers/input/input.c ../drivers/input/virtio_input.c \
      ../drivers/usb/hid.c ../drivers/usb/hid_driver.c \
      ../drivers/usb/xhci.c ../drivers/usb/usb_core.c \
      ../drivers/pci/pci.c test_pl011_stub.c test_panel_boot_recovery_stub.c \
