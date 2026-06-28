@@ -35,23 +35,21 @@
 #define COLOR_TEXT      0xffe0e8f0U
 #define COLOR_CARET     0xffe0e8f0U
 
-static void resolve_path(int argc, char **argv, char *out) {
-    if (argc >= 2 && argv[1] != 0) {
-        size_t i = 0;
-        while (i + 1 < (size_t)PATH_CAP && argv[1][i] != '\0') {
-            out[i] = argv[1][i];
-            i++;
-        }
-        out[i] = '\0';
-        return;
-    }
-    const char *def = "/tmp/note";
+static void copy_path(char *out, const char *src) {
     size_t i = 0;
-    while (def[i] != '\0') {
-        out[i] = def[i];
+    while (i + 1 < (size_t)PATH_CAP && src[i] != '\0') {
+        out[i] = src[i];
         i++;
     }
     out[i] = '\0';
+}
+
+static void resolve_path(int argc, char **argv, char *out) {
+    if (argc >= 2 && argv[1] != 0) {
+        copy_path(out, argv[1]);
+        return;
+    }
+    copy_path(out, "/tmp/note");
 }
 
 static size_t load_note(const char *path, char *buf, size_t cap) {
@@ -78,11 +76,13 @@ static void save_note(const char *path, const char *buf, size_t len) {
     (void)kli_close((int)fd);
 }
 
-// Editor state. caret is the offset in file[0..file_len] where the
-// next character will be inserted or deleted. Backspace at caret
-// removes file[caret-1]; printable at caret shifts the tail right.
-// Left/Right move within file_len; Up/Down move to the same column
-// on the previous/next line.
+// Editor state. The mutable file buffer lives in anonymous user memory
+// allocated by main(); it must not live in .bss because the flat app
+// image only maps KLI1 header/code/rodata. caret is the offset in
+// file[0..file_len] where the next character will be inserted or
+// deleted. Backspace at caret removes file[caret-1]; printable at
+// caret shifts the tail right. Left/Right move within file_len;
+// Up/Down move to the same column on the previous/next line.
 typedef struct {
     char   file[FILE_CAP];
     size_t file_len;
@@ -294,7 +294,6 @@ static void print_argv(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     char path[PATH_CAP];
-    editor_state_t e;
     char render[RENDER_COLS];
     gui_event_t events[EVENT_CAP];
 
@@ -302,8 +301,14 @@ int main(int argc, char **argv) {
     print_argv(argc, argv);
 
     resolve_path(argc, argv, path);
-    editor_init(&e);
-    editor_load(&e, path);
+    long state_addr = kli_mmap(0, sizeof(editor_state_t), 0);
+    if (state_addr < 0) {
+        kli_write_cstr(1, "editor: state mmap failed\n");
+        return 1;
+    }
+    editor_state_t *e = (editor_state_t *)(uintptr_t)state_addr;
+    editor_init(e);
+    editor_load(e, path);
 
     long wid = gui_window_create(WIN_X, WIN_Y, WIN_W, WIN_H,
                                  COLOR_BG, COLOR_BORDER, "editor");
@@ -313,7 +318,7 @@ int main(int argc, char **argv) {
     }
     (void)gui_window_set_title(wid, "editor", TITLE_BAR_H);
 
-    redraw(wid, &e, argc, argv, render);
+    redraw(wid, e, argc, argv, render);
 
     for (;;) {
         long n = gui_window_event(wid, events, EVENT_CAP);
@@ -333,35 +338,35 @@ int main(int argc, char **argv) {
                     return 0;
                 }
                 if (key == 19) {
-                    editor_save(&e, path);
+                    editor_save(e, path);
                 } else if (key == INPUT_KEY_LEFT) {
-                    editor_left(&e);
+                    editor_left(e);
                     dirty = 1;
                 } else if (key == INPUT_KEY_RIGHT) {
-                    editor_right(&e);
+                    editor_right(e);
                     dirty = 1;
                 } else if (key == INPUT_KEY_UP) {
-                    editor_up(&e);
+                    editor_up(e);
                     dirty = 1;
                 } else if (key == INPUT_KEY_DOWN) {
-                    editor_down(&e);
+                    editor_down(e);
                     dirty = 1;
                 } else if (key == 8 || key == 127) {
-                    if (editor_backspace(&e) == 0) {
+                    if (editor_backspace(e) == 0) {
                         dirty = 1;
                     }
                 } else if (key == 13 || key == 10) {
-                    if (editor_insert(&e, '\n') == 0) {
+                    if (editor_insert(e, '\n') == 0) {
                         dirty = 1;
                     }
                 } else if (key >= 32 && key <= 126) {
-                    if (editor_insert(&e, (char)key) == 0) {
+                    if (editor_insert(e, (char)key) == 0) {
                         dirty = 1;
                     }
                 }
             }
             if (dirty) {
-                redraw(wid, &e, argc, argv, render);
+                redraw(wid, e, argc, argv, render);
             }
         } else {
             (void)kli_yield();

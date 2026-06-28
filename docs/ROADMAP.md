@@ -8,7 +8,7 @@ per-rect compositor path. The host test suite covers the window ABI, IPC,
 process isolation, partial redraw, USB HID parsing, FAT32 integration, DHCP
 options, and the syscall number table; `make`, `make size`, and
 `make -C tests test` are the baseline checks. Latest verified size:
-`kernel.bin: 89256 bytes (limit: 100000)`. This is the current v0.9
+`kernel.bin: 89032 bytes (limit: 100000)`. This is the current v0.9
 baseline.
 
 This file is intentionally short. It separates current verification from
@@ -157,17 +157,17 @@ this order:
   input, networking, syscalls, and process cleanup.
 - Touch `kernel/gui_*` or `drivers/usb/xhci.c` only if v1.0 checks expose
   regressions or size pressure.
-- Keep `programs/apps/` stack usage and userland syscall-callsite review for
-  v1.1 unless an app bug blocks QEMU stability.
+- Keep deeper `programs/apps/` UX polish for v1.1 unless an app bug blocks
+  QEMU stability; the first stack/callsite pass is already in place.
 
 ## Later work
 
 The next set of candidates after v1.0, in rough order of return on effort:
 
-- v1.1 userland/app polish: stack usage, syscall-callsite review, and app UX
-  bugs that do not block v1.0. The first pass has centralized app debug-string
-  writes through the small `kli_write_cstr` libkarm helper; keep
-  `make stack-check` in the loop.
+- v1.1 userland/app polish: app UX bugs and any new syscall callsites that do
+  not block v1.0. The first pass moved large app state to anonymous user
+  mappings, centralized app debug-string writes through `kli_write_cstr`, and
+  leaves `make stack-check` at a 368-byte current maximum.
 - RPi 4 PCIe host bridge setup so the VL805 xHCI controller appears to the
   existing USB stack.
 - USB hub support after root-port HID remains stable.

@@ -29,7 +29,7 @@ timeout 25s make qemu-usb
 ```
 
 Latest verified size after the first v1.0 networking follow-up:
-`kernel.bin: 89256 bytes (limit: 100000)`.
+`kernel.bin: 89032 bytes (limit: 100000)`.
 
 ## Closed Items
 
@@ -72,16 +72,11 @@ Latest verified size after the first v1.0 networking follow-up:
 
 ## Current Follow-Up Pointer
 
-Do not reopen this closed backlog for new optimization work. The latest
-file-by-file kernel and driver pass left the tree clean at
-`9e66d71 review(core): harden kernel and driver paths`.
-
-The next best technical target belongs in `ROADMAP.md`: continue the v1.0
-QEMU stability sweep after the first `kernel/net/` and
-`drivers/net/virtio_net.c` buffer-footprint pass. Verify networking work with
-the baseline checks plus `make qemu-net`.
-Continue `programs/apps/` stack usage and userland syscall-callsite review in
-the v1.1 userland pass. Do not reopen this closed review for that work.
+Do not reopen this closed backlog for new optimization work. The v1.0/v1.1
+follow-up coordination now lives in `docs/ROADMAP.md` and
+`docs/CURRENT_STATE.md`. The first userland stack pass moved large app state
+to anonymous user mappings and currently leaves `make stack-check` at a
+368-byte maximum.
 
 ## Follow-Up Policy
 

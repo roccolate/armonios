@@ -7,7 +7,7 @@ Historical cleanup details live in `TECH_DEBT_REVIEW.md`.
 
 - Current version target: **v0.9 QEMU desktop baseline**.
 - Next version target: **v1.0 stable/debugged QEMU kernel + desktop release**.
-- Last verified kernel size: `kernel.bin: 89256 bytes (limit: 100000)`.
+- Last verified kernel size: `kernel.bin: 89032 bytes (limit: 100000)`.
 - Standard checks for kernel, driver, boot, and ABI changes are `make`,
   `make size`, and `make -C tests test`.
 - Targeted runtime checks include `make qemu-fs-test`,
@@ -36,7 +36,9 @@ Historical cleanup details live in `TECH_DEBT_REVIEW.md`.
 - App images use the KLI1 flat format and are embedded in bootfs.
 - When `make qemu-blk` or `make qemu-fs-test` provides the generated FAT32
   virtio-blk disk, the kernel can select FAT32-backed app images through VFS.
-- `make stack-check` measures per-function userland C stack usage.
+- `make stack-check` measures per-function userland C stack usage; the current
+  maximum is 368 bytes after moving large app state into anonymous user
+  mappings.
 
 ## GUI
 
@@ -78,8 +80,8 @@ Historical cleanup details live in `TECH_DEBT_REVIEW.md`.
 
 ## Next Engineering Focus
 
-- Next: continue the v1.1 app polish pass across stack usage and userland
-  syscall callsites, then rerun the v1.0 QEMU stability sweep.
+- Next: continue v1.1 app UX polish and keep new syscall callsites behind
+  `libkarm` / `libkarmdesk`, then rerun the v1.0 QEMU stability sweep.
 - Later: GUI size work if `kernel.bin` pressure returns, and xHCI cleanup only
   with USB runtime checks.
 

@@ -66,9 +66,11 @@ and elegance — and brings those principles to modern ARM hardware.
 
 The project is at the **v0.9 QEMU desktop baseline**. The v1.0 target is a
 stable, debugged, repeatable QEMU kernel and desktop release. The first v1.1
-userland pass has started: app stack usage is measured by `make stack-check`,
-and app syscall callsites are being moved through shared libkarm helpers.
-Latest verified size: `kernel.bin: 89256 bytes (limit: 100000)`. Read
+userland stack pass is in place: `shell`, `editor`, and `panel` keep their
+persistent state in anonymous user mappings instead of on the fixed 4 KB app
+stack, and current app syscall callsites go through `libkarm` / `libkarmdesk`
+wrappers.
+Latest verified size: `kernel.bin: 89032 bytes (limit: 100000)`. Read
 [ROADMAP.md](docs/ROADMAP.md) for the full breakdown.
 
 Baseline already in place:
@@ -99,8 +101,8 @@ Next cleanup targets:
 
 - Continue the QEMU stability sweep; verify networking changes with
   `make qemu-net`.
-- Continue the v1.1 `programs/apps/` stack usage and userland
-  syscall-callsite review.
+- Continue v1.1 `programs/apps/` polish around app UX and any new syscall
+  callsites; keep `make stack-check` in the loop.
 - Revisit GUI size or xHCI internals only with the relevant QEMU runtime checks
   in the loop.
 

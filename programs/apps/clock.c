@@ -71,17 +71,11 @@ int main(int argc, char **argv) {
     (void)gui_window_set_title(wid, "clock", TITLE_BAR_H);
 
     gui_event_t events[EVENT_CAP];
+    int wait = YIELDS_PER_SEC;
+    redraw(wid);
 
     for (;;) {
-        // Yield ~200 times so other apps get a fair share of the CPU
-        // and ~1 second passes between redraws.
-        for (int i = 0; i < YIELDS_PER_SEC; i++) {
-            (void)kli_yield();
-        }
-
-        redraw(wid);
-
-        // Drain pending events; close on GUI_EVENT_CLOSE.
+        // Drain pending events every yield so close / q are responsive.
         long n = gui_window_event(wid, events, EVENT_CAP);
         if (n > 0) {
             for (long i = 0; i < n; i++) {
@@ -89,7 +83,20 @@ int main(int argc, char **argv) {
                     (void)gui_window_destroy(wid);
                     return 0;
                 }
+                if (events[i].type == GUI_EVENT_KEY_PRESS &&
+                    (events[i].data1 == 'q' || events[i].data1 == 'Q')) {
+                    (void)gui_window_destroy(wid);
+                    return 0;
+                }
             }
         }
+
+        wait--;
+        if (wait <= 0) {
+            redraw(wid);
+            wait = YIELDS_PER_SEC;
+        }
+
+        (void)kli_yield();
     }
 }

@@ -43,12 +43,10 @@
 #define HISTORY_DEPTH    4
 /* Circular log buffer depth. Each entry is a fixed LINE_CAP-byte
  * cstring. LOG_DEPTH controls how far the user can scroll back from
- * the latest output via Page Up. The shell_state_t struct lives on
- * the C stack (the loader only copies KLI1 image bytes, BSS is
- * unmapped), so LOG_DEPTH * LINE_CAP must stay under a kilobyte or
- * two of the 4 KB kernel stack. 16 entries = 1 KB of log, plus
- * history (256 B), procs and argv (~1 KB), still leaves room for
- * the rest of the struct and the live call stack. */
+ * the latest output via Page Up. The shell's persistent state is
+ * mapped with SYS_MMAP in main() instead of living in BSS or on the
+ * 4 KB process stack, so the log depth can be chosen for usability
+ * rather than stack pressure. */
 #define LOG_DEPTH       16
 
 #define COLOR_BG         0xff141820U
@@ -444,63 +442,49 @@ int main(int argc, char **argv) {
     (void)argv;
 
     /*
-     * shell_state_t is ~2.4 KB and lives on the C stack instead of
-     * BSS. The loader only copies the KLI1 image bytes (header +
-     * code + rodata) into the per-process image slot, so a static
-     * shell_state_t would land in unmapped memory and the first
-     * write would fault with a translation abort. Same constraint
-     * that drives panel.c to put panel_state_t on the stack.
+     * The loader only copies the KLI1 image bytes (header + code +
+     * rodata), so .bss is not backed by user pages. Keep the large,
+     * mutable shell_state_t in anonymous user memory instead of
+     * spending most of the fixed 4 KB process stack.
      */
-    shell_state_t s;
-    s.line_len = 0;
-    s.history_count = 0;
-    s.history_cursor = 0;
-    s.last_spawned_pid = 0;
-    s.log_head = 0;
-    s.log_count = 0;
-    s.scroll_offset = 0;
-    for (size_t i = 0; i < LINE_CAP; i++) {
-        s.line[i] = '\0';
-        for (int h = 0; h < HISTORY_DEPTH; h++) {
-            s.history[h][i] = '\0';
-        }
+    long state_addr = kli_mmap(0, sizeof(shell_state_t), 0);
+    if (state_addr < 0) {
+        kli_write_cstr(1, "shell: state mmap failed\n");
+        return 1;
     }
-    for (int i = 0; i < LOG_DEPTH; i++) {
-        for (size_t j = 0; j < LINE_CAP; j++) {
-            s.log[i][j] = '\0';
-        }
-    }
+    shell_state_t *s = (shell_state_t *)(uintptr_t)state_addr;
+    memset(s, 0, sizeof(*s));
 
     kli_write_cstr(1, "shell: starting\n");
 
-    s.wid = gui_window_create(WIN_X, WIN_Y, WIN_W, WIN_H,
-                              COLOR_BG, COLOR_BORDER, "shell");
-    if (s.wid < 0) {
+    s->wid = gui_window_create(WIN_X, WIN_Y, WIN_W, WIN_H,
+                               COLOR_BG, COLOR_BORDER, "shell");
+    if (s->wid < 0) {
         kli_write_cstr(1, "shell: window create failed\n");
         return 1;
     }
-    (void)gui_window_set_title(s.wid, "shell", TITLE_BAR_H);
+    (void)gui_window_set_title(s->wid, "shell", TITLE_BAR_H);
 
-    shell_emit(&s, "SHELL READY");
-    redraw(&s);
+    shell_emit(s, "SHELL READY");
+    redraw(s);
 
     gui_event_t events[EVENT_CAP];
     for (;;) {
-        long n = gui_window_event(s.wid, events, EVENT_CAP);
+        long n = gui_window_event(s->wid, events, EVENT_CAP);
         if (n > 0) {
             int dirty = 0;
             for (long i = 0; i < n; i++) {
                 if (events[i].type == GUI_EVENT_CLOSE) {
-                    (void)gui_window_destroy(s.wid);
+                    (void)gui_window_destroy(s->wid);
                     return 0;
                 }
                 if (events[i].type == GUI_EVENT_KEY_PRESS) {
-                    handle_key(&s, events[i].data1);
+                    handle_key(s, events[i].data1);
                     dirty = 1;
                 }
             }
             if (dirty) {
-                redraw(&s);
+                redraw(s);
             }
         } else {
             (void)kli_yield();

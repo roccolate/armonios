@@ -23,6 +23,7 @@
 #define TITLE_BAR_H    16
 #define EVENT_CAP       8
 #define PROC_CAP        6
+#define PROC_NAME_CAP  16
 #define REDRAW_WAIT    20
 
 #define COLOR_BG       0xff182024U
@@ -37,7 +38,7 @@ static void draw_text(long wid, long x, long y, const char *s) {
 typedef struct {
     uint32_t pid;
     uint32_t state;
-    char     name[16];
+    char     name[PROC_NAME_CAP];
 } proc_entry_t;
 
 static void redraw(long wid, uint64_t *info, char *numbuf,
@@ -71,15 +72,8 @@ static void redraw(long wid, uint64_t *info, char *numbuf,
         draw_text(wid, 12, y, numbuf);
         kli_utoa((uint64_t)procs[i].state, numbuf, 24);
         draw_text(wid, 56, y, numbuf);
-        // name is a 16-byte fixed field; draw it as a cstring by
-        // forcing a NUL terminator if the kernel didn't.
-        char name_buf[17];
-        for (int j = 0; j < 16; j++) {
-            char c = procs[i].name[j];
-            name_buf[j] = (c == '\0') ? '\0' : c;
-        }
-        name_buf[16] = '\0';
-        draw_text(wid, 108, y, name_buf);
+        // SYS_PROCLIST zero-terminates and zero-fills this fixed field.
+        draw_text(wid, 108, y, procs[i].name);
         y += 16;
     }
 

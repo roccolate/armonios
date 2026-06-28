@@ -36,11 +36,11 @@
 #define TITLE_BAR_H      0                    // panel has no title bar
 #define BTN_H            24
 #define BTN_Y           (PANEL_Y + 4)         // 428
-// 5 launchers must fit in 640 px with a 4 px left margin:
-//   4 + 5*BTN_W + 4*BTN_GAP == 640 -> BTN_W=124, BTN_GAP=4
-#define BTN_W           124
+// 4 launchers must fit in 640 px with a 4 px left margin:
+//   4 + 4*BTN_W + 3*BTN_GAP == 640 -> BTN_W=156, BTN_GAP=4
+#define BTN_W           156
 #define BTN_GAP           4
-#define BTN_COUNT         5
+#define BTN_COUNT         4
 #define BTN_ROW_W       (BTN_COUNT * BTN_W + (BTN_COUNT - 1) * BTN_GAP)
 #define PANEL_CONTENT_W SCREEN_W
 #define PANEL_CONTENT_H PANEL_H
@@ -109,52 +109,35 @@ typedef struct {
 } panel_state_t;
 
 static void copy_label(char *dst, size_t dst_size, const char *src) {
-    size_t i = 0;
-    while (i + 1 < dst_size && src[i] != '\0') {
-        dst[i] = src[i];
-        i++;
-    }
-    dst[i] = '\0';
+    (void)strlcpy(dst, src, dst_size);
 }
 
-// Convert an absolute framebuffer (x, y) to panel-local. The panel
-// sits at x=0 so the conversion is just the y offset. Negative
-// results (cursor above the panel) are clamped to -1 so the caller
-// can early-out.
-static int abs_to_panel_x(int32_t ax) {
-    return (int)ax;
-}
-
+// Convert absolute framebuffer Y to panel-local Y. Negative results
+// mean the cursor is above the panel.
 static int abs_to_panel_y(int32_t ay) {
     return (int)ay - PANEL_Y;
 }
 
-static int button_hit(int x) {
+static int row_hit(int x, int item_w, int item_gap, int item_count) {
     if (x < 4) {
         return -1;
     }
     int adj = x - 4;
-    int stride = BTN_W + BTN_GAP;
+    int stride = item_w + item_gap;
     int idx = adj / stride;
     int rem = adj - idx * stride;
-    if (rem >= BTN_W || idx < 0 || idx >= BTN_COUNT) {
+    if (rem >= item_w || idx < 0 || idx >= item_count) {
         return -1;
     }
     return idx;
 }
 
+static int button_hit(int x) {
+    return row_hit(x, BTN_W, BTN_GAP, BTN_COUNT);
+}
+
 static int slot_hit(int x) {
-    if (x < 4) {
-        return -1;
-    }
-    int adj = x - 4;
-    int stride = RUN_SLOT_W + RUN_SLOT_GAP;
-    int idx = adj / stride;
-    int rem = adj - idx * stride;
-    if (rem >= RUN_SLOT_W || idx < 0 || idx >= RUN_SLOT_COUNT) {
-        return -1;
-    }
-    return idx;
+    return row_hit(x, RUN_SLOT_W, RUN_SLOT_GAP, RUN_SLOT_COUNT);
 }
 
 static int name_text_width(const char *s) {
@@ -245,19 +228,6 @@ static void launch_button(panel_state_t *p, int idx) {
         return;
     }
 
-    /*
-     * Refuse to launch another panel from the panel. Each spawned
-     * panel has the same launcher buttons, so without this guard a
-     * single click cascades into N nested panels until the process
-     * table fills and every visible click starts returning -1.
-     * The "panel" button is kept as a slot so the launcher row
-     * layout stays fixed, but its click is just a no-op.
-     */
-    if (strcmp(p->button_labels[idx], "panel") == 0) {
-        kli_write_cstr(1, "panel: already running (no nested panels)\n");
-        return;
-    }
-
     kli_write_cstr(1, "panel: launch ");
     kli_write_cstr(1, p->button_labels[idx]);
     kli_write_cstr(1, "\n");
@@ -280,7 +250,7 @@ static void click_running_slot(panel_state_t *p, int idx) {
 }
 
 static void on_click(panel_state_t *p, int32_t abs_x, int32_t abs_y) {
-    int x = abs_to_panel_x(abs_x);
+    int x = (int)abs_x;
     int y = abs_to_panel_y(abs_y);
     if (y < 0) {
         return;
@@ -303,7 +273,7 @@ static void on_click(panel_state_t *p, int32_t abs_x, int32_t abs_y) {
 }
 
 static void on_move(panel_state_t *p, int32_t abs_x, int32_t abs_y) {
-    int x = abs_to_panel_x(abs_x);
+    int x = (int)abs_x;
     int y = abs_to_panel_y(abs_y);
     int new_hover = -1;
     if (y >= BTN_Y - PANEL_Y && y < BTN_Y - PANEL_Y + BTN_H) {
@@ -395,49 +365,30 @@ static void init_button_labels(panel_state_t *p) {
     copy_label(p->button_labels[1], LABEL_CAP, "editor");
     copy_label(p->button_labels[2], LABEL_CAP, "monitor");
     copy_label(p->button_labels[3], LABEL_CAP, "clock");
-    copy_label(p->button_labels[4], LABEL_CAP, "panel");
 }
 
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
 
-    /* The panel state lives on the C stack instead of BSS. The
-     * linker script in programs/apps/image.ld only collects
-     * .user.image.{header,text,rodata} into the flat image; .bss
-     * would land past image_size where the kernel has not mapped
-     * any physical pages, so a static panel_state_t would fault on
-     * the first read. The kernel gives every EL0 process a 4 KB
-     * stack which comfortably fits the ~450 byte struct. */
-    panel_state_t p;
-    (void)p;
-    p.wid = 0;
-    p.panel_pid = 0;
-    p.hover = -1;
-    p.yield_counter = 0;
-    for (int i = 0; i < RUN_SLOT_COUNT; i++) {
-        p.slots[i].present = 0;
-        p.slots[i].pid = 0;
-        p.slots[i].window_id = 0;
-        p.slots[i].minimized = 0;
-        for (int j = 0; j < NAME_CAP; j++) {
-            p.slots[i].name[j] = '\0';
-        }
+    /* The flat app image does not map .bss. Keep mutable panel
+     * state in anonymous user memory instead of relying on the
+     * fixed 4 KB process stack. */
+    long state_addr = kli_mmap(0, sizeof(panel_state_t), 0);
+    if (state_addr < 0) {
+        kli_write_cstr(1, "panel: state mmap failed\n");
+        return 1;
     }
-    for (int i = 0; i < PROCLIST_MAX; i++) {
-        p.procs[i].pid = 0;
-        p.procs[i].state = 0;
-        for (int j = 0; j < NAME_CAP; j++) {
-            p.procs[i].name[j] = '\0';
-        }
-    }
+    panel_state_t *p = (panel_state_t *)(uintptr_t)state_addr;
+    memset(p, 0, sizeof(*p));
+    p->hover = -1;
 
     kli_write_cstr(1, "panel: starting\n");
-    init_button_labels(&p);
+    init_button_labels(p);
 
-    p.wid = gui_window_create(0, PANEL_Y, SCREEN_W, PANEL_H,
-                              COLOR_BG, COLOR_BORDER, "panel");
-    if (p.wid < 0) {
+    p->wid = gui_window_create(0, PANEL_Y, SCREEN_W, PANEL_H,
+                               COLOR_BG, COLOR_BORDER, "panel");
+    if (p->wid < 0) {
         kli_write_cstr(1, "panel: window create failed\n");
         // Park in a yield loop so the kernel debug console (k>) still
         // gets a chance to run and 'ps' / 'proclist' queries see a
@@ -460,17 +411,17 @@ int main(int argc, char **argv) {
     for (int idx = 0; idx < BTN_COUNT; idx++) {
         int bx = 4 + idx * (BTN_W + BTN_GAP);
         int by = BTN_Y - PANEL_Y;
-        (void)gui_cursor_register_region(p.wid, (long)idx, (long)bx,
+        (void)gui_cursor_register_region(p->wid, (long)idx, (long)bx,
                                           (long)by, (long)BTN_W,
                                           (long)BTN_H,
                                           (long)GUI_CURSOR_HAND);
     }
 
     long pid = kli_getpid();
-    p.panel_pid = (pid > 0) ? (uint32_t)pid : 0;
+    p->panel_pid = (pid > 0) ? (uint32_t)pid : 0;
 
-    redraw_all(&p);
-    refresh_running(&p);
+    redraw_all(p);
+    refresh_running(p);
     kli_write_cstr(1, "panel: ready\n");
 
 #ifdef PANEL_FORCE_FAULT
@@ -487,37 +438,34 @@ int main(int argc, char **argv) {
      */
     kli_write_cstr(1, "panel: auto-test launch every button\n");
     for (int idx = 0; idx < BTN_COUNT; idx++) {
-        if (strcmp(p.button_labels[idx], "panel") == 0) {
-            continue;
-        }
         kli_write_cstr(1, "panel: auto-test click ");
-        kli_write_cstr(1, p.button_labels[idx]);
+        kli_write_cstr(1, p->button_labels[idx]);
         kli_write_cstr(1, "\n");
-        launch_button(&p, idx);
+        launch_button(p, idx);
         (void)kli_yield();
     }
 #endif
 
     for (;;) {
-        long n = gui_window_event(p.wid, p.events, EVENT_CAP);
+        long n = gui_window_event(p->wid, p->events, EVENT_CAP);
         if (n > 0) {
             int dirty = 0;
             for (long i = 0; i < n; i++) {
-                if (p.events[i].type == GUI_EVENT_MOUSE_CLICK) {
-                    on_click(&p, p.events[i].data1, p.events[i].data2);
+                if (p->events[i].type == GUI_EVENT_MOUSE_CLICK) {
+                    on_click(p, p->events[i].data1, p->events[i].data2);
                     dirty = 1;
-                } else if (p.events[i].type == GUI_EVENT_MOUSE_MOVE) {
-                    on_move(&p, p.events[i].data1, p.events[i].data2);
+                } else if (p->events[i].type == GUI_EVENT_MOUSE_MOVE) {
+                    on_move(p, p->events[i].data1, p->events[i].data2);
                     dirty = 1;
                 }
             }
             (void)dirty;
         }
 
-        p.yield_counter++;
-        if (p.yield_counter >= REFRESH_PERIOD) {
-            p.yield_counter = 0;
-            refresh_running(&p);
+        p->yield_counter++;
+        if (p->yield_counter >= REFRESH_PERIOD) {
+            p->yield_counter = 0;
+            refresh_running(p);
         }
 
         (void)kli_yield();
