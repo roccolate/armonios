@@ -8,6 +8,7 @@
 #define DHCP_OPTIONS_HAS_SUBNET    (1U << 0)
 #define DHCP_OPTIONS_HAS_GATEWAY   (1U << 1)
 #define DHCP_OPTIONS_HAS_DNS       (1U << 2)
+#define DHCP_OPTIONS_HAS_SERVER_ID (1U << 3)
 
 /*
  * Parsed DHCP options used by the minimal net stack.
@@ -23,6 +24,7 @@ typedef struct {
     uint32_t subnet;
     uint32_t gateway;
     uint32_t dns;
+    uint32_t server_id;
 } dhcp_options_t;
 
 int dhcp_options_parse(const uint8_t *options, uint32_t len,

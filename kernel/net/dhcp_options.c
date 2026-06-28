@@ -15,7 +15,13 @@
 #define DHCP_OPTION_ROUTER      3U
 #define DHCP_OPTION_DNS         6U
 #define DHCP_OPTION_MSG_TYPE    53U
+#define DHCP_OPTION_SERVER_ID   54U
 #define DHCP_OPTION_END         255U
+
+static int dhcp_has_magic_cookie(const uint8_t *options, uint32_t len) {
+    return len >= 4U && options[0] == 0x63U && options[1] == 0x82U &&
+           options[2] == 0x53U && options[3] == 0x63U;
+}
 
 static uint32_t dhcp_get_ipv4(const uint8_t *addr) {
     return ((uint32_t)addr[0]) |
@@ -30,6 +36,7 @@ static void dhcp_options_clear(dhcp_options_t *out) {
     out->subnet = 0;
     out->gateway = 0;
     out->dns = 0;
+    out->server_id = 0;
 }
 
 int dhcp_options_parse(const uint8_t *options, uint32_t len,
@@ -41,6 +48,9 @@ int dhcp_options_parse(const uint8_t *options, uint32_t len,
     }
 
     dhcp_options_clear(out);
+    if (dhcp_has_magic_cookie(options, len)) {
+        pos = 4U;
+    }
 
     while (pos < len) {
         uint8_t code = options[pos++];
@@ -74,6 +84,9 @@ int dhcp_options_parse(const uint8_t *options, uint32_t len,
         } else if (code == DHCP_OPTION_DNS && opt_len >= 4U) {
             out->dns = dhcp_get_ipv4(value);
             out->flags |= DHCP_OPTIONS_HAS_DNS;
+        } else if (code == DHCP_OPTION_SERVER_ID && opt_len >= 4U) {
+            out->server_id = dhcp_get_ipv4(value);
+            out->flags |= DHCP_OPTIONS_HAS_SERVER_ID;
         }
 
         pos += opt_len;

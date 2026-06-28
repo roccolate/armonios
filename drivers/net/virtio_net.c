@@ -34,15 +34,25 @@
 #define VIRTIO_STATUS_FAILED    128U
 #define VIRTQ_DESC_F_NEXT       1U
 #define VIRTQ_DESC_F_WRITE      2U
-#define VIRTIO_NET_QUEUE_SIZE   32U
+/*
+ * The current network stack consumes frames synchronously from a polling path.
+ * Sixteen RX descriptors absorb small QEMU bursts without reserving the old
+ * 48 KiB receive ring; TX uses one shared frame buffer because send waits for
+ * completion before allowing reuse. Each buffer includes the required
+ * virtio-net header before the Ethernet frame.
+ */
+#define VIRTIO_NET_QUEUE_SIZE   16U
 #define VIRTIO_NET_POLL_LIMIT   100000U
 #define VIRTIO_F_VERSION_1_HIGH 1U
 #define VIRTIO_NET_F_MAC        (1U << 5)
 #define VIRTIO_NET_F_CSUM       (1U << 9)
 #define VIRTIO_NET_F_GUEST_CSUM (1U << 8)
 
-#define RX_BUF_SIZE 1536
-#define TX_BUF_SIZE 1536
+#define VIRTIO_NET_FRAME_SIZE 1536U
+/* QEMU virtio-net-device consumes 12 bytes before the Ethernet frame. */
+#define VIRTIO_NET_HDR_SIZE   12U
+#define RX_BUF_SIZE (VIRTIO_NET_HDR_SIZE + VIRTIO_NET_FRAME_SIZE)
+#define TX_BUF_SIZE (VIRTIO_NET_HDR_SIZE + VIRTIO_NET_FRAME_SIZE)
 
 typedef struct {
     uint64_t addr;
@@ -76,9 +86,10 @@ static uint8_t g_rx_buf[VIRTIO_NET_QUEUE_SIZE][RX_BUF_SIZE] KERNEL_ALIGNED(8);
 static virtq_desc_t g_tx_desc[VIRTIO_NET_QUEUE_SIZE] KERNEL_ALIGNED(16);
 static virtq_avail_t g_tx_avail KERNEL_ALIGNED(2);
 static volatile virtq_used_t g_tx_used KERNEL_ALIGNED(4);
-static uint8_t g_tx_buf[VIRTIO_NET_QUEUE_SIZE][TX_BUF_SIZE] KERNEL_ALIGNED(8);
+static uint8_t g_tx_buf[TX_BUF_SIZE] KERNEL_ALIGNED(8);
 
 static uint16_t g_tx_last_used = 0;
+static uint8_t g_tx_pending = 0;
 
 static volatile uint32_t *virtio_reg(uint64_t base, uint32_t offset) {
     return (volatile uint32_t *)(uintptr_t)(base + offset);
@@ -103,6 +114,22 @@ static void copy_bytes(void *dst, const void *src, uint32_t len) {
     for (uint32_t i = 0; i < len; i++) {
         d[i] = s[i];
     }
+}
+
+static int virtio_net_device_ready(const virtio_net_device_t *device) {
+    return device != NULL && device->ready != 0 && device->base != 0 &&
+           device->queue_size > 0 &&
+           device->queue_size <= VIRTIO_NET_QUEUE_SIZE;
+}
+
+static int virtio_net_tx_reclaim_completed(void) {
+    virtio_barrier();
+    if (g_tx_used.idx != g_tx_last_used) {
+        g_tx_last_used = g_tx_used.idx;
+        g_tx_pending = 0;
+        return 1;
+    }
+    return 0;
 }
 
 int virtio_net_probe(uint64_t base, virtio_net_info_t *info) {
@@ -208,7 +235,7 @@ int virtio_net_init(virtio_net_device_t *device, uint64_t base) {
     }
 
     g_rx_avail.flags = 0;
-    g_rx_avail.idx = 0;
+    g_rx_avail.idx = VIRTIO_NET_QUEUE_SIZE;
     g_rx_used.flags = 0;
     g_rx_used.idx = 0;
     g_tx_avail.flags = 0;
@@ -235,6 +262,8 @@ int virtio_net_init(virtio_net_device_t *device, uint64_t base) {
              VIRTIO_STATUS_FEATURES_OK | VIRTIO_STATUS_DRIVER_OK;
     *virtio_reg(base, VIRTIO_MMIO_STATUS) = status;
     virtio_barrier();
+    *virtio_reg(base, VIRTIO_MMIO_QUEUE_NOTIFY) = 0;
+    virtio_barrier();
 
     device->base = base;
     device->queue_size = VIRTIO_NET_QUEUE_SIZE;
@@ -245,6 +274,7 @@ int virtio_net_init(virtio_net_device_t *device, uint64_t base) {
     }
 
     g_tx_last_used = 0;
+    g_tx_pending = 0;
 
     return 0;
 }
@@ -253,21 +283,29 @@ int virtio_net_send(virtio_net_device_t *device, const void *data, uint32_t len)
     uint16_t avail_idx;
     uint16_t desc_idx;
 
-    if (device == NULL || device->ready == 0 || data == NULL || len == 0) {
+    if (!virtio_net_device_ready(device) || data == NULL || len == 0) {
         return -1;
     }
 
-    if (len > TX_BUF_SIZE) {
-        len = TX_BUF_SIZE;
+    if (len > VIRTIO_NET_FRAME_SIZE) {
+        len = VIRTIO_NET_FRAME_SIZE;
+    }
+
+    (void)virtio_net_tx_reclaim_completed();
+    if (g_tx_pending != 0) {
+        return -2;
     }
 
     avail_idx = g_tx_avail.idx;
-    desc_idx = avail_idx % device->queue_size;
+    desc_idx = 0;
 
-    copy_bytes(g_tx_buf[desc_idx], data, len);
+    for (uint32_t i = 0; i < VIRTIO_NET_HDR_SIZE; i++) {
+        g_tx_buf[i] = 0;
+    }
+    copy_bytes(g_tx_buf + VIRTIO_NET_HDR_SIZE, data, len);
 
-    g_tx_desc[desc_idx].addr = (uint64_t)(uintptr_t)g_tx_buf[desc_idx];
-    g_tx_desc[desc_idx].len = len;
+    g_tx_desc[desc_idx].addr = (uint64_t)(uintptr_t)g_tx_buf;
+    g_tx_desc[desc_idx].len = VIRTIO_NET_HDR_SIZE + len;
     g_tx_desc[desc_idx].flags = 0;
     g_tx_desc[desc_idx].next = 0;
 
@@ -276,12 +314,11 @@ int virtio_net_send(virtio_net_device_t *device, const void *data, uint32_t len)
     g_tx_avail.idx = avail_idx + 1U;
     virtio_barrier();
 
+    g_tx_pending = 1;
     *virtio_reg(device->base, VIRTIO_MMIO_QUEUE_NOTIFY) = 1;
 
     for (uint32_t spins = 0; spins < VIRTIO_NET_POLL_LIMIT; spins++) {
-        virtio_barrier();
-        if (g_tx_used.idx != g_tx_last_used) {
-            g_tx_last_used = g_tx_used.idx;
+        if (virtio_net_tx_reclaim_completed()) {
             return 0;
         }
     }
@@ -294,7 +331,7 @@ int virtio_net_recv(virtio_net_device_t *device, void *data, uint32_t max_len) {
     uint16_t desc_idx;
     uint32_t copy_len;
 
-    if (device == NULL || device->ready == 0 || data == NULL) {
+    if (!virtio_net_device_ready(device) || data == NULL) {
         return -1;
     }
 
@@ -311,15 +348,20 @@ int virtio_net_recv(virtio_net_device_t *device, void *data, uint32_t max_len) {
     }
 
     copy_len = g_rx_used.ring[used_idx].len;
+    if (copy_len <= VIRTIO_NET_HDR_SIZE) {
+        copy_len = 0;
+    } else {
+        copy_len -= VIRTIO_NET_HDR_SIZE;
+    }
     if (copy_len > max_len) {
         copy_len = max_len;
     }
-    if (copy_len > RX_BUF_SIZE) {
-        copy_len = RX_BUF_SIZE;
+    if (copy_len > VIRTIO_NET_FRAME_SIZE) {
+        copy_len = VIRTIO_NET_FRAME_SIZE;
     }
 
     if (copy_len > 0) {
-        copy_bytes(data, g_rx_buf[desc_idx], copy_len);
+        copy_bytes(data, g_rx_buf[desc_idx] + VIRTIO_NET_HDR_SIZE, copy_len);
     }
 
     g_rx_desc[desc_idx].addr = (uint64_t)(uintptr_t)g_rx_buf[desc_idx];
@@ -340,10 +382,24 @@ int virtio_net_recv(virtio_net_device_t *device, void *data, uint32_t max_len) {
 }
 
 int virtio_net_poll(virtio_net_device_t *device) {
-    if (device == NULL || device->ready == 0) {
+    if (!virtio_net_device_ready(device)) {
         return -1;
     }
 
     virtio_barrier();
     return (g_rx_used.idx != device->last_used_idx) ? 1 : 0;
 }
+
+#ifdef KOLIBRIARM_TEST
+uint32_t virtio_net_test_rx_buffer_bytes(void) {
+    return (uint32_t)sizeof(g_rx_buf);
+}
+
+uint32_t virtio_net_test_tx_buffer_bytes(void) {
+    return (uint32_t)sizeof(g_tx_buf);
+}
+
+uint16_t virtio_net_test_rx_available_idx(void) {
+    return g_rx_avail.idx;
+}
+#endif

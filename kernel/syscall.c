@@ -19,6 +19,7 @@
 #include "kernel/gui.h"
 #include "kernel/ipc.h"
 #include "kernel/mm/pmm.h"
+#include "kernel/net/dhcp.h"
 #include "kernel/print.h"
 #include "kernel/process.h"
 #include "kernel/sched/sched.h"
@@ -987,6 +988,7 @@ void syscall_dispatch(exception_frame_t *frame) {
             }
         }
     }
+    net_poll();
 
     if (current != 0) {
         process_save_context(current, frame->x, frame->elr, frame->spsr,

@@ -19,11 +19,18 @@
 #define ETH_TYPE_IP   0x0800
 #define ETH_TYPE_ARP  0x0806
 #define IP_PROTO_UDP  17
+#define NET_FRAME_MAX 1536U
+#define ETH_HEADER_LEN 14U
+#define IPV4_HEADER_LEN 20U
+#define UDP_HEADER_LEN 8U
 
 static net_info_t g_net_info;
 static virtio_net_device_t g_net_dev;
 static uint8_t g_net_inited = 0;
+static uint8_t g_net_polling = 0;
 static uint32_t g_dhcp_xid = 0x12345678;
+static uint8_t g_net_rx_frame[NET_FRAME_MAX] KERNEL_ALIGNED(8);
+static uint8_t g_net_tx_frame[NET_FRAME_MAX] KERNEL_ALIGNED(8);
 
 static void copy_bytes(void *dst, const void *src, uint32_t len) {
     uint8_t *d = (uint8_t *)dst;
@@ -63,17 +70,23 @@ static uint32_t get_ip_addr(const uint8_t *addr) {
     return addr[0] | (addr[1] << 8) | (addr[2] << 16) | (addr[3] << 24);
 }
 
-static uint16_t checksum(void *data, uint32_t len) {
-    uint16_t *p = (uint16_t *)data;
+static void put_be16(uint8_t *dst, uint16_t value) {
+    dst[0] = (uint8_t)((value >> 8) & 0xffU);
+    dst[1] = (uint8_t)(value & 0xffU);
+}
+
+static uint16_t checksum(const void *data, uint32_t len) {
+    const uint8_t *p = (const uint8_t *)data;
     uint32_t sum = 0;
 
     while (len > 1) {
-        sum += *p++;
+        sum += ((uint32_t)p[0] << 8) | p[1];
+        p += 2;
         len -= 2;
     }
 
     if (len > 0) {
-        sum += *(uint8_t *)p;
+        sum += ((uint32_t)p[0] << 8);
     }
 
     while (sum >> 16) {
@@ -81,6 +94,13 @@ static uint16_t checksum(void *data, uint32_t len) {
     }
 
     return (uint16_t)~sum;
+}
+
+static void set_dhcp_broadcast_flag(dhcp_packet_t *pkt) {
+    uint8_t *flags = (uint8_t *)(void *)&pkt->flags;
+
+    flags[0] = 0x80;
+    flags[1] = 0x00;
 }
 
 static void print_ip(uint32_t ip) {
@@ -94,147 +114,152 @@ static void print_ip(uint32_t ip) {
     print_dec64((ip >> 24) & 0xFF);
 }
 
-static int send_eth_frame(const void *data, uint32_t len, uint16_t eth_type) {
-    uint8_t frame[1536];
-    uint8_t *src_mac = g_net_dev.mac;
-    uint8_t broadcast[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+static dhcp_packet_t *tx_dhcp_packet(void) {
+    return (dhcp_packet_t *)(void *)(g_net_tx_frame + ETH_HEADER_LEN +
+                                     IPV4_HEADER_LEN + UDP_HEADER_LEN);
+}
 
-    if (len + 14 > sizeof(frame)) {
-        return -1;
-    }
+static void write_eth_header(uint8_t *frame, uint16_t eth_type) {
+    static const uint8_t broadcast[6] = {
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+    };
 
-    copy_bytes(frame, broadcast, 6);
-    copy_bytes(frame + 6, src_mac, 6);
+    copy_bytes(frame, broadcast, sizeof(broadcast));
+    copy_bytes(frame + 6, g_net_dev.mac, 6);
 
     frame[12] = (eth_type >> 8) & 0xFF;
     frame[13] = eth_type & 0xFF;
-
-    copy_bytes(frame + 14, data, len);
-
-    return virtio_net_send(&g_net_dev, frame, len + 14);
 }
 
-static int send_ip_packet(const void *data, uint32_t len,
-                          uint32_t dest_ip, uint8_t proto) {
-    uint8_t packet[1536];
-    uint8_t src_ip[4];
+static void write_ipv4_header(uint8_t *packet, uint32_t payload_len,
+                              uint32_t dest_ip, uint8_t proto) {
+    uint32_t total_len = IPV4_HEADER_LEN + payload_len;
 
-    if (g_net_info.ip == 0) {
-        src_ip[0] = 0; src_ip[1] = 0; src_ip[2] = 0; src_ip[3] = 0;
-    } else {
-        set_ip_addr(src_ip, g_net_info.ip);
-    }
-
-    uint8_t broadcast[] = {255, 255, 255, 255};
-
-    if (len + 20 > sizeof(packet)) {
-        return -1;
-    }
-
-    memset(packet, 0, 20);
+    memset(packet, 0, IPV4_HEADER_LEN);
     packet[0] = 0x45;
     packet[1] = 0;
-    *(uint16_t *)&packet[2] = (uint16_t)((len + 20) << 8) | ((len + 20) >> 8);
-    *(uint32_t *)&packet[4] = 0;
+    put_be16(&packet[2], (uint16_t)total_len);
     packet[8] = 64;
     packet[9] = proto;
-    *(uint16_t *)&packet[10] = 0;
-    copy_bytes(&packet[12], src_ip, 4);
+    if (g_net_info.ip == 0) {
+        packet[12] = 0;
+        packet[13] = 0;
+        packet[14] = 0;
+        packet[15] = 0;
+    } else {
+        set_ip_addr(&packet[12], g_net_info.ip);
+    }
     if (dest_ip == 0) {
-        copy_bytes(&packet[16], broadcast, 4);
+        packet[16] = 255;
+        packet[17] = 255;
+        packet[18] = 255;
+        packet[19] = 255;
     } else {
         set_ip_addr(&packet[16], dest_ip);
     }
-    *(uint16_t *)&packet[10] = checksum(packet, 20);
 
-    copy_bytes(packet + 20, data, len);
-
-    return send_eth_frame(packet, len + 20, ETH_TYPE_IP);
+    put_be16(&packet[10], checksum(packet, IPV4_HEADER_LEN));
 }
 
-static int send_udp_packet(const void *data, uint32_t len,
-                           uint32_t dest_ip, uint16_t dest_port,
-                           uint16_t src_port) {
-    uint8_t packet[1536];
-    uint8_t udp_header[8];
+static int send_udp_frame(uint32_t payload_len, uint32_t dest_ip,
+                          uint16_t dest_port, uint16_t src_port) {
+    uint8_t *ip;
+    uint8_t *udp;
+    uint32_t udp_len = UDP_HEADER_LEN + payload_len;
 
-    if (len + 8 > sizeof(packet)) {
+    if (payload_len > NET_FRAME_MAX - ETH_HEADER_LEN -
+                          IPV4_HEADER_LEN - UDP_HEADER_LEN) {
         return -1;
     }
 
-    udp_header[0] = (src_port >> 8) & 0xFF;
-    udp_header[1] = src_port & 0xFF;
-    udp_header[2] = (dest_port >> 8) & 0xFF;
-    udp_header[3] = dest_port & 0xFF;
-    udp_header[4] = ((len + 8) >> 8) & 0xFF;
-    udp_header[5] = (len + 8) & 0xFF;
-    udp_header[6] = 0;
-    udp_header[7] = 0;
+    write_eth_header(g_net_tx_frame, ETH_TYPE_IP);
 
-    copy_bytes(packet, udp_header, 8);
-    copy_bytes(packet + 8, data, len);
+    ip = g_net_tx_frame + ETH_HEADER_LEN;
+    write_ipv4_header(ip, udp_len, dest_ip, IP_PROTO_UDP);
 
-    return send_ip_packet(packet, len + 8, dest_ip, IP_PROTO_UDP);
+    udp = ip + IPV4_HEADER_LEN;
+    put_be16(&udp[0], src_port);
+    put_be16(&udp[2], dest_port);
+    put_be16(&udp[4], (uint16_t)udp_len);
+    udp[6] = 0;
+    udp[7] = 0;
+
+    return virtio_net_send(&g_net_dev, g_net_tx_frame,
+                           ETH_HEADER_LEN + IPV4_HEADER_LEN + udp_len);
 }
 
 static void send_dhcp_discover(void) {
-    dhcp_packet_t pkt;
-    uint8_t options[4] = {0x63, 0x82, 0x53, 0x63};
+    dhcp_packet_t *pkt = tx_dhcp_packet();
+    static const uint8_t options[4] = {0x63, 0x82, 0x53, 0x63};
+    int status;
 
-    memset(&pkt, 0, sizeof(pkt));
-    pkt.op = 1;
-    pkt.htype = 1;
-    pkt.hlen = 6;
-    pkt.xid = g_dhcp_xid;
-    pkt.flags = 0x8000;
+    memset(pkt, 0, sizeof(*pkt));
+    pkt->op = 1;
+    pkt->htype = 1;
+    pkt->hlen = 6;
+    pkt->xid = g_dhcp_xid;
+    set_dhcp_broadcast_flag(pkt);
 
-    copy_bytes(pkt.chaddr, g_net_dev.mac, 6);
+    copy_bytes(pkt->chaddr, g_net_dev.mac, 6);
 
-    copy_bytes(pkt.options, options, 4);
-    pkt.options[4] = 53;
-    pkt.options[5] = 1;
-    pkt.options[6] = DHCP_DISCOVER;
-    pkt.options[7] = 0xFF;
+    copy_bytes(pkt->options, options, sizeof(options));
+    pkt->options[4] = 53;
+    pkt->options[5] = 1;
+    pkt->options[6] = DHCP_DISCOVER;
+    pkt->options[7] = 0xFF;
 
-    send_udp_packet(&pkt, sizeof(dhcp_packet_t), 0xFFFFFFFF,
-                    DHCP_PORT_SERVER, DHCP_PORT_CLIENT);
+    status = send_udp_frame(sizeof(*pkt), 0xFFFFFFFF, DHCP_PORT_SERVER,
+                            DHCP_PORT_CLIENT);
+    if (status != 0) {
+        uart_puts("[net] DHCP discover send failed: ");
+        print_hex64((uint64_t)(uint32_t)status);
+        uart_puts("\n");
+    }
 }
 
 static void send_dhcp_request(uint32_t server_ip, uint32_t requested_ip) {
-    dhcp_packet_t pkt;
-    uint8_t options[4] = {0x63, 0x82, 0x53, 0x63};
+    dhcp_packet_t *pkt = tx_dhcp_packet();
+    static const uint8_t options[4] = {0x63, 0x82, 0x53, 0x63};
     uint8_t opt_idx = 4;
+    int status;
 
-    memset(&pkt, 0, sizeof(pkt));
-    pkt.op = 1;
-    pkt.htype = 1;
-    pkt.hlen = 6;
-    pkt.xid = g_dhcp_xid;
-    pkt.flags = 0x8000;
+    memset(pkt, 0, sizeof(*pkt));
+    pkt->op = 1;
+    pkt->htype = 1;
+    pkt->hlen = 6;
+    pkt->xid = g_dhcp_xid;
+    set_dhcp_broadcast_flag(pkt);
 
-    set_ip_addr(pkt.ciaddr, requested_ip);
-    copy_bytes(pkt.chaddr, g_net_dev.mac, 6);
+    set_ip_addr(pkt->ciaddr, requested_ip);
+    copy_bytes(pkt->chaddr, g_net_dev.mac, 6);
 
-    copy_bytes(pkt.options, options, 4);
+    copy_bytes(pkt->options, options, sizeof(options));
 
-    pkt.options[opt_idx++] = 53;
-    pkt.options[opt_idx++] = 1;
-    pkt.options[opt_idx++] = DHCP_REQUEST;
+    pkt->options[opt_idx++] = 53;
+    pkt->options[opt_idx++] = 1;
+    pkt->options[opt_idx++] = DHCP_REQUEST;
 
-    pkt.options[opt_idx++] = 54;
-    pkt.options[opt_idx++] = 4;
-    set_ip_addr(&pkt.options[opt_idx], server_ip);
+    if (server_ip != 0) {
+        pkt->options[opt_idx++] = 54;
+        pkt->options[opt_idx++] = 4;
+        set_ip_addr(&pkt->options[opt_idx], server_ip);
+        opt_idx += 4;
+    }
+
+    pkt->options[opt_idx++] = 50;
+    pkt->options[opt_idx++] = 4;
+    set_ip_addr(&pkt->options[opt_idx], requested_ip);
     opt_idx += 4;
 
-    pkt.options[opt_idx++] = 50;
-    pkt.options[opt_idx++] = 4;
-    set_ip_addr(&pkt.options[opt_idx], requested_ip);
-    opt_idx += 4;
+    pkt->options[opt_idx++] = 0xFF;
 
-    pkt.options[opt_idx++] = 0xFF;
-
-    send_udp_packet(&pkt, sizeof(dhcp_packet_t), 0xFFFFFFFF,
-                    DHCP_PORT_SERVER, DHCP_PORT_CLIENT);
+    status = send_udp_frame(sizeof(*pkt), 0xFFFFFFFF, DHCP_PORT_SERVER,
+                            DHCP_PORT_CLIENT);
+    if (status != 0) {
+        uart_puts("[net] DHCP request send failed: ");
+        print_hex64((uint64_t)(uint32_t)status);
+        uart_puts("\n");
+    }
 }
 
 static void parse_dhcp_offer(dhcp_packet_t *pkt,
@@ -243,6 +268,9 @@ static void parse_dhcp_offer(dhcp_packet_t *pkt,
 
     if (options->message_type == DHCP_OFFER) {
         g_net_info.dhcp_state = DHCP_OFFER;
+    }
+    if ((options->flags & DHCP_OPTIONS_HAS_SERVER_ID) != 0) {
+        g_net_info.dhcp_server = options->server_id;
     }
     uart_puts("[net] DHCP offer: ");
     print_ip(g_net_info.ip);
@@ -265,6 +293,9 @@ static void parse_dhcp_ack(dhcp_packet_t *pkt,
     }
     if ((options->flags & DHCP_OPTIONS_HAS_DNS) != 0) {
         g_net_info.dns = options->dns;
+    }
+    if ((options->flags & DHCP_OPTIONS_HAS_SERVER_ID) != 0) {
+        g_net_info.dhcp_server = options->server_id;
     }
 
     uart_puts("[net] DHCP ack: ");
@@ -385,6 +416,7 @@ int net_init(void) {
     g_net_info.subnet = 0;
     g_net_info.gateway = 0;
     g_net_info.dns = 0;
+    g_net_info.dhcp_server = 0;
     copy_bytes(g_net_info.mac, net_info.mac, 6);
 
     g_net_inited = 1;
@@ -398,22 +430,27 @@ int net_init(void) {
 }
 
 void net_poll(void) {
-    uint8_t buf[1536];
     int len;
 
     if (!g_net_inited || !g_net_dev.ready) {
         return;
     }
+    if (g_net_polling != 0) {
+        return;
+    }
+    g_net_polling = 1;
 
-    while ((len = virtio_net_recv(&g_net_dev, buf, sizeof(buf))) > 0) {
-        parse_eth_frame(buf, (uint32_t)len);
+    while ((len = virtio_net_recv(&g_net_dev, g_net_rx_frame,
+                                  sizeof(g_net_rx_frame))) > 0) {
+        parse_eth_frame(g_net_rx_frame, (uint32_t)len);
     }
 
     if (!g_net_info.discovered) {
         if (g_net_info.dhcp_state == DHCP_OFFER) {
-            send_dhcp_request(0, g_net_info.ip);
+            send_dhcp_request(g_net_info.dhcp_server, g_net_info.ip);
         }
     }
+    g_net_polling = 0;
 }
 
 int net_is_link_up(void) {

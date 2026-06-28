@@ -42,6 +42,7 @@ typedef struct {
     uint32_t subnet;
     uint32_t gateway;
     uint32_t dns;
+    uint32_t dhcp_server;
     uint8_t  dhcp_state;
     uint8_t  discovered;
 } net_info_t;

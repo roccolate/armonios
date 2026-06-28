@@ -59,7 +59,8 @@ void test_virtio_net_init_negotiates_feature_banks(void) {
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)virtio_net_init(
                                   &device, (uint64_t)(uintptr_t)mmio));
     TEST_ASSERT_EQUAL_UINT64(1, device.ready);
-    TEST_ASSERT_EQUAL_UINT64(32, device.queue_size);
+    TEST_ASSERT_EQUAL_UINT64(16, device.queue_size);
+    TEST_ASSERT_EQUAL_UINT64(16, virtio_net_test_rx_available_idx());
     TEST_ASSERT_EQUAL_UINT64(15, mmio[VIRTIO_MMIO_STATUS / sizeof(uint32_t)]);
     TEST_ASSERT_EQUAL_UINT64(1, mmio[VIRTIO_MMIO_QUEUE_READY / sizeof(uint32_t)]);
     TEST_ASSERT_EQUAL_UINT64(1, mmio[VIRTIO_MMIO_DRIVER_FEATURES_SEL /
@@ -68,4 +69,27 @@ void test_virtio_net_init_negotiates_feature_banks(void) {
                              mmio[VIRTIO_MMIO_DRIVER_FEATURES /
                                   sizeof(uint32_t)]);
     TEST_ASSERT_EQUAL_UINT64(0x02U, device.mac[0]);
+}
+
+void test_virtio_net_tx_uses_single_frame_buffer(void) {
+    TEST_ASSERT_EQUAL_UINT64(1548U, virtio_net_test_tx_buffer_bytes());
+    TEST_ASSERT_EQUAL_UINT64(16U * 1548U, virtio_net_test_rx_buffer_bytes());
+}
+
+void test_virtio_net_ready_ops_reject_invalid_device_state(void) {
+    virtio_net_device_t device = {
+        .base = 0,
+        .queue_size = 0,
+        .ready = 1,
+    };
+    uint8_t frame[1] = { 0 };
+
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)virtio_net_send(&device, frame,
+                                                       sizeof(frame)));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)virtio_net_recv(&device, frame,
+                                                       sizeof(frame)));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
+                             (uint64_t)virtio_net_poll(&device));
 }

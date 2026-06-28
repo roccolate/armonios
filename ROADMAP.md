@@ -8,7 +8,7 @@ per-rect compositor path. The host test suite covers the window ABI, IPC,
 process isolation, partial redraw, USB HID parsing, FAT32 integration, DHCP
 options, and the syscall number table; `make`, `make size`, and
 `make -C tests test` are the baseline checks. Latest verified size:
-`kernel.bin: 89040 bytes (limit: 100000)`. This is the current v0.9
+`kernel.bin: 89368 bytes (limit: 100000)`. This is the current v0.9
 baseline.
 
 This file is intentionally short. It separates current verification from
@@ -150,8 +150,9 @@ regressed:
 The v1.0 target is a stable, debugged QEMU kernel and desktop release. Work in
 this order:
 
-- Compact `kernel/net/` and `drivers/net/virtio_net.c`, especially the static
-  RX/TX queue buffers. Verify with `make qemu-net`.
+- Continue hardening `kernel/net/` and `drivers/net/virtio_net.c`. The first
+  buffer-footprint pass reduced virtio-net to 16 RX descriptors and one shared
+  TX frame buffer; verify further work with `make qemu-net`.
 - Run a QEMU-focused debug/stability sweep across boot, storage, display,
   input, networking, syscalls, and process cleanup.
 - Touch `kernel/gui_*` or `drivers/usb/xhci.c` only if v1.0 checks expose

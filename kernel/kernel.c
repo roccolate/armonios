@@ -337,6 +337,7 @@ static void poll_input_events(void) {
 void kernel_on_timer_tick(void) {
     board_virtio_input_poll();
     poll_input_events();
+    net_poll();
 }
 
 static int enable_identity_mmu(const dtb_memory_t *memory, uint64_t dtb_addr) {

@@ -7,7 +7,7 @@ Historical cleanup details live in `docs/TECH_DEBT_REVIEW.md`.
 
 - Current version target: **v0.9 QEMU desktop baseline**.
 - Next version target: **v1.0 stable/debugged QEMU kernel + desktop release**.
-- Last verified kernel size: `kernel.bin: 89040 bytes (limit: 100000)`.
+- Last verified kernel size: `kernel.bin: 89368 bytes (limit: 100000)`.
 - Standard checks for kernel, driver, boot, and ABI changes are `make`,
   `make size`, and `make -C tests test`.
 - Targeted runtime checks include `make qemu-fs-test`,
@@ -58,6 +58,9 @@ Historical cleanup details live in `docs/TECH_DEBT_REVIEW.md`.
   HID on the development path.
 - The network stack is hand-written under `kernel/net/`; DHCP option parsing
   has focused host tests.
+- The first v1.0 networking pass reduced virtio-net's static buffers to a
+  16-descriptor RX queue plus one shared TX frame, and moved DHCP frame
+  scratch space out of the polling thread stack.
 - FAT32 parser/VFS behavior has host tests, and the storage integration path is
   covered by `make qemu-fs-test`.
 
@@ -73,9 +76,7 @@ Historical cleanup details live in `docs/TECH_DEBT_REVIEW.md`.
 
 ## Next Engineering Focus
 
-- First: compact `kernel/net/` and `drivers/net/virtio_net.c`, especially the
-  static virtio-net RX/TX buffers; verify with `make qemu-net`.
-- Then: run the v1.0 QEMU stability sweep across boot, storage, display, input,
+- Next: run the v1.0 QEMU stability sweep across boot, storage, display, input,
   networking, syscalls, and process cleanup.
 - Later: GUI size work if `kernel.bin` pressure returns, xHCI cleanup only with
   USB runtime checks, and `programs/apps/` stack/syscall-callsite review in
