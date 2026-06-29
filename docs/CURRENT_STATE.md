@@ -7,7 +7,7 @@ Historical cleanup details live in `TECH_DEBT_REVIEW.md`.
 
 - Current version target: **v0.9 QEMU desktop baseline**.
 - Next version target: **v1.0 stable/debugged QEMU kernel + desktop release**.
-- Last verified kernel size: `kernel.bin: 88040 bytes (limit: 100000)`.
+- Last verified kernel size: `kernel.bin: 85840 bytes (limit: 100000)`.
 - Standard checks for kernel, driver, boot, and ABI changes are `make`,
   `make size`, and `make -C tests test`.
 - Targeted runtime checks include `make qemu-fs-test`,

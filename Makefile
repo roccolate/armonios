@@ -91,6 +91,7 @@ STORAGE_DEV := $(BUILD_DIR)/drivers/storage/virtio_blk.o
 endif
 
 LDFLAGS := -T $(KERNEL_LINKER_SCRIPT) -nostdlib
+APP_LDFLAGS := --gc-sections
 
 DEPFLAGS := -MMD -MP
 ASFLAGS := -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -mcpu=cortex-a72 -g
@@ -278,7 +279,7 @@ $(BUILD_DIR)/$(APPS_DIR)/%.elf: $(BUILD_DIR)/$(APPS_DIR)/%.o \
     $(LIBKARM_IO_OBJ) \
     $$(APP_LIBS_$$*) $(BUILD_DIR)/$(APPS_DIR)/%_end.o \
     $(APPS_DIR)/image.ld
-	$(LOG_LD)$(LD) -T $(APPS_DIR)/image.ld -nostdlib \
+	$(LOG_LD)$(LD) $(APP_LDFLAGS) -T $(APPS_DIR)/image.ld -nostdlib \
 	    $(BUILD_DIR)/$(APPS_DIR)/$*.o \
 	    $(BUILD_DIR)/$(APPS_DIR)/$*_header.o \
 	    $(LIBKARM_SYSCALL_OBJ) \

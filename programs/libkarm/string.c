@@ -7,17 +7,15 @@
 // rolling their own. No printf-style formatting, no locales, no
 // heap.
 //
-// Each function is placed in `.user.image.text` explicitly because
-// programs/apps/image.ld only collects `.user.image.{header,text,
-// rodata}*` into the flat image that the kernel copies into
-// per-process memory. Anything left in the default `.text` would be
-// silently dropped at load time.
+// Each function is placed in its own `.user.image.text.*` section so
+// the app link can garbage-collect unused helpers while still keeping
+// every retained byte inside the flat image copied by the kernel.
 
 #include "string.h"
 
-#define KLI_TEXT __attribute__((section(".user.image.text")))
+#define KLI_TEXT(name) __attribute__((section(".user.image.text." #name)))
 
-KLI_TEXT
+KLI_TEXT(memcpy)
 void *memcpy(void *dst, const void *src, size_t n) {
     unsigned char *d = (unsigned char *)dst;
     const unsigned char *s = (const unsigned char *)src;
@@ -27,7 +25,7 @@ void *memcpy(void *dst, const void *src, size_t n) {
     return dst;
 }
 
-KLI_TEXT
+KLI_TEXT(memset)
 void *memset(void *dst, int c, size_t n) {
     unsigned char *d = (unsigned char *)dst;
     unsigned char v = (unsigned char)c;
@@ -37,7 +35,7 @@ void *memset(void *dst, int c, size_t n) {
     return dst;
 }
 
-KLI_TEXT
+KLI_TEXT(memmove)
 void *memmove(void *dst, const void *src, size_t n) {
     unsigned char *d = (unsigned char *)dst;
     const unsigned char *s = (const unsigned char *)src;
@@ -58,7 +56,7 @@ void *memmove(void *dst, const void *src, size_t n) {
     return dst;
 }
 
-KLI_TEXT
+KLI_TEXT(strlen)
 size_t strlen(const char *s) {
     size_t n = 0;
     while (*s++) {
@@ -67,7 +65,7 @@ size_t strlen(const char *s) {
     return n;
 }
 
-KLI_TEXT
+KLI_TEXT(strcmp)
 int strcmp(const char *a, const char *b) {
     while (*a && *a == *b) {
         a++;
@@ -76,7 +74,7 @@ int strcmp(const char *a, const char *b) {
     return (int)(unsigned char)*a - (int)(unsigned char)*b;
 }
 
-KLI_TEXT
+KLI_TEXT(strlcpy)
 size_t strlcpy(char *dst, const char *src, size_t dst_size) {
     size_t src_len = strlen(src);
     size_t copy_len = src_len;
@@ -91,7 +89,7 @@ size_t strlcpy(char *dst, const char *src, size_t dst_size) {
     return src_len;
 }
 
-KLI_TEXT
+KLI_TEXT(kli_utoa)
 size_t kli_utoa(uint64_t value, char *buf, size_t buf_size) {
     char tmp[24];
     size_t i = 0;
@@ -114,7 +112,7 @@ size_t kli_utoa(uint64_t value, char *buf, size_t buf_size) {
     return out;
 }
 
-KLI_TEXT
+KLI_TEXT(kli_itoa)
 size_t kli_itoa(int64_t value, char *buf, size_t buf_size) {
     int negative = (value < 0);
     uint64_t magnitude;

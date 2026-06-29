@@ -70,7 +70,7 @@ userland stack pass is in place: `shell`, `editor`, and `panel` keep their
 persistent state in anonymous user mappings instead of on the fixed 4 KB app
 stack, and current app syscall callsites go through `libkarm` / `libkarmdesk`
 wrappers.
-Latest verified size: `kernel.bin: 88040 bytes (limit: 100000)`. Read
+Latest verified size: `kernel.bin: 85840 bytes (limit: 100000)`. Read
 [ROADMAP.md](docs/ROADMAP.md) for the full breakdown.
 
 Baseline already in place:

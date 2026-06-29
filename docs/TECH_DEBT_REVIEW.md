@@ -29,7 +29,7 @@ timeout 25s make qemu-usb
 ```
 
 Latest verified size after the first v1.0 networking follow-up:
-`kernel.bin: 88040 bytes (limit: 100000)`.
+`kernel.bin: 85840 bytes (limit: 100000)`.
 
 ## Closed Items
 

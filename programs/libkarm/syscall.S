@@ -15,9 +15,9 @@
 // All trampolines are C-callable: they take the syscall number as the
 // first C argument (in x0), shuffle it into x8, move the remaining
 // arguments into x0..x6, and trap. x0..x7 are caller-saved across `svc`
-// by the AArch64 ABI, which matches the kernel's exception path.
-
-.section .user.image.text, "ax"
+// by the AArch64 ABI, which matches the kernel's exception path. Each
+// trampoline gets its own KLI1 text section so app links can discard
+// arities that a particular app never calls.
 
 .global __syscall0
 .global __syscall1
@@ -38,12 +38,14 @@
 .type __syscall7, %function
 
 // long __syscall0(long n)
+.section .user.image.text.__syscall0, "ax"
 __syscall0:
     mov x8, x0
     svc #0
     ret
 
 // long __syscall1(long n, long a0)
+.section .user.image.text.__syscall1, "ax"
 __syscall1:
     mov x8, x0
     mov x0, x1
@@ -51,6 +53,7 @@ __syscall1:
     ret
 
 // long __syscall2(long n, long a0, long a1)
+.section .user.image.text.__syscall2, "ax"
 __syscall2:
     mov x8, x0
     mov x0, x1
@@ -59,6 +62,7 @@ __syscall2:
     ret
 
 // long __syscall3(long n, long a0, long a1, long a2)
+.section .user.image.text.__syscall3, "ax"
 __syscall3:
     mov x8, x0
     mov x0, x1
@@ -68,6 +72,7 @@ __syscall3:
     ret
 
 // long __syscall4(long n, long a0, long a1, long a2, long a3)
+.section .user.image.text.__syscall4, "ax"
 __syscall4:
     mov x8, x0
     mov x0, x1
@@ -78,6 +83,7 @@ __syscall4:
     ret
 
 // long __syscall5(long n, long a0, long a1, long a2, long a3, long a4)
+.section .user.image.text.__syscall5, "ax"
 __syscall5:
     mov x8, x0
     mov x0, x1
@@ -89,6 +95,7 @@ __syscall5:
     ret
 
 // long __syscall6(long n, long a0, long a1, long a2, long a3, long a4, long a5)
+.section .user.image.text.__syscall6, "ax"
 __syscall6:
     mov x8, x0
     mov x0, x1
@@ -101,6 +108,7 @@ __syscall6:
     ret
 
 // long __syscall7(long n, long a0, long a1, long a2, long a3, long a4, long a5, long a6)
+.section .user.image.text.__syscall7, "ax"
 __syscall7:
     mov x8, x0
     mov x0, x1
