@@ -25,7 +25,6 @@
 #include <stdint.h>
 
 #include "libkarm/syscall.h"
-#include "libkarm/string.h"
 #include "libkarmdesk/gui.h"
 
 // Geometry constants for a 640x480 virtio-gpu framebuffer.
@@ -33,7 +32,6 @@
 #define SCREEN_H        480
 #define PANEL_H          56
 #define PANEL_Y         (SCREEN_H - PANEL_H)   // 424
-#define TITLE_BAR_H      0                    // panel has no title bar
 #define BTN_H            24
 #define BTN_Y           (PANEL_Y + 4)         // 428
 // 4 launchers must fit in 640 px with a 4 px left margin:
@@ -61,13 +59,11 @@
 #define COLOR_BTN_BG      0xff3a4658U
 #define COLOR_BTN_HI      0xff5870a0U
 #define COLOR_BTN_TXT     0xffe0e8f0U
-#define COLOR_TITLE_TXT   0xff8090a0U
 #define COLOR_RUN_BG      0xff182028U
 #define COLOR_RUN_ACTIVE  0xff506880U
 #define COLOR_RUN_MIN     0xff3a3a3cU
 #define COLOR_RUN_TXT     0xffc0d0e0U
 
-#define GUI_CURSOR_ARROW  0U
 #define GUI_CURSOR_HAND   1U
 
 #define NAME_CAP          16
@@ -109,7 +105,22 @@ typedef struct {
 } panel_state_t;
 
 static void copy_label(char *dst, size_t dst_size, const char *src) {
-    (void)strlcpy(dst, src, dst_size);
+    size_t i = 0;
+    while (i + 1 < dst_size && src[i] != '\0') {
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = '\0';
+}
+
+static void clear_running_slots(panel_state_t *p) {
+    for (int i = 0; i < RUN_SLOT_COUNT; i++) {
+        p->slots[i].present = 0;
+        p->slots[i].pid = 0;
+        p->slots[i].window_id = 0;
+        p->slots[i].minimized = 0;
+        p->slots[i].name[0] = '\0';
+    }
 }
 
 // Convert absolute framebuffer Y to panel-local Y. Negative results
@@ -306,15 +317,7 @@ static void on_move(panel_state_t *p, int32_t abs_x, int32_t abs_y) {
 static void refresh_running(panel_state_t *p) {
     // Clear the slot table first; entries we can't repopulate stay
     // empty until the next poll.
-    for (int i = 0; i < RUN_SLOT_COUNT; i++) {
-        p->slots[i].present = 0;
-        p->slots[i].pid = 0;
-        p->slots[i].window_id = 0;
-        p->slots[i].minimized = 0;
-        for (int j = 0; j < NAME_CAP; j++) {
-            p->slots[i].name[j] = '\0';
-        }
-    }
+    clear_running_slots(p);
 
     long n = kli_proclist(p->procs, PROCLIST_MAX);
     if (n <= 0) {
@@ -380,8 +383,11 @@ int main(int argc, char **argv) {
         return 1;
     }
     panel_state_t *p = (panel_state_t *)(uintptr_t)state_addr;
-    memset(p, 0, sizeof(*p));
+    p->wid = 0;
+    p->panel_pid = 0;
     p->hover = -1;
+    p->yield_counter = 0;
+    clear_running_slots(p);
 
     kli_write_cstr(1, "panel: starting\n");
     init_button_labels(p);
@@ -449,17 +455,13 @@ int main(int argc, char **argv) {
     for (;;) {
         long n = gui_window_event(p->wid, p->events, EVENT_CAP);
         if (n > 0) {
-            int dirty = 0;
             for (long i = 0; i < n; i++) {
                 if (p->events[i].type == GUI_EVENT_MOUSE_CLICK) {
                     on_click(p, p->events[i].data1, p->events[i].data2);
-                    dirty = 1;
                 } else if (p->events[i].type == GUI_EVENT_MOUSE_MOVE) {
                     on_move(p, p->events[i].data1, p->events[i].data2);
-                    dirty = 1;
                 }
             }
-            (void)dirty;
         }
 
         p->yield_counter++;

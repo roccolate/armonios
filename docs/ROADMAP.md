@@ -8,7 +8,7 @@ per-rect compositor path. The host test suite covers the window ABI, IPC,
 process isolation, partial redraw, USB HID parsing, FAT32 integration, DHCP
 options, and the syscall number table; `make`, `make size`, and
 `make -C tests test` are the baseline checks. Latest verified size:
-`kernel.bin: 89032 bytes (limit: 100000)`. This is the current v0.9
+`kernel.bin: 88040 bytes (limit: 100000)`. This is the current v0.9
 baseline.
 
 This file is intentionally short. It separates current verification from

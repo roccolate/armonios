@@ -96,12 +96,7 @@ typedef struct {
 } shell_state_t;
 
 static void log_push(shell_state_t *s, const char *line) {
-    size_t n = 0;
-    while (n + 1 < LINE_CAP && line[n] != '\0') {
-        s->log[s->log_head][n] = line[n];
-        n++;
-    }
-    s->log[s->log_head][n] = '\0';
+    (void)strlcpy(s->log[s->log_head], line, LINE_CAP);
     s->log_head = (s->log_head + 1) % LOG_DEPTH;
     if (s->log_count < LOG_DEPTH) {
         s->log_count++;
@@ -109,8 +104,9 @@ static void log_push(shell_state_t *s, const char *line) {
 }
 
 // Read the log entry `lines_back` lines before the head (0 = newest).
-// Always writes into a NUL-terminated LINE_CAP buffer.
-static void log_read(const shell_state_t *s, int lines_back, char *out) {
+// Always writes a NUL-terminated line into the caller-provided buffer.
+static void log_read(const shell_state_t *s, int lines_back,
+                     char *out, size_t out_size) {
     if (lines_back < 0) {
         lines_back = 0;
     }
@@ -119,12 +115,7 @@ static void log_read(const shell_state_t *s, int lines_back, char *out) {
         return;
     }
     int idx = (s->log_head - 1 - lines_back + LOG_DEPTH) % LOG_DEPTH;
-    size_t i = 0;
-    while (i + 1 < LINE_CAP && s->log[idx][i] != '\0') {
-        out[i] = s->log[idx][i];
-        i++;
-    }
-    out[i] = '\0';
+    (void)strlcpy(out, s->log[idx], out_size);
 }
 
 static void history_push(shell_state_t *s) {
@@ -132,35 +123,21 @@ static void history_push(shell_state_t *s) {
         return;
     }
     if (s->history_count < HISTORY_DEPTH) {
-        for (size_t i = 0; i < s->line_len; i++) {
-            s->history[s->history_count][i] = s->line[i];
-        }
-        s->history[s->history_count][s->line_len] = '\0';
+        (void)strlcpy(s->history[s->history_count], s->line, LINE_CAP);
         s->history_count++;
     } else {
-        for (int i = 0; i < HISTORY_DEPTH - 1; i++) {
-            for (size_t j = 0; j < LINE_CAP; j++) {
-                s->history[i][j] = s->history[i + 1][j];
-            }
-        }
-        for (size_t i = 0; i < s->line_len; i++) {
-            s->history[HISTORY_DEPTH - 1][i] = s->line[i];
-        }
-        s->history[HISTORY_DEPTH - 1][s->line_len] = '\0';
+        memmove(s->history[0], s->history[1],
+                (HISTORY_DEPTH - 1) * LINE_CAP);
+        (void)strlcpy(s->history[HISTORY_DEPTH - 1], s->line, LINE_CAP);
     }
     s->history_cursor = s->history_count;
 }
 
 static void history_load(shell_state_t *s, int idx) {
-    for (size_t i = 0; i < LINE_CAP; i++) {
-        s->line[i] = '\0';
+    size_t n = strlcpy(s->line, s->history[idx], LINE_CAP);
+    if (n >= LINE_CAP) {
+        n = LINE_CAP - 1;
     }
-    size_t n = 0;
-    while (s->history[idx][n] != '\0' && n + 1 < LINE_CAP) {
-        s->line[n] = s->history[idx][n];
-        n++;
-    }
-    s->line[n] = '\0';
     s->line_len = n;
 }
 
@@ -170,9 +147,7 @@ static void history_load(shell_state_t *s, int idx) {
 // backwards from the head.
 static void render_log_view(shell_state_t *s, char (*out_lines)[DISPLAY_COLS]) {
     for (int i = 0; i < DISPLAY_LINES; i++) {
-        for (int j = 0; j < DISPLAY_COLS; j++) {
-            out_lines[i][j] = '\0';
-        }
+        out_lines[i][0] = '\0';
     }
     for (int row = 0; row < DISPLAY_LINES; row++) {
         /* The bottom-most visible row in the rendered list corresponds
@@ -182,11 +157,7 @@ static void render_log_view(shell_state_t *s, char (*out_lines)[DISPLAY_COLS]) {
         if (lines_back >= s->log_count) {
             continue;
         }
-        char tmp[LINE_CAP];
-        log_read(s, lines_back, tmp);
-        for (int j = 0; j < DISPLAY_COLS - 1 && tmp[j] != '\0'; j++) {
-            out_lines[row][j] = tmp[j];
-        }
+        log_read(s, lines_back, out_lines[row], DISPLAY_COLS);
     }
 }
 
@@ -317,13 +288,7 @@ static void dispatch(shell_state_t *s, const char *line) {
         }
         shell_emit(s, "PROCESSES");
         for (long i = 0; i < n && i < PROC_CAP; i++) {
-            char name_buf[17];
-            for (int j = 0; j < 16; j++) {
-                char c = s->procs[i].name[j];
-                name_buf[j] = (c == '\0') ? '\0' : c;
-            }
-            name_buf[16] = '\0';
-            shell_emit(s, name_buf);
+            shell_emit(s, s->procs[i].name);
         }
     } else if (strcmp(line, "ticks") == 0) {
         if (kli_timeinfo(s->info) < 0) {
@@ -377,9 +342,7 @@ static void handle_key(shell_state_t *s, int key) {
             history_load(s, s->history_cursor);
         } else if (s->history_cursor + 1 == s->history_count) {
             s->history_cursor = s->history_count;
-            for (size_t i = 0; i < LINE_CAP; i++) {
-                s->line[i] = '\0';
-            }
+            s->line[0] = '\0';
             s->line_len = 0;
         }
         return;
@@ -415,15 +378,11 @@ static void handle_key(shell_state_t *s, int key) {
     if (key == 13 || key == 10) {
         s->line[s->line_len] = '\0';
         char submitted[LINE_CAP];
-        for (size_t i = 0; i <= s->line_len; i++) {
-            submitted[i] = s->line[i];
-        }
+        (void)strlcpy(submitted, s->line, sizeof(submitted));
         history_push(s);
         shell_emit(s, submitted);
         dispatch(s, submitted);
-        for (size_t i = 0; i < s->line_len; i++) {
-            s->line[i] = '\0';
-        }
+        s->line[0] = '\0';
         s->line_len = 0;
         s->scroll_offset = 0;
         return;
