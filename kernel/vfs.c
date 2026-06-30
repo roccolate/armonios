@@ -3,7 +3,11 @@
 #include <stdint.h>
 
 #include "kernel/fat32.h"
+<<<<<<< HEAD
 #include "kernel/process.h"
+=======
+#include "kernel/kstring.h"
+>>>>>>> 6022217 (refactor: consolidate duplicate strcmp into shared kstreq())
 
 /*
  * Small in-kernel virtual filesystem.
@@ -201,22 +205,6 @@ static vfs_open_file_t *vfs_fd_at(int fd) {
     return 0;
 }
 
-static int vfs_path_equals(const char *left, const char *right) {
-    if (left == 0 || right == 0) {
-        return 0;
-    }
-
-    while (*left != '\0' && *right != '\0') {
-        if (*left != *right) {
-            return 0;
-        }
-        left++;
-        right++;
-    }
-
-    return *left == *right;
-}
-
 static int vfs_path_is_mountable(const char *path) {
     uint32_t i = 0;
 
@@ -396,7 +384,7 @@ int vfs_mount_static(const vfs_node_t *nodes, uint32_t count) {
         }
 
         for (uint32_t j = 0; j < i; j++) {
-            if (vfs_path_equals(nodes[j].path, node->path)) {
+            if (kstreq(nodes[j].path, node->path)) {
                 return -1;
             }
         }
@@ -448,7 +436,7 @@ int vfs_mount_list(const char *path, vfs_list_fn_t list, void *context) {
 
     for (uint32_t i = 0; i < VFS_MAX_LIST_MOUNTS; i++) {
         if (g_list_mounts[i].used != 0 &&
-            vfs_path_equals(g_list_mounts[i].path, path)) {
+            kstreq(g_list_mounts[i].path, path)) {
             return -1;
         }
     }
@@ -474,7 +462,7 @@ const vfs_node_t *vfs_find(const char *path) {
     }
 
     for (uint32_t i = 0; i < g_vfs_node_count; i++) {
-        if (vfs_path_equals(g_vfs_nodes[i].path, path)) {
+        if (kstreq(g_vfs_nodes[i].path, path)) {
             return &g_vfs_nodes[i];
         }
     }
@@ -574,13 +562,13 @@ int vfs_list(const char *path, uint8_t *buffer, uint64_t capacity,
 
     for (uint32_t i = 0; i < VFS_MAX_LIST_MOUNTS; i++) {
         if (g_list_mounts[i].used != 0 &&
-            vfs_path_equals(g_list_mounts[i].path, path)) {
+            kstreq(g_list_mounts[i].path, path)) {
             return g_list_mounts[i].list(g_list_mounts[i].context, buffer,
                                          capacity, bytes_written);
         }
     }
 
-    if (!vfs_path_equals(path, "/")) {
+    if (!kstreq(path, "/")) {
         return -1;
     }
 
