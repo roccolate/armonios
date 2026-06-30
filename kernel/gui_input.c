@@ -41,6 +41,9 @@ int gui_hit_test(gui_desktop_t *desktop, int32_t x, int32_t y) {
 
     for (uint32_t i = 0; i < GUI_MAX_WINDOWS; i++) {
         gui_window_t *window = &desktop->windows[i];
+        if (window->minimized) {
+            continue;
+        }
         if (gui_window_contains(window, x, y)) {
             if (best == (int)GUI_NO_WINDOW || window->z >= best_z) {
                 best = (int)i;
