@@ -160,7 +160,7 @@ Current limitations:
 | 78 | `sys_window_for_pid` | `x0=owner_pid, x1=index` | window id / `ERR_NOENT` | Return the index-th window owned by the given pid, or `ERR_NOENT` when none |
 | 79 | `sys_cursor_set_shape` | `x0=shape` | 0 / error | Request the global cursor shape (`0=arrow`, `1=hand`) |
 | 80 | `sys_window_flush` | `x0=window_id, x1=x, x2=y, x3=w, x4=h` | 0 / error | Push a content-local damage rect; the compositor partial-redraws only that region |
-| 81 | `sys_window_get_bounds` | `x0=window_id, x1=out_ptr` | 0 / error | Copy the window's `(x, y, w, h)` into the caller's 16-byte buffer as four `uint32_t` values; only the owner may read another process's window bounds |
+| 81 | `sys_window_get_bounds` | `x0=window_id, x1=out_ptr` | 0 / error | Owner-only: copy the window's `(x, y, w, h)` into the caller's 16-byte buffer as four `uint32_t` values |
 | 82 | `sys_window_set_bounds` | `x0=window_id, x1=x, x2=y, x3=w, x4=h` | 0 / error | Move and/or resize the window in one step; if `(w, h)` changes the kernel reallocates the per-window backing and pushes `GUI_EVENT_RESIZE` onto the owner's event queue |
 | 83 | `sys_window_minimize` | `x0=window_id` | 0 / error | Owner-only: hide the window through the same path the kernel-drawn minimize button uses; pushes `GUI_EVENT_MINIMIZE` onto the owner's queue |
 | 84 | `sys_window_restore` | `x0=window_id` | 0 / error | Presentation operation: clears the hidden flag, raises the window, and pushes `GUI_EVENT_MAXIMIZE`; callable by the panel for taskbar restore |
@@ -172,10 +172,11 @@ Current limitations:
   must be appended with new syscall numbers; existing numbers and argument
   registers must not be reused.
 - Window ownership is enforced with the current process pid for draw,
-  destroy, minimize, and set-title. `sys_window_focus`, `sys_window_restore`,
-  `sys_window_state`, and `sys_window_for_pid` are deliberately callable from
-  any pid so the desktop taskbar (a different pid from the apps it tracks) can
-  draw minimized state, restore minimized windows, and raise their windows.
+  destroy, get/set bounds, minimize, set-title, event reads, flush, and cursor
+  regions. `sys_window_focus`, `sys_window_restore`, `sys_window_state`, and
+  `sys_window_for_pid` are deliberately callable from any pid so the desktop
+  taskbar (a different pid from the apps it tracks) can draw minimized state,
+  restore minimized windows, and raise their windows.
 - `sys_window_event` writes packed `gui_event_t` triples:
   `uint32_t type, int32_t data1, int32_t data2`.
 - `sys_window_event` yields for a bounded number of scheduler turns and returns
@@ -214,6 +215,28 @@ Current limitations:
   draws land in the backing buffer; a `sys_window_flush` call is only
   needed for content the owner mutated through a kernel-bypassing path
   (e.g. by mapping the backing into another process).
+
+### System Info
+
+| # | Name | Args | Returns | Description |
+|---|------|------|---------|-------------|
+| 100 | `sys_timeinfo` | `x0=info_ptr` | 0 / error | Write three `uint64_t` values: timer ticks, scheduler ticks, scheduler quantums |
+| 101 | `sys_meminfo` | `x0=info_ptr` | 0 / error | Write two `uint64_t` values: total PMM pages, free PMM pages |
+| 102 | `sys_proclist` | `x0=entries_ptr, x1=max_entries` | entries written / error | Write a bounded array of process entries for monitor/shell tooling |
+
+Current limitations:
+- `sys_timeinfo` validates a writable user buffer of `3 * sizeof(uint64_t)` and
+  writes `timer_ticks()`, `sched_ticks()`, and `sched_quantums()` in that order.
+- `sys_meminfo` validates a writable user buffer of `2 * sizeof(uint64_t)` and
+  writes `pmm_total_count()` and `pmm_free_count()` in that order.
+- `sys_proclist` accepts `max_entries == 0` and returns 0 without touching the
+  buffer. Non-zero `max_entries` must be no larger than
+  `PROCESS_MAX_PROCESSES`.
+- Each `sys_proclist` entry is currently 24 bytes:
+  `uint32_t pid`, `uint32_t state`, and `char name[16]`. Process names are
+  copied from the kernel process slot and always null-terminated.
+- The stable userland wrappers for these calls live in `programs/libkarm` as
+  `kli_timeinfo`, `kli_meminfo`, and `kli_proclist`.
 
 ### Error Codes Implemented Today
 
@@ -259,8 +282,8 @@ contract below is enforced by the `kernel/gui_*` modules and pinned by
 - Every window carries one `owner_pid`. `gui_window_t.owner_pid ==
   GUI_NO_OWNER` (`0xffffffff`) marks a kernel-owned window and is the
   only owner value `sys_window_for_pid` skips.
-- `sys_window_create` and `sys_window_destroy` are owner-only: a process
-  cannot draw into or destroy a window it does not own.
+- `sys_window_create`, `sys_window_destroy`, draw, title, event, bounds,
+  minimize, flush, and cursor-region operations are owner-only.
 - `sys_window_focus`, `sys_window_restore`, `sys_window_state`, and
   `sys_window_for_pid` are intentionally callable from any pid. The panel
   taskbar uses them to draw state, restore, and raise a different pid's
@@ -277,167 +300,4 @@ contract below is enforced by the `kernel/gui_*` modules and pinned by
   pool indices stay stable; z-order changes never move window structs.
 - `GUI_WINDOW_NO_FOCUS` keeps the focus machinery from selecting the
   window. Dock/taskbar windows set this.
-- `GUI_WINDOW_NO_DRAG` and `GUI_WINDOW_SKIP_TASKBAR` are reserved
-  flags that the current kernel respects in their respective lookups.
-- A window whose owner has exited (`state == ZOMBIE` or `UNUSED`)
-  stays on the desktop. A title-bar close click on an ownerless
-  window destroys it; on a live owner it queues `GUI_EVENT_CLOSE`.
-- The compositor keeps a coalesced damage-rectangle list (cap 32 with a
-  "full" sentinel). Owner draws land in a per-window backing buffer,
-  so dragging or z-order changes carry the content with the window.
-
-### System Info
-
-| # | Name | Args | Returns | Description |
-|---|------|------|---------|-------------|
-| 100 | `sys_timeinfo` | `x0=info_ptr` | 0 / error | Fill timer/scheduler counters |
-| 101 | `sys_meminfo` | `x0=info_ptr` | 0 / error | Fill memory page counters |
-| 102 | `sys_proclist` | `x0=entries, x1=max_entries` | entry count / error | Fill a process snapshot |
-
-`sys_timeinfo` writes three `uint64_t` values:
-```
-info[0]  ARM generic timer IRQ ticks
-info[1]  scheduler timer ticks
-info[2]  completed scheduler quantums
-```
-
-`sys_meminfo` writes two `uint64_t` values:
-```
-info[0]  total physical pages tracked by PMM
-info[1]  free physical pages
-```
-
-`sys_proclist` writes up to `max_entries` fixed-size entries:
-```c
-typedef struct {
-    uint32_t pid;
-    uint32_t state;
-    char name[16];
-} syscall_proc_entry_t;
-```
-
-`max_entries` is currently capped at `PROCESS_MAX_PROCESSES`.
-
----
-
-## Reserved / Planned Syscalls
-
-The following numbers describe the intended ABI shape. They are not implemented
-yet unless also listed in "Implemented Now".
-
-### Planned Process
-
-| # | Name | Args | Returns | Description |
-|---|------|------|---------|-------------|
-| 5 | `sys_exec` | `x0=path_ptr, x1=argv_ptr` | — | Replace process image |
-| 9 | `sys_fork` | — | PID / 0 | Clone current process |
-
-### Planned Memory
-
-| # | Name | Args | Returns | Description |
-|---|------|------|---------|-------------|
-| 22 | `sys_mprotect` | `x0=vaddr, x1=size, x2=prot` | 0 / error | Change page protection |
-
-### Planned I/O and Files
-
-| # | Name | Args | Returns | Description |
-|---|------|------|---------|-------------|
-| 49 | `sys_mkdir` | `x0=path` | 0 / error | Create directory |
-
-Planned standard file descriptors:
-```
-0  stdin   keyboard or terminal input
-1  stdout  terminal/display, UART in debug mode
-2  stderr  terminal/display or UART debug channel
-```
-
-Planned additional `open` flags:
-```
-0x200 O_TRUNC
-0x400 O_APPEND
-```
-
-### Planned GUI / Window System Extensions
-
-The live GUI range is 70..86. Future GUI numbers should be appended after 86;
-do not move GUI calls into 60-69 because that range is already used for IPC.
-
-Planned but not implemented yet:
-
-| Name | Description |
-|------|-------------|
-| `sys_window_show` / `sys_window_hide` | Toggle visibility |
-| `sys_draw_line` | Draw a clipped line in a window |
-| `sys_draw_bitmap` | Blit a bitmap into a window |
-| `sys_draw_get_text_metrics` | Measure text before drawing |
-| `sys_event_poll` | Non-blocking event read with final event layout |
-| `sys_event_wait` | Blocking event read with final event layout |
-
-**Event structure:**
-```c
-typedef struct {
-    uint32_t type;      // EVENT_KEY, EVENT_MOUSE, EVENT_RESIZE, EVENT_CLOSE
-    uint32_t wid;       // target window
-    union {
-        struct { uint32_t keycode; uint32_t modifiers; } key;
-        struct { int32_t x, y; uint32_t buttons; } mouse;
-        struct { uint32_t w, h; } resize;
-    };
-} event_t;
-```
-
-### Planned IPC
-
-| # | Name | Args | Returns | Description |
-|---|------|------|---------|-------------|
-| 90 | `sys_msg_send` | `x0=pid, x1=buf, x2=len` | 0 / error | Send message to process |
-| 91 | `sys_msg_recv` | `x0=buf, x1=maxlen` | len / error | Receive next message |
-| 92 | `sys_shm_create` | `x0=size` | shmid | Create shared memory region |
-| 93 | `sys_shm_map` | `x0=shmid` | vaddr | Map shared region into this process |
-| 94 | `sys_shm_unmap` | `x0=shmid` | 0 / error | Unmap shared region |
-| 95 | `sys_shm_destroy` | `x0=shmid` | 0 / error | Destroy shared region |
-
-### Planned System Info Extensions
-
-The live system-info numbers are already `100 sys_timeinfo`,
-`101 sys_meminfo`, and `102 sys_proclist`. Future additions should avoid
-renumbering those calls.
-
-| Name | Description |
-|------|-------------|
-| `sys_uptime` | Return milliseconds since boot, if this remains distinct from `sys_timeinfo` |
-| `sys_cpuinfo` | Fill CPU identification and feature information |
-
----
-
-## Reserved Error Names
-
-The implemented error values are listed above. Future errors should be added
-only when a syscall returns them and the ABI tests pin the number. Candidate
-names that are not currently part of the ABI include `ERR_BUSY`,
-`ERR_OVERFLOW`, `ERR_TIMEOUT`, and `ERR_EXIST`.
-
----
-
-## Usage Example (C, userland)
-
-```c
-// Write "hello" to stdout using sys_write
-static inline long syscall(long n, long a0, long a1, long a2) {
-    register long x8 asm("x8") = n;
-    register long x0 asm("x0") = a0;
-    register long x1 asm("x1") = a1;
-    register long x2 asm("x2") = a2;
-    asm volatile("svc #0"
-        : "+r"(x0)
-        : "r"(x8), "r"(x1), "r"(x2)
-        : "memory");
-    return x0;
-}
-
-void _start(void) {
-    const char msg[] = "hello from userland\n";
-    syscall(43, 1, (long)msg, sizeof(msg) - 1);  // sys_write(stdout, msg, len)
-    syscall(1, 0, 0, 0);                           // sys_exit(0)
-}
-```
+- `GUI_WINDOW_NO_DRAG` and `GUI_WINDOW_SKIP_TASKBAR` are reserved.
