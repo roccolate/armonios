@@ -1,23 +1,30 @@
 # Memory Map
 
 This is the current fixed-address reference for ArmoniOS. C-owned user layout
-constants live in `kernel/layout.h`; kernel link addresses still live in
-the kernel linker scripts under `linker/`.
+constants live in `kernel/layout.h`; kernel link addresses live in the board
+linker scripts under `linker/`.
 
 ## QEMU virt Physical Layout
 
-The default QEMU target uses 128 MB of RAM. The kernel still runs from an
+The default QEMU target uses 128 MB of RAM. The kernel currently runs from an
 identity-mapped lower-half bootstrap layout.
 
 | Region | Current use |
 |--------|-------------|
 | `0x00040000` area | QEMU-provided DTB / firmware data, discovered at boot |
-| `0x40000000` | Kernel load/link base for QEMU `virt` |
-| kernel image range | `.text`, `.rodata`, `.data`, `.bss`, embedded app blobs |
+| `0x40080000` | Kernel load/link base for QEMU `virt` (`linker/linker.ld`) |
+| kernel image range | `.text`, embedded app blobs, `.rodata`, `.data`, `.bss`, and the bootstrap stack reservation |
 | PMM-managed pages | Kernel allocations, page tables, EL0 image/stack pages, mmap pages |
 
 The exact free range comes from the DTB memory map and PMM reservations during
 boot. Do not add new generic-kernel constants for board physical addresses.
+
+## Raspberry Pi 4 Planned Physical Layout
+
+The Raspberry Pi 4 linker script currently uses `0x80000` as the kernel
+load/link address (`linker/linker_rpi4.ld`). The roadmap does not claim a real
+Raspberry Pi boot yet; keep hardware-specific assumptions behind the board
+layer until bring-up proves them on serial output.
 
 ## QEMU virt MMIO
 
@@ -30,6 +37,7 @@ generic code through `drivers/board.h`.
 | `0x08010000` | GIC CPU interface |
 | `0x09000000` | PL011 UART0 |
 | `0x0a000000` and following strides | virtio-mmio transports |
+| board-owned PCIe ECAM/MMIO ranges | mapped by `drivers/boards/qemu_virt/board.c` for PCI/xHCI paths |
 
 ## Kernel Virtual Layout
 
