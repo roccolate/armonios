@@ -6,7 +6,8 @@ rules that are easy to forget while changing the compositor or userland wrappers
 ## Live Range
 
 The live GUI/window range is `70..86`. Do not reuse `60..69`; that range is
-used by IPC.
+used by IPC. System-info calls live at `100..102` and are documented separately
+in `SYSCALLS.md`.
 
 Implemented calls:
 
@@ -30,10 +31,14 @@ Implemented calls:
 
 ## Ownership
 
-- Draw, destroy, title, bounds, minimize/restore, state, flush, event, and cursor
-  region operations are owner-checked.
+- Owner-only operations: create/destroy ownership, draw, title, event reads,
+  get/set bounds, minimize, flush, and cursor-region registration.
 - `sys_window_focus` is intentionally cross-process so the panel can raise app
   windows.
+- `sys_window_restore` is intentionally cross-process so the panel can make a
+  minimized app window visible again from the taskbar.
+- `sys_window_state` is intentionally cross-process so the panel can read
+  minimized/focused presentation state for windows it does not own.
 - `sys_window_for_pid` is intentionally cross-process so the panel can enumerate
   app windows.
 - Ownerless windows use `GUI_NO_OWNER` and are skipped by
@@ -88,5 +93,7 @@ shape. Passing `GUI_CURSOR_REGION_DELETE` clears a slot.
 - Append new GUI syscalls; do not renumber existing calls.
 - Keep event struct size and event ids stable.
 - Keep owner-only checks centralized through syscall helpers.
+- Keep cross-process presentation calls explicit and documented; do not expand
+  cross-process access casually.
 - Update `SYSCALLS.md`, `kernel/syscall_numbers.h`,
   `programs/libkarmdesk/gui.h`, and ABI tests in the same change.
