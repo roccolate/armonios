@@ -251,6 +251,7 @@ armonios/
 ├── programs/           # Userland applications
 ├── docs/               # Focused project notes
 │   ├── ARCHITECTURE.md
+│   ├── CODEX_HANDOFF.md
 │   ├── CONTRIBUTING.md
 │   ├── CURRENT_STATE.md
 │   ├── ENGINE_MULTIMEDIA.md
