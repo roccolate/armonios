@@ -19,17 +19,20 @@ make size
 make -C tests test
 ```
 
-Additional targeted checks:
+Additional targeted checks used by the current QEMU desktop baseline:
 
 ```sh
 make stack-check
 make qemu-fs-test
 timeout 25s make qemu-fb
 timeout 25s make qemu-usb
+timeout 25s make qemu-net
 ```
 
-The current verified kernel size is tracked in `docs/CURRENT_STATE.md`; this
-closed review keeps only the baseline commands and closure history.
+The full release gate list and manual visible-desktop checklist live in
+`docs/ROADMAP.md`. The current verified kernel size is tracked in
+`docs/CURRENT_STATE.md`; this closed review keeps only the baseline commands and
+closure history.
 
 ## Closed Items
 
