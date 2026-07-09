@@ -82,19 +82,19 @@ static inline long gui_window_destroy(long window_id) {
 
 // SYS_WINDOW_DRAW_TEXT args: wid=x0, x=x1, y=x2, color=x3, str=x4.
 static inline long gui_window_draw_text(long window_id, long x, long y,
-                                       long color, const char *str) {
+                                        long color, const char *str) {
     return __syscall5(SYS_WINDOW_DRAW_TEXT, window_id, x, y, color,
                       (long)(uintptr_t)str);
 }
 
 // SYS_WINDOW_DRAW_RECT args: wid=x0, x=x1, y=x2, w=x3, h=x4, color=x5.
 static inline long gui_window_draw_rect(long window_id, long x, long y,
-                                       long w, long h, long color) {
+                                        long w, long h, long color) {
     return __syscall6(SYS_WINDOW_DRAW_RECT, window_id, x, y, w, h, color);
 }
 
 static inline long gui_window_event(long window_id, gui_event_t *buf,
-                                   size_t max_events) {
+                                    size_t max_events) {
     return __syscall3(SYS_WINDOW_EVENT, window_id,
                       (long)(uintptr_t)buf, (long)max_events);
 }
@@ -123,14 +123,14 @@ static inline long gui_cursor_set_shape(long shape) {
 
 // SYS_WINDOW_FLUSH args: wid=x0, x=x1, y=x2, w=x3, h=x4.
 static inline long gui_window_flush(long window_id, long x, long y,
-                                   long w, long h) {
+                                    long w, long h) {
     return __syscall5(SYS_WINDOW_FLUSH, window_id, x, y, w, h);
 }
 
-// gui_window_get_bounds reads the window's (x, y, w, h) into out_ptr
-// (4 x uint32_t = 16 bytes). out_ptr must point into a registered
-// user region. Only the owning process may read another process's
-// window bounds.
+// gui_window_get_bounds reads the caller-owned window's (x, y, w, h) into
+// out_ptr (4 x uint32_t = 16 bytes). out_ptr must point into a registered
+// user region. This is owner-only; use gui_window_state/focus/restore for
+// cross-process presentation queries.
 static inline long gui_window_get_bounds(long window_id, void *out_ptr) {
     return __syscall2(SYS_WINDOW_GET_BOUNDS, window_id,
                       (long)(uintptr_t)out_ptr);
