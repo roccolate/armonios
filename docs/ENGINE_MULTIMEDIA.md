@@ -3,9 +3,14 @@
 This document captures the accepted long-term direction for graphics, input,
 audio, resources, and interactive multimedia applications in ArmoniOS.
 
-Status: accepted as a post-v1.5 direction. It does not replace the current
-loader, filesystem, GUI, networking, or Raspberry Pi port milestones in
-`ROADMAP.md`.
+Status: future-facing design guidance for the minimal engine track and the
+later v2.0 engine/multimedia runtime. It does not replace the current loader,
+filesystem, GUI, networking, QEMU desktop stabilization, or Raspberry Pi port
+milestones in `ROADMAP.md`.
+
+Current rule: the first engine work must stay in userland unless a demo proves a
+missing kernel capability. Do not add new kernel graphics, audio, or input
+syscalls speculatively.
 
 ## Integration Rules
 
@@ -15,9 +20,9 @@ loader, filesystem, GUI, networking, or Raspberry Pi port milestones in
 - Do not put Lua or any other hosted runtime in the kernel. A script runtime can
   only be considered later as a userland/runtime library after VFS, loader,
   input, display, and audio are stable.
-- Keep assets out of C code once the VFS exists. During bootstrap, embedded test
-  assets are allowed, but production sprites, tilemaps, fonts, and audio should
-  be loaded through VFS/resource handles.
+- Keep assets out of C code once the VFS path is sufficient. During bootstrap,
+  embedded test assets are allowed, but production sprites, tilemaps, fonts, and
+  audio should be loaded through VFS/resource handles.
 - Do not allocate from the kernel heap inside a frame loop, input IRQ hot path,
   or audio callback. Subsystems initialize fixed pools up front and manage their
   own pool state.
@@ -25,6 +30,8 @@ loader, filesystem, GUI, networking, or Raspberry Pi port milestones in
   tests; NEON fast paths are added only after the behavior is covered.
 - Keep board-specific display, input, storage, and audio details in board/driver
   layers. Generic engine code must not depend on QEMU or Raspberry Pi constants.
+- Build on `programs/libkarm` and `programs/libkarmdesk`; do not create a second
+  SDK tree without a proved need.
 
 ## Frame Budget Target
 
@@ -43,9 +50,9 @@ numbers are planning budgets, not hard ABI guarantees:
 A simple profiler should land before serious engine optimization so each
 subsystem can report its per-frame cost.
 
-## Phase 8 - Userland C SDK Baseline
+## Current Userland SDK Baseline
 
-This prerequisite is complete enough for the multimedia plan:
+This prerequisite is complete enough for minimal userland experiments:
 
 - `programs/libkarm/` provides user entry, syscall trampolines, and small
   freestanding C helpers.
@@ -55,44 +62,79 @@ This prerequisite is complete enough for the multimedia plan:
 - The app linker script emits KLI1 flat images consumed by the current loader.
 - Kernel low-level entry code, exception vectors, context switching, EL0 entry,
   and `crt0.S` remain assembly.
+- Input from UART, virtio-input, and USB HID feeds the common input queue before
+  reaching the GUI/window event path.
+- VFS exposes bootfs, tmpfs, and the current FAT32 root-file workflow.
 
-Future engine APIs should build on `libkarm`/`libkarmdesk`; do not create a
-second SDK tree.
+Future engine APIs should reuse this baseline and remain small enough that app
+image sizes and `make stack-check` stay green.
 
-## Phase 9 - Display Backbone
+## Minimal Engine Track
 
-Build on the existing `drivers/fb` and `virtio-gpu` work instead of replacing
-it.
+Start this only after the desktop-core gates pass. The first implementation
+should be a small userland helper layer or a tiny demo app.
+
+Allowed first steps:
+
+- a compact app-loop helper over existing `libkarm` / `libkarmdesk` calls;
+- fixed timestep update/draw loop;
+- simple timing helper based on the existing system-info syscall surface;
+- owner-window drawing helpers that use current desktop ABI calls;
+- VFS asset-loading conventions for tiny binary assets;
+- a demo that proves what the current ABI can and cannot do.
+
+Avoid in this track:
+
+- new kernel graphics syscalls;
+- audio claims;
+- new input syscalls;
+- broad compositor rewrites;
+- scripting runtimes;
+- asset pipelines that require hosted OS features.
+
+Exit signal:
+
+- a demo runs as a normal EL0 app;
+- release gates remain green;
+- any missing kernel capability is described with a concrete demo failure, not a
+  speculative design preference.
+
+## Display Backbone
+
+Build on the existing `drivers/fb`, `virtio-gpu`, and kernel GUI work instead of
+replacing it.
 
 Initial scope:
-- Front/back framebuffer ownership and an explicit present path.
-- QEMU `virtio-gpu` present path first; Raspberry Pi display support stays
-  behind the board layer.
-- Timer-driven 16 ms present pacing in QEMU until a real vsync source exists.
-- Logical resolution support for small internal canvases scaled to the visible
-  framebuffer.
-- Clear cacheability rules for framebuffer memory before adding faster blits.
 
-Candidate API shape:
+- userland helper API over the current owner-window draw/event calls;
+- damage-aware redraw behavior through existing window syscalls;
+- QEMU `virtio-gpu` as the primary development path;
+- Raspberry Pi display support behind the board layer later;
+- logical resolution helpers for small internal canvases scaled into a window;
+- clear cacheability rules before adding faster blits or mapped buffers.
+
+Candidate API shape for a later helper library:
 
 ```c
-int fb_init(uint32_t width, uint32_t height);
-void fb_clear(uint32_t color);
-void fb_flip(void);
-uint32_t *fb_backbuffer(void);
+int karm_app_init(uint32_t width, uint32_t height, const char *title);
+void karm_clear(uint32_t color);
+void karm_present(void);
+uint32_t *karm_backbuffer(void);
 ```
 
-## Phase 10 - 2D Graphics Primitives
+Do not treat this candidate API as implemented until a demo lands.
 
-Add a small clipped 2D drawing layer over the framebuffer.
+## 2D Graphics Primitives
+
+Add a small clipped 2D drawing layer over the existing userland/window surface.
 
 Initial scope:
-- `gfx_rect`, `gfx_fill`, `gfx_line`, and basic circle support.
-- Clipped blits and color-key blits.
-- Built-in bitmap font for bootstrap GUI text; VFS-loaded fonts can replace it
-  once the resource manager exists.
-- ARGB8888 as the generic software color format.
-- Host tests for clipping and edge cases before any NEON path is added.
+
+- filled rectangles, lines, simple circles;
+- clipped blits and color-key blits;
+- bitmap font helpers only if they reduce app duplication;
+- ARGB8888 as the generic software color format;
+- host tests for clipping and edge cases before any NEON path is added.
 
 Candidate API shape:
 
@@ -105,16 +147,17 @@ void gfx_blit_key(const sprite_t *src, int dx, int dy, uint32_t key);
 void gfx_text(int x, int y, const char *str, uint32_t color);
 ```
 
-## Phase 11 - Input Layer
+## Input Layer
 
-Unify keyboard, mouse, and gamepad state behind a small event queue.
+The kernel already has UART, virtio-input, and USB HID paths feeding a common
+input queue. Engine work should not replace that path.
 
-Initial scope:
-- Keep UART console input as the bootstrap keyboard path.
-- Add an input event ring that can be filled by UART, virtio-input, or USB HID.
-- QEMU uses virtio-input before Raspberry Pi USB HID work.
-- Track current and previous button/key state so real-time apps can ask for
-  held and newly-pressed inputs.
+Initial app-facing scope:
+
+- translate current GUI/window events into held/pressed/released helper state;
+- keep current and previous button/key state for real-time apps;
+- add gamepad concepts only after a real driver path exists;
+- keep direct driver calls out of applications.
 
 Candidate API shape:
 
@@ -125,17 +168,19 @@ bool input_btn(uint8_t pad, uint8_t button);
 bool input_poll_event(input_event_t *event);
 ```
 
-## Phase 12 - Audio
+## Audio
 
-Add software-mixed PCM output only after timer, IRQ, storage, and resource
-loading are reliable enough to feed it.
+Audio is future work. Add software-mixed PCM output only after timer, IRQ,
+storage, and resource loading are reliable enough to feed it.
 
 Initial scope:
-- QEMU target: virtio-sound if the environment supports it.
-- Raspberry Pi target: I2S/HDMI through a board-specific driver.
-- PCM 16-bit signed stereo at 44.1 kHz for the first mixer.
-- Fixed-point channel mixing with clamp to signed 16-bit.
-- No allocation in the IRQ/audio callback.
+
+- QEMU target: virtio-sound only if the environment and documentation make it a
+  small, testable driver path;
+- Raspberry Pi target: board-specific I2S/HDMI path;
+- PCM 16-bit signed stereo at 44.1 kHz for the first mixer;
+- fixed-point channel mixing with clamp to signed 16-bit;
+- no allocation in the IRQ/audio callback.
 
 Candidate API shape:
 
@@ -147,16 +192,16 @@ void audio_set_volume(audio_handle_t handle, uint8_t volume);
 void audio_mix_callback(int16_t *out, uint32_t frames);
 ```
 
-## Phase 13 - VFS Resource Manager
+## VFS Resource Manager
 
-Layer asset loading on top of the Phase 4 VFS rather than inventing a separate
-storage path.
+Layer asset loading on top of VFS rather than inventing a separate storage path.
 
 Initial scope:
-- Load sprites, tilemaps, bitmap fonts, and audio buffers from VFS handles.
-- Cache resources with explicit size limits and deterministic eviction.
-- Keep loaded assets in non-pageable memory while they are active.
-- Use simple binary formats with magic values and fixed-width fields.
+
+- load sprites, tilemaps, bitmap fonts, and audio buffers from VFS handles;
+- cache resources with explicit size limits and deterministic eviction;
+- keep loaded assets in non-pageable memory while they are active;
+- use simple binary formats with magic values and fixed-width fields.
 
 Initial sprite format:
 
@@ -182,30 +227,32 @@ Initial tilemap format:
 | 12 | 4 | Sprite sheet ID |
 | 16 | N | `uint16_t` tile IDs, row-major |
 
-## Phase 14 - Compositor
+## Compositor Direction
 
 Build on the current kernel GUI split rather than replacing it.
 
-Initial scope:
-- Layer/window composition over the framebuffer backbuffer.
-- Dirty rectangle tracking for unchanged regions.
-- Cursor sprite and hotspot handling.
-- Scroll offsets for tilemap-like backgrounds where useful.
-- Input events routed to the focused window/process through the GUI event
-  path, not direct driver calls from applications.
+Initial scope after the minimal userland demo proves the need:
 
-## Phase 15 - Interactive Runtime
+- layer/window composition improvements over existing backing buffers;
+- dirty rectangle tracking for unchanged regions;
+- cursor sprite and hotspot handling;
+- scroll offsets for tilemap-like backgrounds where useful;
+- input events routed to the focused window/process through the GUI event path,
+  not direct driver calls from applications.
+
+## Interactive Runtime
 
 Build a small app loop and multimedia helpers on top of display, input, audio,
-VFS, and the compositor.
+VFS, and the compositor after the stable desktop base exists.
 
 Initial scope:
-- Fixed timestep app loop for demos and educational apps.
-- Collision primitives in C (`AABB`, point-rect, tile solidity checks).
-- Optional entity pool with fixed capacity.
-- Basic sequencer for structured music only after the sample mixer works.
-- Optional scripting after the C runtime is stable and after the memory/runtime
-  costs are measured.
+
+- fixed timestep app loop for demos and educational apps;
+- collision primitives in C (`AABB`, point-rect, tile solidity checks);
+- optional entity pool with fixed capacity;
+- basic sequencer for structured music only after the sample mixer works;
+- optional scripting after the C runtime is stable and after memory/runtime costs
+  are measured.
 
 Candidate app loop shape:
 
@@ -228,10 +275,10 @@ void app_run(const app_desc_t *desc);
 
 | Platform | Role |
 |----------|------|
-| QEMU `virt` | Primary development path |
+| QEMU `virt` | Primary development path and v1.0 release target |
 | Raspberry Pi 4/5 | First real hardware target from the current roadmap |
 | Raspberry Pi 3B/3B+ / Zero 2W | Later constrained-hardware validation |
 
 The proposal's Raspberry Pi 3/Zero targets are useful constraints, but the
-current roadmap already targets Raspberry Pi 4/5 first. Keep that order unless
-the board abstraction work shows a cheaper path to Pi 3-class hardware.
+current roadmap targets Raspberry Pi 4/5 first. Keep that order unless the board
+abstraction work shows a cheaper path to Pi 3-class hardware.
