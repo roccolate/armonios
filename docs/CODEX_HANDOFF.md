@@ -1,55 +1,85 @@
 # Codex Handoff
 
-This is the short operational guide for using Codex or another coding agent on
-ArmoniOS. It is intentionally stricter than the README so automated changes do
-not drift away from the current release plan.
+This document is the first file to read before using Codex or another coding agent on ArmoniOS.
 
-## Current Baseline
+ArmoniOS is an assembly-first, bare-metal AArch64 operating system inspired by KolibriOS/MenuetOS. It is not Linux, POSIX, or libc-based.
 
-- Current target: **v0.9 QEMU desktop baseline**.
-- Next target: **v1.0 stable, repeatable QEMU desktop release**.
-- Primary board: QEMU `virt` / AArch64 / Cortex-A72.
-- Planned hardware board: Raspberry Pi 4 / 5, but not before the v1.0 QEMU
-  desktop is stable.
-- Kernel size limit: `KERNEL_SIZE_LIMIT`, currently 100000 bytes.
-- Last documented size: see `docs/CURRENT_STATE.md` and `docs/ROADMAP.md`.
+## Current baseline
 
-## Read First
+The current baseline is **v0.9 QEMU desktop**.
 
-Before changing code, read these files in this order:
+The immediate goal is **v1.0 QEMU desktop release candidate**:
 
-1. `README.md` — public project overview and user-visible claims.
-2. `docs/CURRENT_STATE.md` — live system snapshot.
-3. `docs/ROADMAP.md` — current version targets and release gates.
-4. `docs/ARCHITECTURE.md` — subsystem architecture.
-5. `docs/SYSCALLS.md` — syscall ABI reference.
-6. `docs/GUI_ABI_NOTES.md` — GUI/window ABI invariants.
-7. `docs/PORTING.md` — board-layer rules.
-8. `docs/CONTRIBUTING.md` — coding and PR rules.
+- stable QEMU framebuffer desktop;
+- stable panel, shell, editor, files, monitor, and clock apps;
+- stable FAT32 root workflow through `files` and `editor`;
+- release gates passing repeatedly.
 
-Treat `docs/TECH_DEBT_REVIEW.md` as closed history, not an active backlog.
+## Current focus: FAT files/editor workflow
 
-## Hard Rules
+Issue #1 tracks the v1.0 FAT workflow.
 
-- Do not add POSIX, libc, hosted runtime, or broad compatibility-layer work.
-- Do not claim Raspberry Pi hardware support until a real board reaches a
-  documented serial/boot milestone.
-- Do not renumber syscalls.
-- Do not change GUI event struct size, event ids, or syscall argument order
-  without updating docs, wrappers, and ABI tests in the same commit.
-- Do not introduce large subsystems during v1.0 stabilization.
-- Do not start kernel-side engine/audio/multimedia work unless a userland demo
-  proves the missing capability.
-- Keep board-specific constants behind `drivers/boards/<board>/` and
-  `drivers/board.h`.
-- Keep app persistent state out of the fixed 4 KB EL0 stack; prefer anonymous
-  user mappings for larger state.
-- Keep kernel size under the configured limit.
+The code now invalidates dynamic `/fat/<name>` VFS nodes after successful rename/delete, and host coverage exists in `tests/test_vfs_fat32_invalidation.c`.
 
-## Required Release Gates
+Codex should next run the local gates and visible workflow:
 
-For kernel, driver, syscall, boot, ABI, Makefile, and userland changes that
-affect shipped app images, run:
+```sh
+make
+make size
+make -C tests test
+make stack-check
+make qemu-fs-test
+timeout 25s make qemu-fb
+timeout 25s make qemu-usb
+timeout 25s make qemu-net
+make qemu-fb-visible
+```
+
+Manual visible flow:
+
+1. Open `files` from the panel.
+2. List `/fat`.
+3. Create a new 8.3 file.
+4. Open it in `editor`.
+5. Type content.
+6. Save with Ctrl-S.
+7. Close editor.
+8. Return to `files`.
+9. Rename the file.
+10. Reopen the renamed file and confirm content remains.
+11. Delete the file.
+12. Refresh/list `/fat` and confirm the deleted name is gone.
+13. Confirm no user fault, scheduler stall, compositor blank frame, or stale editor path.
+
+Do not close issue #1 until gates and visible workflow are verified.
+
+## Read-first docs
+
+Read these before coding:
+
+1. `README.md`
+2. `docs/CURRENT_STATE.md`
+3. `docs/ROADMAP.md`
+4. `docs/SYSCALLS.md`
+5. `docs/GUI_ABI_NOTES.md`
+6. `docs/PORTING.md`
+7. `docs/MEMORY_MAP.md`
+8. `docs/TECH_DEBT_REVIEW.md`
+
+## Hard rules
+
+- Keep QEMU stable before Raspberry Pi work.
+- Do not claim real Raspberry Pi 4 boot until verified on hardware.
+- Do not add new syscalls unless a real userland need exists and docs/tests are updated.
+- Keep app and kernel stack usage within `make stack-check` limits.
+- Avoid broad rewrites.
+- Prefer small, testable changes.
+- Keep docs synchronized with behavior.
+- Be explicit about commands run and commands not run.
+
+## Current release gates
+
+Run these before claiming v1.0 readiness:
 
 ```sh
 make
@@ -62,57 +92,46 @@ timeout 25s make qemu-usb
 timeout 25s make qemu-net
 ```
 
-For visible desktop behavior, also run:
+Manual visual check:
 
 ```sh
 make qemu-fb-visible
 ```
 
-Manual visible-pass checklist lives in `docs/ROADMAP.md`.
+## ABI anchors
 
-## Documentation Sync Rules
+Current syscall ranges:
 
-Update documentation in the same change when any of these move:
+- Process: `1..8`
+- Memory: `20..21`
+- I/O and VFS: `40..48`
+- IPC: `60..61`
+- GUI/window: `70..86`
+- System info: `100..102`
 
-| Change | Docs/files to update |
-| --- | --- |
-| New syscall or ABI change | `kernel/syscall_numbers.h`, `docs/SYSCALLS.md`, wrappers, ABI tests |
-| GUI/window syscall or event change | `docs/SYSCALLS.md`, `docs/GUI_ABI_NOTES.md`, `programs/libkarmdesk/gui.h`, window ABI tests |
-| Board interface change | `drivers/board.h`, `docs/PORTING.md`, `docs/ARCHITECTURE.md` if architecture changes |
-| Build target or release gate change | `README.md`, `docs/ROADMAP.md`, `docs/CONTRIBUTING.md` |
-| Current app/user-visible desktop behavior | `README.md`, `docs/CURRENT_STATE.md`, `docs/ROADMAP.md` |
-| Memory/linker layout change | `docs/MEMORY_MAP.md`, relevant linker script note |
-| Engine/multimedia direction | `docs/ENGINE_MULTIMEDIA.md`, `docs/ROADMAP.md` |
+System info syscalls:
 
-## Current ABI Anchors
+- `SYS_TIMEINFO = 100`
+- `SYS_MEMINFO = 101`
+- `SYS_PROCLIST = 102`
 
-- Process syscalls: `1..8`.
-- Memory syscalls: `20..21`.
-- VFS/I/O syscalls: `40..48`.
-- IPC syscalls: `60..61`.
-- GUI/window syscalls: `70..86`.
-- System-info syscalls: `100..102`.
-- Userland process/memory/I/O/IPC/system-info wrappers live in
-  `programs/libkarm`.
-- Desktop/window wrappers live in `programs/libkarmdesk`.
+## Preferred work order
 
-## Preferred Work Order
+1. Reproduce or inspect the issue.
+2. Make the smallest correct change.
+3. Add or adjust host tests.
+4. Run relevant gates.
+5. Update docs if behavior changes.
+6. Report exactly what was run and what remains.
 
-1. Fix regressions found by gates.
-2. Keep v1.0 docs and tests synchronized.
-3. Finish desktop-core usability checks for panel/shell/editor/files.
-4. Only then start minimal userland engine helpers.
-5. Only after v1.0 stability, resume Raspberry Pi 4 bring-up.
+## Output expectation for future agents
 
-## Output Expectations For Coding Agents
+Every agent handoff should say:
 
-Every automated change should end with:
-
-- what files changed;
+- files changed;
 - why each change was necessary;
-- which commands were run;
-- which commands could not be run and why;
-- any remaining risk or follow-up.
+- commands run;
+- commands not run and why;
+- risks/follow-up.
 
-If no build/test commands were run, say so explicitly. Do not imply validation
-that did not happen.
+Never imply validation that did not happen.
