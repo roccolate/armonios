@@ -47,6 +47,14 @@ typedef struct {
 
 void vfs_reset(void);
 int vfs_mount_static(const vfs_node_t *nodes, uint32_t count);
+
+/*
+ * Remove a mounted static VFS node by path. Open descriptors pointing at that
+ * node are invalidated so later descriptor operations fail cleanly instead of
+ * touching stale filesystem state. List mounts are not affected.
+ */
+int vfs_unmount_static(const char *path);
+
 int vfs_mount_list(const char *path, vfs_list_fn_t list, void *context);
 const vfs_node_t *vfs_find(const char *path);
 const char *vfs_strip_prefix(const char *path, const char *prefix);
