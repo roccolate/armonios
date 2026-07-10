@@ -36,6 +36,64 @@ typedef struct {
 
 static vfs_open_file_t g_open_files[VFS_MAX_OPEN_FILES];
 
+static void vfs_clear_node(uint32_t index) {
+    if (index >= VFS_MAX_NODES) {
+        return;
+    }
+
+    g_vfs_nodes[index].path = 0;
+    g_vfs_nodes[index].size = 0;
+    g_vfs_nodes[index].read = 0;
+    g_vfs_nodes[index].write = 0;
+    g_vfs_nodes[index].stat = 0;
+    g_vfs_nodes[index].context = 0;
+    for (uint32_t j = 0; j < VFS_MAX_PATH; j++) {
+        g_vfs_paths[index][j] = '\0';
+    }
+}
+
+static uint32_t vfs_free_node_count(void) {
+    uint32_t free_count = 0;
+
+    for (uint32_t i = 0; i < VFS_MAX_NODES; i++) {
+        if (g_vfs_nodes[i].path == 0) {
+            free_count++;
+        }
+    }
+
+    return free_count;
+}
+
+static int vfs_find_free_node(uint32_t *index) {
+    if (index == 0) {
+        return -1;
+    }
+
+    for (uint32_t i = 0; i < VFS_MAX_NODES; i++) {
+        if (g_vfs_nodes[i].path == 0) {
+            *index = i;
+            return 0;
+        }
+    }
+
+    return -1;
+}
+
+static void vfs_drop_open_files_for_node(const vfs_node_t *node) {
+    if (node == 0) {
+        return;
+    }
+
+    for (uint32_t i = 0; i < VFS_MAX_OPEN_FILES; i++) {
+        if (g_open_files[i].used != 0 && g_open_files[i].node == node) {
+            g_open_files[i].node = 0;
+            g_open_files[i].offset = 0;
+            g_open_files[i].flags = VFS_O_RDONLY;
+            g_open_files[i].used = 0;
+        }
+    }
+}
+
 static vfs_open_file_t *vfs_fd_at(int fd) {
     if (fd < 0 || fd >= (int)VFS_MAX_OPEN_FILES ||
         g_open_files[fd].used == 0 || g_open_files[fd].node == 0) {
@@ -209,15 +267,7 @@ static const vfs_node_t *vfs_open_dynamic_fat32_node(const char *path,
 
 void vfs_reset(void) {
     for (uint32_t i = 0; i < VFS_MAX_NODES; i++) {
-        g_vfs_nodes[i].path = 0;
-        g_vfs_nodes[i].size = 0;
-        g_vfs_nodes[i].read = 0;
-        g_vfs_nodes[i].write = 0;
-        g_vfs_nodes[i].stat = 0;
-        g_vfs_nodes[i].context = 0;
-        for (uint32_t j = 0; j < VFS_MAX_PATH; j++) {
-            g_vfs_paths[i][j] = '\0';
-        }
+        vfs_clear_node(i);
     }
     for (uint32_t i = 0; i < VFS_MAX_OPEN_FILES; i++) {
         g_open_files[i].node = 0;
@@ -237,8 +287,7 @@ void vfs_reset(void) {
 }
 
 int vfs_mount_static(const vfs_node_t *nodes, uint32_t count) {
-    if (nodes == 0 || count == 0 ||
-        g_vfs_node_count + count > VFS_MAX_NODES) {
+    if (nodes == 0 || count == 0 || count > vfs_free_node_count()) {
         return -1;
     }
 
@@ -259,17 +308,42 @@ int vfs_mount_static(const vfs_node_t *nodes, uint32_t count) {
     }
 
     for (uint32_t i = 0; i < count; i++) {
-        (void)vfs_copy_path(g_vfs_paths[g_vfs_node_count], nodes[i].path);
-        g_vfs_nodes[g_vfs_node_count].path = g_vfs_paths[g_vfs_node_count];
-        g_vfs_nodes[g_vfs_node_count].size = nodes[i].size;
-        g_vfs_nodes[g_vfs_node_count].read = nodes[i].read;
-        g_vfs_nodes[g_vfs_node_count].write = nodes[i].write;
-        g_vfs_nodes[g_vfs_node_count].stat = nodes[i].stat;
-        g_vfs_nodes[g_vfs_node_count].context = nodes[i].context;
-        g_vfs_node_count++;
+        uint32_t index;
+
+        if (vfs_find_free_node(&index) != 0 ||
+            vfs_copy_path(g_vfs_paths[index], nodes[i].path) != 0) {
+            return -1;
+        }
+
+        g_vfs_nodes[index].path = g_vfs_paths[index];
+        g_vfs_nodes[index].size = nodes[i].size;
+        g_vfs_nodes[index].read = nodes[i].read;
+        g_vfs_nodes[index].write = nodes[i].write;
+        g_vfs_nodes[index].stat = nodes[i].stat;
+        g_vfs_nodes[index].context = nodes[i].context;
+        if (index >= g_vfs_node_count) {
+            g_vfs_node_count = index + 1U;
+        }
     }
 
     return 0;
+}
+
+int vfs_unmount_static(const char *path) {
+    if (path == 0 || path[0] == '\0') {
+        return -1;
+    }
+
+    for (uint32_t i = 0; i < g_vfs_node_count; i++) {
+        if (vfs_path_equals(g_vfs_nodes[i].path, path)) {
+            const vfs_node_t *node = &g_vfs_nodes[i];
+            vfs_drop_open_files_for_node(node);
+            vfs_clear_node(i);
+            return 0;
+        }
+    }
+
+    return -1;
 }
 
 int vfs_mount_list(const char *path, vfs_list_fn_t list, void *context) {
@@ -583,7 +657,12 @@ int vfs_unlink(const char *path) {
     if (fs == 0 || fs->mounted == 0) {
         return -1;
     }
-    return fat32_delete(fs, name);
+    if (fat32_delete(fs, name) != 0) {
+        return -1;
+    }
+
+    (void)vfs_unmount_static(path);
+    return 0;
 }
 
 int vfs_rename(const char *old_path, const char *new_path) {
@@ -599,5 +678,11 @@ int vfs_rename(const char *old_path, const char *new_path) {
     if (fs == 0 || fs->mounted == 0) {
         return -1;
     }
-    return fat32_rename(fs, old_name, new_name);
+    if (fat32_rename(fs, old_name, new_name) != 0) {
+        return -1;
+    }
+
+    (void)vfs_unmount_static(old_path);
+    (void)vfs_unmount_static(new_path);
+    return 0;
 }
