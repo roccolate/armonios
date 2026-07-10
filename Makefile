@@ -327,14 +327,16 @@ qemu-blk: qemu-check entry-check $(KERNEL_BIN) $(VIRTIO_BLK_IMG)
 
 qemu-fs-test: qemu-check entry-check $(KERNEL_BIN) $(VIRTIO_BLK_IMG)
 	$(Q)mkdir -p $(dir $(QEMU_FS_TEST_LOG))
-	$(LOG_QEMU)status=0; \
+	$(LOG_QEMU)rm -f $(QEMU_FS_TEST_LOG); \
+	    status=0; \
 	    timeout $(QEMU_FS_TEST_TIMEOUT) qemu-system-aarch64 \
-	        -machine virt -cpu cortex-a72 -m 128M -nographic \
+	        -machine virt -cpu cortex-a72 -m 128M \
+	        -display none -serial file:$(QEMU_FS_TEST_LOG) -monitor none \
 	        -global virtio-mmio.force-legacy=false \
 	        -kernel $(KERNEL_BIN) \
 	        -drive file=$(VIRTIO_BLK_IMG),if=none,format=raw,id=hd0 \
 	        -device virtio-blk-device,drive=hd0 \
-	        >$(QEMU_FS_TEST_LOG) 2>&1 || status=$$?; \
+	        >/dev/null 2>&1 || status=$$?; \
 	    if [ $$status -ne 0 ] && [ $$status -ne 124 ]; then \
 	        cat $(QEMU_FS_TEST_LOG); \
 	        exit $$status; \
