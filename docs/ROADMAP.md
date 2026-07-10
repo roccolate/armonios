@@ -1,52 +1,12 @@
 # Roadmap
 
-ArmoniOS is at the **v0.9 QEMU desktop baseline**. The kernel boots on QEMU
-`virt`, starts a graphical desktop, runs separate EL0 apps, and keeps the
-debug console available for headless work.
+This roadmap is intentionally conservative. ArmoniOS should become stable in QEMU before chasing hardware or multimedia scope.
 
-This roadmap is the live coordination plan. Completed debt history lives in
-`docs/TECH_DEBT_REVIEW.md`; detailed architecture notes live in
-`docs/CURRENT_STATE.md`.
+## Current milestone: v1.0 QEMU desktop release candidate
 
-Latest verified size: `kernel.bin: 92696 bytes (limit: 100000)`.
+Goal: turn the current v0.9 desktop baseline into a repeatable, documented QEMU desktop release.
 
----
-
-## Current Baseline
-
-What is already in place:
-
-- QEMU `virt` boot with AArch64 EL1 kernel and EL0 user processes.
-- Per-process page tables, user image/stack regions, and anonymous user mmap.
-- KLI1 flat app images exposed through `/armonios/<name>`.
-- Kernel GUI compositor with owned windows, focus, drag, title bars, close,
-  minimize/restore, cursor regions, backing buffers, and damage rectangles.
-- Desktop apps: `panel`, `shell`, `editor`, `files`, `monitor`, and `clock`.
-- VFS with bootfs, tmpfs, FAT32 integration, dynamic FAT32 root-file opens,
-  FAT32 `O_CREAT` for `/fat/<8.3-name>`, FAT32 rename/delete, and stale dynamic
-  `/fat/<name>` VFS-node invalidation after rename/delete.
-- virtio-gpu, virtio-input, virtio-blk, virtio-net/DHCP, and xHCI USB HID
-  paths for QEMU.
-- Host tests for memory, process isolation, scheduler behavior, syscalls,
-  window ABI, FAT32, DHCP options, USB/HID parsing, GUI, and app image layout.
-- Userland app stack usage measured by `make stack-check`; current maximum is
-  368 bytes.
-
-What v0.9 does not claim:
-
-- Real Raspberry Pi hardware boot.
-- USB hub support.
-- TCP/HTTP applications.
-- Automated screenshot diffing.
-- SMP.
-- Audio, multimedia, or game/runtime APIs.
-
----
-
-## Release Gates
-
-Use these for kernel, driver, syscall, boot, ABI, Makefile, and userland
-changes that affect shipped app images:
+### Required gates
 
 ```sh
 make
@@ -59,195 +19,103 @@ timeout 25s make qemu-usb
 timeout 25s make qemu-net
 ```
 
-Before a release tag, also run one visible desktop pass:
+Manual visible pass:
 
 ```sh
 make qemu-fb-visible
 ```
 
-Manual visible-pass checklist:
+### v1.0 desktop-core checklist
 
-- panel appears and shows launchers for shell, editor, files, monitor, and
-  clock;
-- each launcher starts the expected app when it is not running, and
-  focuses/restores the existing window when it is already running;
-- windows can be raised, dragged, closed, minimized, and restored;
-- editor accepts typing and basic navigation;
-- files lists `/fat`, creates FAT32 root files, opens the selected file in
-  editor, renames files, and deletes files after confirmation;
-- shell commands `help`, `ls`, `ps`, `ticks`, `mem`, `run editor`,
-  `run files`, `run monitor`, `run clock`, `ls /fat`, `kill last`, and `exit`
-  behave as expected;
-- no unexpected user fault, scheduler stall, or compositor blank frame.
+- [x] QEMU framebuffer desktop boots.
+- [x] Panel starts and launches apps.
+- [x] Shell/editor/files/monitor/clock are registered as bootfs apps.
+- [x] FAT32 root create/read/write/rename/delete/list exists.
+- [x] Dynamic `/fat/<name>` VFS nodes are invalidated after successful rename/delete.
+- [x] Host coverage exists for VFS static unmount and FAT32 dynamic node invalidation.
+- [ ] Full release gates pass after the FAT invalidation change.
+- [ ] Visible `files` -> `editor` -> FAT32 workflow is manually confirmed in QEMU.
+- [ ] `README.md`, `CURRENT_STATE.md`, `SYSCALLS.md`, and this roadmap match the verified behavior.
 
----
+### Manual FAT workflow to confirm before v1.0
 
-## v1.0: Stable QEMU Desktop
+In `make qemu-fb-visible`:
 
-Goal: make the current QEMU desktop boringly repeatable. v1.0 is not the
-Raspberry Pi release; it is the stable QEMU release.
+1. Open `files` from the panel.
+2. List `/fat`.
+3. Create a new 8.3 file.
+4. Open it in `editor`.
+5. Type content.
+6. Save with Ctrl-S.
+7. Close editor.
+8. Return to `files`.
+9. Rename the file.
+10. Reopen the renamed file and confirm content remains.
+11. Delete the file.
+12. Refresh/list `/fat` and confirm the deleted name is gone.
+13. Confirm no user fault, scheduler stall, compositor blank frame, or stale editor path.
 
-Allowed work:
+## v1.1 desktop app polish
 
-- Fix regressions found by the release gates.
-- Tighten logging where a runtime failure is ambiguous.
-- Keep docs, syscall tables, and app image-size tests in sync.
-- Touch `kernel/gui_*`, `drivers/usb/xhci.c`, or networking only when a gate
-  exposes a concrete issue.
+Start only after v1.0 is verified or the remaining v1.0 items are explicitly marked non-blocking.
 
-Avoid for v1.0:
+Scope should remain mostly userland:
 
-- new large subsystems;
-- new syscalls unless a release blocker cannot be solved without one;
-- broad GUI rewrites;
-- speculative USB or network refactors;
-- Raspberry Pi hardware work.
+- `programs/apps/panel.c`
+- `programs/apps/shell.c`
+- `programs/apps/editor.c`
+- `programs/apps/files.c`
+- `programs/apps/monitor.c`
+- `programs/apps/clock.c`
+- `programs/libkarm/`
+- `programs/libkarmdesk/`
 
-Exit criteria:
+Rules:
 
-- every release gate passes from a clean tree;
-- one `make qemu-fb-visible` pass is manually checked;
-- README, `docs/CURRENT_STATE.md`, `docs/SYSCALLS.md`, and this roadmap match
-  the shipped behavior;
-- the kernel remains under `KERNEL_SIZE_LIMIT`;
-- optional: tag `v1.0` only after the user explicitly asks for the tag.
+- no broad kernel rewrite;
+- no new syscall unless a userland need is proven and documented;
+- keep app stack usage within the current stack-check limit;
+- prefer small helpers in `libkarm` / `libkarmdesk` only when they reduce duplication or app image size;
+- keep every UI behavior testable in `make qemu-fb-visible`.
 
----
+Candidate polish tasks:
 
-## Desktop-Core Usability Track
+- clearer focused/minimized state in panel taskbar slots;
+- grouped shell help output;
+- better shell error messages;
+- clearer editor modified/saved/open-failed status;
+- clearer files create/rename/delete feedback;
+- select newly created/renamed file after refresh;
+- keep monitor and clock useful as small system-info demos.
 
-Goal: make the shipped desktop apps useful without destabilizing the kernel.
-Do not choose the final version label for this track until the behavior passes
-the gates below; it can land as v1.0, v1.1, or another milestone depending on
-release timing.
+## v1.5 Raspberry Pi 4 bring-up
 
-Current scope:
+Only after QEMU v1.0 is stable.
 
-- Shell remains a GUI user shell, not a Menuet/Kolibri-level terminal.
-- Editor remains a compact text editor with a 512-byte buffer and one-line
-  rendering until manual use proves that blocks the core flow.
-- Panel keeps fixed launchers for the shipped apps, does not allow nested panel
-  launches, and focuses/restores an already running app instead of spawning a
-  duplicate from the launcher row.
-- `files` is a core shipped app for FAT32 root-file management.
-- `SYS_OPEN` carries the small filesystem ABI expansion: access mode bits plus
-  `O_CREAT = 0x40`. No new syscall number is used.
+Goals:
 
-Implemented first pass:
+- keep board code behind `drivers/board.h`;
+- preserve QEMU as the primary regression target;
+- bring up serial first;
+- bring up framebuffer only after basic boot is stable;
+- do not claim Raspberry Pi 4 support until real hardware boot is confirmed.
 
-- Shell command text is clearer for `run`, `kill last`, `ls`, `mem`, `ps`, and
-  `ticks`; `pwd`, `cd`, cwd-relative `ls`, and `cat` are implemented with the
-  same fixed-buffer parser.
-- Editor shows the active path and save/open status in the window, and uses
-  `O_RDWR | O_CREAT` for editable `/fat/<name>` paths.
-- Panel launcher row is `shell`, `editor`, `files`, `monitor`, `clock`, with
-  duplicate launcher clicks treated as focus/restore.
-- `files` lists `/fat`, supports Up/Down selection, Enter-to-open in editor,
-  create-name mode, rename mode, delete confirmation, and Ctrl-Q/close exit.
-- FAT32 root names stay 8.3-only for now and are rejected in userland before
-  hitting the kernel.
-- FAT32 rename/delete through VFS invalidates any matching dynamic
-  `/fat/<name>` VFS node so stale old paths are not reused after directory
-  changes.
+## v2.0 engine / multimedia runtime
 
-Still required before calling the track done:
+Only after the desktop core is stable.
 
-- Run the full release gates from this file.
-- Run a visible desktop pass that creates, edits, saves, renames, deletes, and
-  lists a FAT file.
-- Verify dynamic FAT VFS-node invalidation under the visible workflow and keep
-  the behavior covered by host/QEMU checks where practical.
-- Keep app image-size tests and `make stack-check` green.
+Start in userland first:
 
-Shared userland rules:
+- fixed-step game loop helper;
+- sprite/tile helpers using existing framebuffer/window primitives;
+- input helpers over existing keyboard/mouse events;
+- tiny demo app;
+- no audio/kernel multimedia ABI until a concrete userland need is proven.
 
-- Keep all app syscall calls behind `libkarm` / `libkarmdesk` wrappers.
-- Keep app persistent state out of the fixed 4 KB stack.
-- Add small app-level helpers only when they reduce image size or clarify ABI
-  usage.
-- Reuse `programs/libkarm` only when linker garbage collection keeps the
-  resulting app image small.
+Not in scope until proven:
 
-Exit criteria:
-
-- `make stack-check` remains comfortably under the limit;
-- app image sizes are pinned by tests;
-- visible QEMU desktop pass covers every shipped app;
-- shell/editor/panel behavior is documented in README or `docs/CURRENT_STATE.md`
-  if it changes visible user workflows;
-- no kernel API churn unless the userland need is proven.
-
-## Minimal Engine Track
-
-Start only after the desktop-core gates pass. The first engine work stays in
-userland:
-
-- a tiny helper layer over the existing `libkarmdesk` draw/event calls, or a
-  small demo app if that proves the API shape more clearly;
-- no new kernel graphics, audio, or input syscalls until a demo proves the
-  missing capability;
-- no audio or multimedia runtime claims until the QEMU desktop remains stable
-  with the core apps.
-
----
-
-## v1.5: Raspberry Pi 4 Bring-Up
-
-Goal: boot on real Raspberry Pi 4 hardware with a useful serial/debug path.
-
-Candidate work:
-
-- Confirm linker/load address, boot handoff, and early UART on hardware.
-- Bring up board memory map and MMIO ranges without QEMU assumptions leaking
-  into generic kernel code.
-- Wire PCIe host bridge enough for the VL805 xHCI controller to appear.
-- Reuse the existing USB HID stack once the controller is visible.
-- Document every board-specific difference in `docs/PORTING.md`.
-
-Exit criteria:
-
-- real hardware reaches a clear serial milestone;
-- hardware failures are distinguishable from QEMU-only assumptions;
-- QEMU v1.0 gates still pass.
-
----
-
-## v2.0: Engine And Multimedia Runtime
-
-Goal: build the foundation for graphical, audio, and interactive demos on top
-of the stable desktop.
-
-Candidate work after the minimal userland track proves its shape:
-
-- audio output path;
-- timer/input APIs suitable for interactive apps;
-- richer drawing primitives or a small userland graphics helper;
-- asset loading conventions;
-- sample demos that stress windowing, input, storage, and timing.
-
-This remains future work until the QEMU desktop is stable and the minimal
-engine track proves what the kernel is actually missing.
-
----
-
-## Version Targets
-
-| Version | Status | Focus | Exit Signal |
-| --- | --- | --- | --- |
-| v0.9 | current | QEMU desktop baseline | Current gates pass; tech-debt review closed |
-| v1.0 | next | Stable QEMU desktop release | All gates plus one visible desktop pass |
-| v1.1 | flexible | Desktop-core usability / app polish | Files, shell, editor, and panel pass visible desktop workflows |
-| v1.5 | planned | Raspberry Pi 4 hardware bring-up | Real hardware reaches documented serial/boot milestone |
-| v2.0 | future | Engine and multimedia runtime | Interactive demos on the stable desktop base |
-
----
-
-## Rules For New Work
-
-- Keep the syscall ABI pinned in `kernel/syscall_numbers.h`,
-  `docs/SYSCALLS.md`, wrappers, and tests in the same change.
-- Prefer host tests for pure C logic.
-- Use QEMU gates for behavior that host tests cannot cover.
-- Keep board-specific code behind the board layer.
-- Keep the kernel small enough to understand and under the configured size
-  limit.
+- SMP;
+- full POSIX;
+- browser/network stack apps;
+- GPU acceleration;
+- complex package system.
