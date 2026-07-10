@@ -121,6 +121,19 @@ static int test_disk_write_sector(void *context, uint32_t lba,
     return 0;
 }
 
+static int test_bad_read_sector(void *context, uint32_t lba,
+                                uint8_t *buffer) {
+    (void)context;
+    (void)lba;
+    (void)buffer;
+    return -1;
+}
+
+static void test_clear_default_fat32(void) {
+    fat32_fs_t bad_fs;
+    (void)fat32_mount(&bad_fs, test_bad_read_sector, 0);
+}
+
 static void test_dir_name(uint8_t entry[32], const char name[11]) {
     for (uint32_t i = 0; i < 11U; i++) {
         entry[i] = (uint8_t)name[i];
@@ -256,6 +269,7 @@ static void test_vfs_fat32_rename_delete_invalidates_dynamic_nodes(void) {
 
     vfs_reset();
     fat32_vfs_reset();
+    test_clear_default_fat32();
 }
 
 __attribute__((constructor))
