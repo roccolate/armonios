@@ -23,7 +23,8 @@ What is already in place:
   minimize/restore, cursor regions, backing buffers, and damage rectangles.
 - Desktop apps: `panel`, `shell`, `editor`, `files`, `monitor`, and `clock`.
 - VFS with bootfs, tmpfs, FAT32 integration, dynamic FAT32 root-file opens,
-  FAT32 `O_CREAT` for `/fat/<8.3-name>`, and a QEMU FAT32 smoke test.
+  FAT32 `O_CREAT` for `/fat/<8.3-name>`, FAT32 rename/delete, and stale dynamic
+  `/fat/<name>` VFS-node invalidation after rename/delete.
 - virtio-gpu, virtio-input, virtio-blk, virtio-net/DHCP, and xHCI USB HID
   paths for QEMU.
 - Host tests for memory, process isolation, scheduler behavior, syscalls,
@@ -145,15 +146,17 @@ Implemented first pass:
   create-name mode, rename mode, delete confirmation, and Ctrl-Q/close exit.
 - FAT32 root names stay 8.3-only for now and are rejected in userland before
   hitting the kernel.
+- FAT32 rename/delete through VFS invalidates any matching dynamic
+  `/fat/<name>` VFS node so stale old paths are not reused after directory
+  changes.
 
 Still required before calling the track done:
 
 - Run the full release gates from this file.
 - Run a visible desktop pass that creates, edits, saves, renames, deletes, and
   lists a FAT file.
-- Decide whether stale dynamically mounted FAT VFS nodes after rename/delete
-  need cleanup before release, or whether `/fat` directory reads are enough for
-  the current workflow.
+- Verify dynamic FAT VFS-node invalidation under the visible workflow and keep
+  the behavior covered by host/QEMU checks where practical.
 - Keep app image-size tests and `make stack-check` green.
 
 Shared userland rules:
