@@ -81,6 +81,8 @@ Historical cleanup details live in `TECH_DEBT_REVIEW.md`.
   currently supported only for FAT32 root files under `/fat/<8.3-name>`.
 - Dynamic `/fat/<name>` opens mount FAT32 root files on demand instead of
   requiring every file to be pre-mounted during boot.
+- FAT32 rename/delete through VFS invalidates any matching dynamic `/fat/<name>`
+  VFS node so old paths are not reused after the directory entry changes.
 
 ## Syscalls And ABI
 
@@ -113,8 +115,9 @@ It does not yet claim:
 
 ## Next Engineering Focus
 
-- Next: run the desktop-core gates after the `files` / `O_CREAT` pass, then
-  decide whether this behavior is part of v1.0 or a later label.
+- Next: run the desktop-core gates after the `files` / `O_CREAT` / FAT dynamic
+  node invalidation pass, then decide whether this behavior is part of v1.0 or
+  a later label.
 - Later: minimal userland-only engine helpers after the desktop-core flow is
   stable; GUI size work if `kernel.bin` pressure returns; xHCI cleanup only
   with USB runtime checks.
