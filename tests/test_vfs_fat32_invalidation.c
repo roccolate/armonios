@@ -5,8 +5,14 @@
 
 #define TEST_FAT32_SECTORS 8U
 
-#define CHECK_TRUE(expr) do { if (!(expr)) { __builtin_trap(); } } while (0)
-#define CHECK_EQ(expected, actual) CHECK_TRUE((expected) == (actual))
+static void check_true(int ok) {
+    if (!ok) {
+        __builtin_trap();
+    }
+}
+
+#define CHECK_TRUE(expr) check_true((expr) != 0)
+#define CHECK_EQ(expected, actual) check_true((expected) == (actual))
 
 typedef struct {
     uint8_t data[8];
