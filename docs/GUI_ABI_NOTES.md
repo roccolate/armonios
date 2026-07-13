@@ -1,65 +1,98 @@
 # GUI ABI Notes
 
-`SYSCALLS.md` is the authoritative syscall reference. This file records the GUI
-rules that are easy to forget while changing the compositor or userland wrappers.
+`SYSCALLS.md` is the authoritative syscall reference. This file records GUI rules that are easy to break while changing the compositor or userland wrappers.
 
-## Live Range
+Current GUI risks:
 
-The live GUI/window range is `70..86`. Do not reuse `60..69`; that range is
-used by IPC. System-info calls live at `100..102` and are documented separately
-in `SYSCALLS.md`.
+- `RISK-001` — event/state/bounds output buffers are range-checked but not proven writable;
+- `RISK-004` — a newly spawned normal window is not guaranteed to receive focus.
 
-Implemented calls:
+## Live range
 
-- `70 sys_window_create`
-- `71 sys_window_destroy`
-- `72 sys_window_draw_text`
-- `73 sys_window_draw_rect`
-- `74 sys_window_event`
-- `75 sys_window_set_title`
-- `76 sys_window_redraw`
-- `77 sys_window_focus`
-- `78 sys_window_for_pid`
-- `79 sys_cursor_set_shape`
-- `80 sys_window_flush`
-- `81 sys_window_get_bounds`
-- `82 sys_window_set_bounds`
-- `83 sys_window_minimize`
-- `84 sys_window_restore`
-- `85 sys_window_state`
-- `86 sys_cursor_register_region`
+The implemented GUI/window range is `70..86`. IPC uses `60..61`; system information uses `100..102`.
+
+| # | Call |
+|---:|---|
+| 70 | `sys_window_create` |
+| 71 | `sys_window_destroy` |
+| 72 | `sys_window_draw_text` |
+| 73 | `sys_window_draw_rect` |
+| 74 | `sys_window_event` |
+| 75 | `sys_window_set_title` |
+| 76 | `sys_window_redraw` |
+| 77 | `sys_window_focus` |
+| 78 | `sys_window_for_pid` |
+| 79 | `sys_cursor_set_shape` |
+| 80 | `sys_window_flush` |
+| 81 | `sys_window_get_bounds` |
+| 82 | `sys_window_set_bounds` |
+| 83 | `sys_window_minimize` |
+| 84 | `sys_window_restore` |
+| 85 | `sys_window_state` |
+| 86 | `sys_cursor_register_region` |
+
+Append new calls. Never renumber or reuse existing entries.
 
 ## Ownership
 
-- Owner-only operations: create/destroy ownership, draw, title, event reads,
-  get/set bounds, minimize, flush, and cursor-region registration.
-- `sys_window_focus` is intentionally cross-process so the panel can raise app
-  windows.
-- `sys_window_restore` is intentionally cross-process so the panel can make a
-  minimized app window visible again from the taskbar.
-- `sys_window_state` is intentionally cross-process so the panel can read
-  minimized/focused presentation state for windows it does not own.
-- `sys_window_for_pid` is intentionally cross-process so the panel can enumerate
-  app windows.
-- Ownerless windows use `GUI_NO_OWNER` and are skipped by
-  `sys_window_for_pid`.
+Owner-only operations include:
 
-## Event Buffer
+- destroy;
+- draw text/rect;
+- set title;
+- read events;
+- get/set bounds;
+- minimize;
+- flush damage;
+- register cursor regions.
+
+Window creation assigns the caller as owner.
+
+Cross-process presentation operations are intentionally limited to:
+
+- `sys_window_focus` — panel can raise an app window;
+- `sys_window_restore` — panel can restore a minimized app;
+- `sys_window_state` — panel can read minimized/focused state;
+- `sys_window_for_pid` — panel can enumerate app windows.
+
+Ownerless windows use `GUI_NO_OWNER` and are skipped by process-window enumeration.
+
+Do not expand cross-process mutation casually. A new exception requires a documented desktop responsibility and ABI tests.
+
+## Focus policy
+
+Current behavior:
+
+- the first focusable window receives focus when no window is focused;
+- mouse clicks can focus and raise a window;
+- `sys_window_focus` can focus and raise a selected window;
+- creating a new normal window while another app is focused does not automatically transfer focus.
+
+The last rule caused the observed `files` to `editor` workflow defect: the editor appeared while keyboard input remained with `files`.
+
+Before closing `RISK-004`, define one stable policy:
+
+- normal newly created app windows receive focus automatically; or
+- every launcher/spawned app must explicitly request focus and tests enforce that convention.
+
+The chosen rule must cover `GUI_WINDOW_NO_FOCUS` docks and taskbars without allowing them to steal application focus.
+
+## Event buffer
 
 `sys_window_event` writes fixed 12-byte records:
 
 ```c
 typedef struct {
     uint32_t type;
-    int32_t data1;
-    int32_t data2;
+    int32_t  data1;
+    int32_t  data2;
 } gui_event_t;
 ```
 
-Event ids are part of the ABI:
+Event IDs are ABI:
 
-| Type | Name | data1 | data2 |
-|------|------|-------|-------|
+| Type | Name | `data1` | `data2` |
+|---:|---|---|---|
 | 1 | `GUI_EVENT_KEY_PRESS` | key value | 0 |
 | 2 | `GUI_EVENT_KEY_RELEASE` | key value | 0 |
 | 3 | `GUI_EVENT_MOUSE_CLICK` | absolute x | absolute y |
@@ -69,31 +102,51 @@ Event ids are part of the ABI:
 | 7 | `GUI_EVENT_MINIMIZE` | 0 | 0 |
 | 8 | `GUI_EVENT_MAXIMIZE` | 0 | 0 |
 
-`sys_window_event` is a bounded wait and returns `ERR_AGAIN` when no event is
-available.
+The call waits for a bounded number of scheduler turns and returns `ERR_AGAIN` when no event is available.
 
-## Drawing And Damage
+The destination is currently validated only as a registered process range. The helper does not yet prove write permission. The same limitation applies to bounds and state output buffers.
 
-- Owner drawing goes into a per-window backing buffer.
-- `sys_window_flush` pushes a content-local dirty rectangle.
-- The compositor tracks framebuffer damage rectangles with a cap and a full
-  redraw sentinel.
-- Owner drawing coordinates are content-local; title-bar height is applied by
-  the kernel.
+## Drawing and backing buffers
 
-## Cursor Regions
+- owner drawing lands in a per-window kernel backing buffer;
+- title-bar height is added by the kernel, so owner coordinates remain content-local;
+- `sys_window_flush` adds a content-local damage rectangle;
+- the compositor clips/merges damage and can collapse to a full-redraw sentinel;
+- backing storage is freed when the window is destroyed;
+- resize must allocate replacement storage successfully before discarding the old buffer.
 
-`sys_cursor_register_region` lets an owner register up to
-`GUI_MAX_CURSOR_REGIONS` content-local rectangles. Slots are walked in ascending
-order, and the first matching region wins over the default title-bar cursor
-shape. Passing `GUI_CURSOR_REGION_DELETE` clears a slot.
+## Window state
 
-## Compatibility Rules
+`sys_window_state` writes a 32-bit bitmap:
 
-- Append new GUI syscalls; do not renumber existing calls.
-- Keep event struct size and event ids stable.
-- Keep owner-only checks centralized through syscall helpers.
-- Keep cross-process presentation calls explicit and documented; do not expand
-  cross-process access casually.
-- Update `SYSCALLS.md`, `kernel/syscall_numbers.h`,
-  `programs/libkarmdesk/gui.h`, and ABI tests in the same change.
+```text
+bit 0  minimized
+bit 1  focused
+```
+
+Minimized windows are skipped by composition. Restore clears minimized state, raises the window, and emits `GUI_EVENT_MAXIMIZE`.
+
+## Cursor regions
+
+A window owner can configure up to `GUI_MAX_CURSOR_REGIONS` content-local rectangles.
+
+- slots are checked in ascending order;
+- first matching region wins;
+- title-bar cursor behavior remains kernel-owned;
+- `GUI_CURSOR_REGION_DELETE` clears a slot;
+- regions are removed when the window is destroyed.
+
+## Compatibility checklist
+
+A GUI ABI change must update:
+
+- `kernel/syscall_numbers.h`;
+- syscall dispatch and owner checks;
+- `kernel/gui*.h` public constants/structures;
+- `programs/libkarmdesk` wrappers;
+- shipping applications;
+- `tests/test_window_abi.c` and relevant GUI tests;
+- `SYSCALLS.md` and this file;
+- `CURRENT_STATE.md` if evidence or user-visible behavior changes.
+
+Do not describe a GUI workflow as verified without recording the exact visible steps, commit, environment, and tester.
