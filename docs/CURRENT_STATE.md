@@ -45,8 +45,8 @@ The latest local verification recorded by Roque in issue #1 confirms:
 | `timeout 25s make qemu-fb` | UNVERIFIED | No current deterministic pass record in the repository. |
 | `timeout 25s make qemu-usb` | UNVERIFIED | No current deterministic pass record in the repository. |
 | `timeout 25s make qemu-net` | UNVERIFIED | No current deterministic pass record in the repository. |
-| `make qemu-fb-visible` | PARTIAL MANUAL-VERIFIED | Desktop, panel, and `files` were observed, but the target had no FAT disk and the editor focus workflow exposed a defect. |
-| `make BOARD=rpi4` | UNVERIFIED / likely KNOWN-BROKEN | The board backend does not currently satisfy the full board interface used by generic kernel code. |
+| `make qemu-fb-visible` | MANUAL-VERIFIED | Scope is limited to observing desktop, panel, and `files`; the FAT and editor workflow did not pass. |
+| `make BOARD=rpi4` | KNOWN-BROKEN | Static inspection shows the board backend does not satisfy the full interface used by generic kernel code. |
 | Physical Raspberry Pi 4 boot | PLANNED | No hardware boot claim. |
 
 The commands above were not rerun as part of this documentation-only audit. Their scope and remaining gaps are preserved explicitly instead of being promoted to broader claims.
@@ -55,23 +55,23 @@ The commands above were not rerun as part of this documentation-only audit. Thei
 
 | Subsystem | Status | Current evidence | Important limitation |
 |---|---|---|---|
-| AArch64 QEMU boot | BUILD-VERIFIED, QEMU-VERIFIED through storage smoke path | Boot code, DTB parsing, UART markers, and `qemu-fs-test` | The full desktop/runtime matrix is not automated. |
-| EL0 processes | IMPLEMENTED, HOST-VERIFIED | Process table, saved trap frames, per-process page tables, spawn/wait/kill/exit tests | User-output pointer permissions are not enforced separately from range membership. |
-| EL0 scheduling | IMPLEMENTED, HOST-VERIFIED | Timer IRQ dispatch and process round-robin tests | Runtime stress/preemption coverage is limited. |
+| AArch64 QEMU boot | BUILD-VERIFIED; QEMU-VERIFIED | Boot code, DTB parsing, UART markers, and the storage smoke path | The full desktop/runtime matrix is not automated. |
+| EL0 processes | IMPLEMENTED; HOST-VERIFIED | Process table, saved trap frames, per-process page tables, spawn/wait/kill/exit tests | User-output pointer permissions are not enforced separately from range membership. |
+| EL0 scheduling | IMPLEMENTED; HOST-VERIFIED | Timer IRQ dispatch and process round-robin tests | Runtime stress/preemption coverage is limited. |
 | EL1 kernel threads | IMPLEMENTED | Cooperative scheduler code | Kernel threads are not timer-preempted. |
-| PMM/VMM/heap | IMPLEMENTED, HOST-VERIFIED | Allocation, mapping, rollback, cleanup, and heap tests | PMM manages at most 128 MiB; kernel RAM mappings are RWX identity mappings. |
-| Syscall ABI | IMPLEMENTED, HOST-VERIFIED | Frozen numbers and ABI tests | Pointer checks validate registered ranges, not read/write permissions. |
-| VFS | IMPLEMENTED, HOST-VERIFIED | bootfs/tmpfs/FAT dispatch and descriptor tests | Eight VFS file descriptors are global to the kernel, not process-owned. |
-| FAT32 | IMPLEMENTED, HOST-VERIFIED, QEMU-VERIFIED for mount path | Root 8.3 create/read/write/rename/delete/list and `qemu-fs-test` | No subdirectories, long names, general FAT compatibility, or completed visible workflow claim. |
-| GUI compositor | IMPLEMENTED, HOST-VERIFIED, PARTIAL MANUAL-VERIFIED | Windows, ownership, focus, drag, backing buffers, damage, events | The spawned editor does not receive initial focus in the observed files workflow. |
-| Desktop apps | IMPLEMENTED, BUILD-VERIFIED, PARTIAL MANUAL-VERIFIED | panel, shell, editor, files, monitor, clock | The complete files/editor/FAT workflow is not yet verified. |
-| virtio block | IMPLEMENTED, QEMU-VERIFIED | FAT storage smoke target | Not attached by the current visible desktop target. |
-| virtio GPU | IMPLEMENTED, PARTIAL MANUAL-VERIFIED | Visible desktop observation | No deterministic framebuffer completion test. |
-| virtio input | IMPLEMENTED, HOST-VERIFIED | Parser/driver tests | QEMU runtime result is not recorded as a deterministic gate. |
-| USB xHCI/HID | IMPLEMENTED, HOST-VERIFIED | PCI, USB, HID parsing tests | Basic directly attached boot devices only; no hub support claim. |
-| virtio network/DHCP | IMPLEMENTED, partial HOST-VERIFIED | DHCP option tests and minimal stack code | No sockets, TCP, HTTP, or deterministic QEMU success gate. |
-| KLI1 application images | IMPLEMENTED, HOST-VERIFIED for current shipping apps | Image layout and shipping blob tests | Mutable `.data`/`.bss` contract is undefined. |
-| Raspberry Pi 4 board layer | EXPERIMENTAL / KNOWN-BROKEN as a support claim | Initial board, linker, mailbox, and eMMC files exist | Not build-proven, not boot-proven, incomplete board contract, experimental eMMC code. |
+| PMM/VMM/heap | IMPLEMENTED; HOST-VERIFIED | Allocation, mapping, rollback, cleanup, and heap tests | PMM manages at most 128 MiB; kernel RAM mappings are RWX identity mappings. |
+| Syscall ABI | IMPLEMENTED; HOST-VERIFIED | Frozen numbers and ABI tests | Pointer checks validate registered ranges, not read/write permissions. |
+| VFS | IMPLEMENTED; HOST-VERIFIED | bootfs/tmpfs/FAT dispatch and descriptor tests | Eight VFS file descriptors are global to the kernel, not process-owned. |
+| FAT32 | IMPLEMENTED; HOST-VERIFIED; QEMU-VERIFIED | Root 8.3 create/read/write/rename/delete/list plus QEMU mount markers | No subdirectories, long names, general FAT compatibility, or completed visible workflow claim. |
+| GUI compositor | IMPLEMENTED; HOST-VERIFIED; MANUAL-VERIFIED | Windows, ownership, focus, drag, backing buffers, damage, events, and a limited visible observation | The spawned editor does not receive initial focus in the observed files workflow. |
+| Desktop apps | IMPLEMENTED; BUILD-VERIFIED; MANUAL-VERIFIED | Six apps build; panel and `files` were observed visibly | The complete files/editor/FAT workflow is not verified. |
+| virtio block | IMPLEMENTED; QEMU-VERIFIED | FAT storage smoke target | Not attached by the current visible desktop target. |
+| virtio GPU | IMPLEMENTED; MANUAL-VERIFIED | A visible desktop frame and windows were observed | No deterministic framebuffer completion test. |
+| virtio input | IMPLEMENTED; HOST-VERIFIED | Parser/driver tests | QEMU runtime result is not recorded as a deterministic gate. |
+| USB xHCI/HID | IMPLEMENTED; HOST-VERIFIED | PCI, USB, HID parsing tests | Basic directly attached boot devices only; no hub support claim. |
+| virtio network/DHCP | IMPLEMENTED; HOST-VERIFIED | DHCP option parser tests and minimal stack code | End-to-end QEMU DHCP remains `UNVERIFIED`; no sockets, TCP, or HTTP. |
+| KLI1 application images | IMPLEMENTED; HOST-VERIFIED | Image layout and shipping blob tests | Mutable `.data`/`.bss` contract is undefined. |
+| Raspberry Pi 4 board layer | IMPLEMENTED; KNOWN-BROKEN; UNVERIFIED | Initial board, linker, mailbox, and eMMC files exist | Board target is not build- or boot-verified; contract is incomplete and eMMC is experimental. |
 
 ## Confirmed implementation facts
 
