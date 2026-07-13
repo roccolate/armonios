@@ -10,6 +10,19 @@
 
 #include <stdint.h>
 
+#include "kernel/mm/pmm.h"
+#include "kernel/mm/vmm.h"
+
+/*
+ * AArch64 leaf-descriptor bits used by the VMM implementation. Keep these
+ * local to the syscall boundary: this code is checking the effective page
+ * permissions that EL0/EL1 will actually encounter, not duplicating VM policy.
+ */
+#define USER_PTE_VALID   (1ULL << 0)
+#define USER_PTE_PAGE    (1ULL << 1)
+#define USER_PTE_AP_USER (1ULL << 6)
+#define USER_PTE_AP_RO   (1ULL << 7)
+
 static int64_t owner_window_lookup(process_t *process, uint64_t window_id,
                                    int64_t missing_error,
                                    gui_desktop_t **out_desktop,
@@ -56,22 +69,107 @@ int64_t sys_owner_window_badf(process_t *process, uint64_t window_id,
 }
 
 static int64_t user_buf_range(const process_t *process, uint64_t ptr,
-                              uint64_t len) {
+                              uint64_t len, int require_write) {
+    uint64_t last;
+    uint64_t page;
+    uint64_t last_page;
+
     if (process == 0 || (ptr == 0 && len != 0)) {
         return ERR_INVAL;
     }
-    if (!process_user_range_contains(process, ptr, len)) {
+
+    /* Preserve the existing zero-length ABI: no memory is touched. */
+    if (len == 0) {
+        return 0;
+    }
+
+    if (!process_user_range_contains(process, ptr, len) ||
+        process->page_table == 0 || ptr > UINT64_MAX - (len - 1ULL)) {
         return ERR_INVAL;
     }
+
+    last = ptr + len - 1ULL;
+    page = ptr & ~(PAGE_SIZE - 1ULL);
+    last_page = last & ~(PAGE_SIZE - 1ULL);
+
+    for (;;) {
+        uint64_t entry = vmm_leaf_entry(process->page_table, page);
+
+        if ((entry & (USER_PTE_VALID | USER_PTE_PAGE)) !=
+                (USER_PTE_VALID | USER_PTE_PAGE) ||
+            (entry & USER_PTE_AP_USER) == 0) {
+            return ERR_INVAL;
+        }
+
+        /*
+         * AArch64 stage-1 mappings have no user write-only encoding. A valid
+         * EL0 leaf is therefore readable; output additionally requires AP_RO
+         * to be clear on every page in the requested range.
+         */
+        if (require_write != 0 && (entry & USER_PTE_AP_RO) != 0) {
+            return ERR_PERM;
+        }
+
+        if (page == last_page) {
+            break;
+        }
+        if (page > UINT64_MAX - PAGE_SIZE) {
+            return ERR_INVAL;
+        }
+        page += PAGE_SIZE;
+    }
+
     return 0;
 }
 
 int64_t sys_user_buf_in(const process_t *process, uint64_t ptr, uint64_t len) {
-    return user_buf_range(process, ptr, len);
+    return user_buf_range(process, ptr, len, 0);
 }
 
 int64_t sys_user_buf_out(const process_t *process, uint64_t ptr, uint64_t len) {
-    return user_buf_range(process, ptr, len);
+    return user_buf_range(process, ptr, len, 1);
+}
+
+int64_t sys_copy_from_user(const process_t *process, void *out, uint64_t ptr,
+                           uint64_t len) {
+    uint8_t *dst = (uint8_t *)out;
+    const uint8_t *src = (const uint8_t *)(uintptr_t)ptr;
+    int64_t status;
+
+    if (out == 0 && len != 0) {
+        return ERR_INVAL;
+    }
+
+    status = sys_user_buf_in(process, ptr, len);
+    if (status != 0) {
+        return status;
+    }
+
+    for (uint64_t i = 0; i < len; i++) {
+        dst[i] = src[i];
+    }
+    return 0;
+}
+
+int64_t sys_copy_to_user(const process_t *process, uint64_t ptr,
+                         const void *input, uint64_t len) {
+    uint8_t *dst = (uint8_t *)(uintptr_t)ptr;
+    const uint8_t *src = (const uint8_t *)input;
+    int64_t status;
+
+    if (input == 0 && len != 0) {
+        return ERR_INVAL;
+    }
+
+    status = sys_user_buf_out(process, ptr, len);
+    if (status != 0) {
+        return status;
+    }
+
+    for (uint64_t i = 0; i < len; i++) {
+        dst[i] = src[i];
+    }
+    return 0;
 }
 
 int64_t sys_user_copy_cstr(const process_t *process, uint64_t ptr,
@@ -88,11 +186,10 @@ int64_t sys_user_copy_cstr(const process_t *process, uint64_t ptr,
         }
         byte_ptr = ptr + i;
 
-        if (sys_user_buf_in(process, byte_ptr, 1) != 0) {
+        if (sys_copy_from_user(process, &out[i], byte_ptr, 1) != 0) {
             return ERR_INVAL;
         }
 
-        out[i] = *(const char *)(uintptr_t)byte_ptr;
         if (out[i] == '\0') {
             return 0;
         }
