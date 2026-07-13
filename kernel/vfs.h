@@ -19,6 +19,13 @@
 #define VFS_O_CREAT   0x40U
 #define VFS_O_ALLOWED (VFS_O_ACCMODE | VFS_O_CREAT)
 
+/*
+ * Fixed-table kernel VFS facade.
+ *
+ * Paths are absolute, copied into VFS-owned storage at mount time, and capped
+ * by VFS_MAX_PATH. File descriptors are local to the current process; the VFS
+ * translates them to kernel-private open-file handles and owns their offsets.
+ */
 typedef struct {
     uint64_t size;
 } vfs_stat_t;
@@ -43,7 +50,14 @@ typedef struct {
 
 void vfs_reset(void);
 int vfs_mount_static(const vfs_node_t *nodes, uint32_t count);
+
+/*
+ * Remove a mounted static VFS node by path. Open handles pointing at that node
+ * are invalidated so later descriptor operations fail cleanly instead of
+ * touching stale filesystem state. List mounts are not affected.
+ */
 int vfs_unmount_static(const char *path);
+
 int vfs_mount_list(const char *path, vfs_list_fn_t list, void *context);
 const vfs_node_t *vfs_find(const char *path);
 const char *vfs_strip_prefix(const char *path, const char *prefix);
@@ -63,6 +77,16 @@ int vfs_write_fd(int fd, const uint8_t *buffer, uint64_t size,
 int vfs_seek(int fd, uint64_t offset);
 int vfs_close(int fd);
 uint32_t vfs_close_all_for_pid(uint32_t pid);
+
+/*
+ * vfs_unlink removes a single file from its underlying filesystem.
+ * vfs_rename renames a file in the same directory.
+ *
+ * Currently only the FAT32 mount is wired up: paths starting with
+ * "/fat/" go through fat32_delete / fat32_rename. Other prefixes
+ * (tmpfs, bootfs) reject the call. The syscall layer validates user
+ * pointers before these helpers receive kernel-owned path strings.
+ */
 int vfs_unlink(const char *path);
 int vfs_rename(const char *old_path, const char *new_path);
 
