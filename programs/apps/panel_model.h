@@ -54,6 +54,9 @@ typedef enum {
     PANEL_ACTION_WAIT,
     PANEL_ACTION_FOCUS,
     PANEL_ACTION_RESTORE,
+    /* Reserved for a future scoped presentation permission. The current
+     * SYS_WINDOW_MINIMIZE contract is owner-only, so the panel must not
+     * request this action for another process's window. */
     PANEL_ACTION_MINIMIZE,
 } panel_activation_action_t;
 
@@ -165,7 +168,10 @@ static inline panel_activation_action_t panel_activation_action(
     }
     if (window_count == 1 &&
         (states[0] & PANEL_WINDOW_STATE_FOCUSED) != 0U) {
-        return PANEL_ACTION_MINIMIZE;
+        /* Focused-window minimization stays deferred until the kernel has a
+         * panel-scoped presentation permission. Doing nothing is safer than
+         * silently broadening owner-only mutation rights. */
+        return PANEL_ACTION_NONE;
     }
 
     target = panel_pick_window(states, window_count);
