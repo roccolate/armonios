@@ -1,140 +1,47 @@
 # ArmoniOS
 
-> A minimal, fast, assembly-first operating system for AArch64 — inspired by KolibriOS and MenuetOS.
+> A small freestanding AArch64 operating system with a graphical QEMU desktop, inspired by KolibriOS and MenuetOS.
 
 [![License: GPL-2.0](https://img.shields.io/badge/License-GPL%202.0-blue.svg)](LICENSE)
 [![Architecture](https://img.shields.io/badge/arch-AArch64-green.svg)]()
 [![Language](https://img.shields.io/badge/lang-C%20%2B%20ASM-orange.svg)]()
-[![Status](https://img.shields.io/badge/status-QEMU%20desktop-blue.svg)]()
+[![Status](https://img.shields.io/badge/status-QEMU%20desktop%20alpha-blue.svg)]()
 
----
+## Project status
 
-## A Tiny Desktop OS For ARM
+ArmoniOS is currently a **v0.9 QEMU desktop alpha**. It is a real bare-metal operating system, not a hosted application or Linux distribution, but it is not yet a stable v1.0 release candidate.
 
-ArmoniOS is a small bare-metal operating system for ARM64. It boots directly
-into a graphical desktop on QEMU: a panel, a shell, an editor, a file manager,
-a monitor, a clock, mouse input, windows, process isolation, storage, USB HID,
-and virtio-net DHCP.
+The current codebase includes:
 
-The project is inspired by [KolibriOS](https://kolibrios.org) and
-[MenuetOS](https://www.menuetos.net/): compact systems where the whole OS is
-small enough to understand, fast enough to feel immediate, and direct enough
-that every subsystem has a visible purpose.
+- an AArch64 EL1 kernel and freestanding EL0 applications;
+- per-process page tables, process dispatch, syscalls, IPC, and anonymous mappings;
+- a kernel-owned window compositor with input, dragging, focus, backing buffers, and damage tracking;
+- `panel`, `shell`, `editor`, `files`, `monitor`, and `clock` applications;
+- bootfs, tmpfs, and a small FAT32 root-filesystem implementation;
+- QEMU virtio block, GPU, input, and network paths;
+- PCI/xHCI and basic USB HID support;
+- native host tests for core kernel, VFS, filesystem, driver-parser, GUI, and ABI logic.
 
-ArmoniOS is not a Linux clone. There is no libc, no POSIX layer, and no hosted
-runtime. User programs are freestanding AArch64 images that talk to the kernel
-through a small `svc #0` syscall ABI.
+Important limitations remain. In particular, user-output buffers are not yet checked for write permission, VFS file descriptors are global rather than process-owned, the visible desktop target does not currently attach its FAT disk, and Raspberry Pi support is not build- or hardware-verified.
 
-## Try The Desktop
+Read these before making or evaluating claims:
 
-```bash
-git clone https://github.com/roccolate/armonios
-cd armonios
-make
-make qemu-fb-visible
-```
+- [Current State](docs/CURRENT_STATE.md) — audited operational truth and verification evidence
+- [Technical Risks](docs/TECHNICAL_RISKS.md) — active blockers and correctness risks
+- [Documentation Policy](docs/DOCUMENTATION_POLICY.md) — evidence and maintenance rules
+- [Roadmap](docs/ROADMAP.md) — ordered release work
 
-In the visible QEMU window you can:
+## What ArmoniOS is
 
-- click panel buttons to launch or focus `shell`, `editor`, `files`,
-  `monitor`, and `clock`;
-- drag windows by their title bars;
-- type into the editor;
-- browse and manage FAT32 root files through `files` when a FAT disk is
-  present;
-- use the shell to run apps, list processes, inspect memory, and kill the last
-  spawned process.
+ArmoniOS is a compact monolithic ARM64 kernel intended to remain understandable and direct. It does not provide libc, POSIX compatibility, dynamic linking, or a hosted runtime. Applications are freestanding KLI1 images that invoke a small syscall ABI through `svc #0`.
 
-For a quick headless smoke test:
+The primary supported development target is currently **QEMU `virt` with a Cortex-A72 CPU model**.
 
-```bash
-timeout 25s make qemu-fb
-```
-
-Success means the serial log reaches `panel: ready`.
-
----
-
-## What Works Today
-
-ArmoniOS is currently at the **v0.9 QEMU desktop baseline**. The next target is
-**v1.0: a stable, repeatable QEMU desktop release**.
-
-Latest verified size: `kernel.bin: 92696 bytes (limit: 100000)`.
-
-Highlights:
-
-- AArch64 boot path, MMU setup, physical/virtual memory managers.
-- Preemptive scheduling with kernel threads and EL0 user processes.
-- Per-process address spaces, user stacks, and KLI1 flat app images.
-- A kernel-owned GUI compositor with windows, focus, dragging, title bars,
-  cursor regions, backing buffers, and damage-rectangle redraw.
-- Freestanding C apps under `programs/apps/`: `panel`, `shell`, `editor`,
-  `files`, `monitor`, and `clock`.
-- VFS with bootfs, tmpfs, and FAT32 integration through virtio-blk; `SYS_OPEN`
-  supports `O_CREAT` for FAT32 root files under `/fat/<8.3-name>`.
-- Input through virtio-input and USB HID keyboard/mouse paths.
-- virtio-net initialization and DHCP on QEMU.
-- Host tests for memory, scheduler, process isolation, syscalls, GUI ABI,
-  FAT32, DHCP options, USB/HID parsing, and app-image layout.
-
-Release gates currently used:
-
-```bash
-make
-make size
-make -C tests test
-make stack-check
-make qemu-fs-test
-timeout 25s make qemu-fb
-timeout 25s make qemu-usb
-timeout 25s make qemu-net
-```
-
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the version plan and remaining
-work.
-
----
-
-## Philosophy
-
-- Keep the kernel small enough to read in one sitting.
-- Prefer direct C and small AArch64 assembly boundaries over large frameworks.
-- Make every byte earn its place; the kernel binary has a tight size gate.
-- Keep QEMU fast, observable, and repeatable before claiming hardware support.
-- Port ideas from classic small OSes, not their x86 assembly.
-
-## Not Yet
-
-These are planned or future work, not current release claims:
-
-- Raspberry Pi 4 real-hardware boot.
-- USB hub support.
-- TCP/HTTP clients.
-- SMP and secondary-core startup.
-- Engine and multimedia runtime.
-
----
-
-## Target Hardware
-
-**Primary target:** QEMU `virt` machine (AArch64, Cortex-A72)
-**Planned hardware target:** Raspberry Pi 4 / 5 (BCM2711 / BCM2712)
-**Future targets:** Any Cortex-A board with open peripheral documentation
-
----
-
-## Building
+## Quick start
 
 ### Requirements
 
-- WSL2 (Ubuntu 22.04+) or any Linux system
-- `gcc-aarch64-linux-gnu` — AArch64 cross-compiler
-- `qemu-system-aarch64` — ARM emulator
-- `gdb-multiarch` — debugger
-- `make`
-
-### Install dependencies (Ubuntu / WSL2)
+On Ubuntu or WSL2:
 
 ```bash
 sudo apt update && sudo apt install -y \
@@ -145,166 +52,153 @@ sudo apt update && sudo apt install -y \
   make
 ```
 
-### Build and run
+### Build
 
 ```bash
-# Clone the repository
 git clone https://github.com/roccolate/armonios
 cd armonios
-
-# Build the default QEMU virt board
 make
-
-# List documented build and QEMU targets
-make help
-
-# Show full compiler/linker commands instead of compact build lines
-make V=1
-
-# Measure per-function C stack usage for userland apps
-make stack-check
-
-# Equivalent explicit board selection
-make BOARD=qemu_virt
-
-# Run in QEMU
-make qemu
-
-# In the shell app, try:
-# help
-# pwd
-# cd /fat
-# ls
-# ls /fat
-# cat /tmp/note
-# ps
-# ticks
-# mem
-# run editor
-# run files
-# run editor myfile.txt    # passes myfile.txt as argv[1] to the editor
-# run editor /fat/NOTE.TXT # opens or creates a FAT32 root file
-# run monitor
-# run clock
-# kill last
-# exit
-
-# Run in QEMU with a generated FAT32 virtio-blk image
-make qemu-blk
-
-# Smoke-test the FAT32 storage/VFS boot path under QEMU
-make qemu-fs-test
-
-# Run in QEMU with virtio-gpu headless and boot the desktop
-make qemu-fb
-
-# Run in QEMU with a visible virtio-gpu window, USB keyboard, and virtio mouse.
-# This is the interactive desktop: click to raise windows, type into
-# focused apps, drag title bars, click panel buttons, etc.
-make qemu-fb-visible
-
-# Run in QEMU with a USB host (qemu-xhci + usb-kbd + usb-mouse).
-# The kernel prints "USB: controller initialized" and
-# "USB: device on port ..." as it walks the xHCI root hub, then
-# "USB: enumeration ok" and "USB HID: 2 devices" for the directly
-# attached boot-protocol keyboard and mouse.
-make qemu-usb
-
-# Exit QEMU: Ctrl+A then X
+make size
+make -C tests test
 ```
 
-### Debug with GDB
+### Run the serial target
 
 ```bash
-# Terminal 1: launch QEMU in debug mode (CPU paused)
-make qemu-debug
-
-# Terminal 2: attach GDB
-gdb-multiarch build/kernel.elf
-(gdb) target remote :1234
-(gdb) break kernel_main
-(gdb) continue
+make qemu
 ```
 
----
+Exit QEMU with `Ctrl+A`, then `X`.
 
-## Project Structure
+### Run the visible desktop
 
-```
-armonios/
-├── boot/               # Bootloader (AArch64 ASM only)
-│   └── start.S         # Entry point, early stack, BSS clear, jump to kernel
-├── kernel/             # Kernel core (C + inline ASM)
-│   ├── kernel.c        # kernel_main, early init
-│   ├── mm/             # Memory management
-│   ├── sched/          # Scheduler
-│   ├── ipc.c           # Fixed-message IPC queue
-│   └── gui_*.c         # Kernel-managed GUI modules
-├── drivers/            # Hardware drivers (C + minimal ASM)
-│   ├── board.h         # Generic board/platform interface
-│   ├── boards/         # Board/platform glue, starting with qemu_virt
-│   ├── uart/           # PL011 UART
-│   ├── fb/             # Linear framebuffer primitives
-│   ├── irq/            # GICv2 interrupt controller
-│   ├── usb/            # USB HID (keyboard, mouse)
-│   └── net/            # Ethernet driver
-├── programs/           # Userland applications
-├── docs/               # Focused project notes
-│   ├── ARCHITECTURE.md
-│   ├── CODEX_HANDOFF.md
-│   ├── CONTRIBUTING.md
-│   ├── CURRENT_STATE.md
-│   ├── ENGINE_MULTIMEDIA.md
-│   ├── GUI_ABI_NOTES.md
-│   ├── MEMORY_MAP.md
-│   ├── PORTING.md
-│   ├── ROADMAP.md
-│   ├── SYSCALLS.md
-│   └── TECH_DEBT_REVIEW.md
-├── linker/             # Kernel linker scripts
-│   ├── linker.ld       # QEMU kernel layout
-│   └── linker_rpi4.ld  # Raspberry Pi 4 kernel layout
-├── Makefile            # Build system
-└── LICENSE             # GPL-2.0
+```bash
+make qemu-fb-visible
 ```
 
----
+This target currently provides GPU and input devices. It does **not** yet attach the generated FAT32 block image, so the `files` application will not expose the documented FAT workflow until that build-target defect is fixed. See `RISK-003` in `docs/TECHNICAL_RISKS.md`.
 
-## Design Decisions
+### Run the storage smoke test
 
-### Why AArch64?
+```bash
+make qemu-fs-test
+```
 
-AArch64 (ARM64) is the cleanest ISA to write an OS in from scratch:
-- 31 general-purpose registers (no x86 legacy baggage)
-- Clean, orthogonal instruction set
-- Well-documented exception model (EL0/EL1/EL2)
-- MMU with 4-level page tables, standard and predictable
-- No real mode, no A20 gate, no interrupt legacy hell
+This is the strongest current QEMU integration test because it captures guest serial output and checks explicit storage/FAT markers.
 
-### Why no POSIX?
+Other QEMU launch targets exist:
 
-POSIX compatibility layers add complexity without adding value for a
-purpose-built OS. ArmoniOS defines its own minimal syscall ABI (inspired by
-KolibriOS's ~100-syscall design), using the `svc` instruction with function
-number in `x8` and arguments in `x0`–`x6`. This keeps the kernel small and the
-syscall path fast.
+```bash
+make qemu-fb
+make qemu-usb
+make qemu-net
+```
 
-### Why C + ASM and not Rust?
+At present these are runtime launch targets, not complete deterministic tests. A timeout alone is not proof that the associated subsystem passed.
 
-The goal is to keep the codebase readable to anyone who knows C and assembly. Rust would add compile-time safety guarantees but also toolchain complexity, longer onboarding, and a runtime (even `no_std` has one). The entire kernel is meant to be understandable — Rust's borrow checker, while valuable, works against that goal at this stage.
+## Current verified local baseline
 
----
+The latest verification recorded in issue #1 reports:
+
+```text
+make                  passed
+make size             kernel.bin: 92696 bytes, limit 100000
+make -C tests test    ALL TESTS PASSED (0)
+make stack-check      maximum 368 bytes, limit 3072
+make qemu-fs-test     passed after direct QEMU serial-file capture
+```
+
+The full visible files/editor/FAT workflow is still incomplete and the remaining QEMU targets do not yet have deterministic pass records. See `docs/CURRENT_STATE.md` for exact evidence and scope.
+
+## Architecture summary
+
+```text
+boot/start.S
+  -> early stack, exception vectors, BSS clear
+  -> kernel_main
+       -> board/UART and DTB memory discovery
+       -> PMM, heap, VMM/MMU
+       -> VFS, bootfs, tmpfs
+       -> IRQ, timer, process dispatch
+       -> optional storage, display, network, input, USB
+       -> launch panel in EL0
+       -> cooperative EL1 helper scheduler
+```
+
+EL0 processes are preempted through IRQ trap frames. EL1 helper threads are currently cooperative.
+
+Each process has its own TTBR0 root, image, stack, and anonymous mappings. The current process tables also identity-map the full detected RAM range for EL1 as read/write/execute. A future hardening step should move shared kernel mappings to TTBR1 and apply section-specific permissions.
+
+See [Architecture](docs/ARCHITECTURE.md) and [Memory Map](docs/MEMORY_MAP.md).
+
+## Filesystem scope
+
+The current FAT32 implementation supports:
+
+- 512-byte sectors;
+- short 8.3 names;
+- root-directory files;
+- create, read, write, rename, delete, and list;
+- dynamic `/fat/<name>` VFS nodes.
+
+It does not claim long-file-name support, directories, partition discovery, crash consistency, or broad FAT32 interoperability.
+
+The current VFS has eight global file descriptors shared by the kernel. They are not yet isolated per process. See `RISK-002`.
+
+## Application format
+
+Shipping applications are linked as flat KLI1 images with a fixed header and entry table. The current format is tested for the six included applications, but mutable static `.data` and `.bss` are not yet a defined application contract. Apps currently use restricted freestanding patterns and anonymous mappings for larger mutable state.
+
+## Raspberry Pi status
+
+Raspberry Pi 4 and 5 are planned targets only.
+
+The repository contains an early `rpi4` board directory, linker script, mailbox scaffolding, and experimental eMMC code. This does not constitute support. The RPi4 backend has not been recorded as building and linking cleanly, has not reached a physical serial milestone, and its storage code must not be treated as validated.
+
+Do not describe ArmoniOS as running on Raspberry Pi until the hardware criteria in `docs/DOCUMENTATION_POLICY.md` and `docs/PORTING.md` are satisfied.
+
+## Release direction
+
+The next release goal is a repeatable **v1.0 QEMU desktop release candidate**. The immediate work is correctness and reproducibility, not new multimedia or hardware scope.
+
+Major blockers include:
+
+1. permission-aware user-copy helpers;
+2. process-owned file descriptors and exit cleanup;
+3. a visible desktop target with FAT storage;
+4. correct initial window focus for spawned apps;
+5. deterministic framebuffer, USB, and network QEMU gates;
+6. successful end-to-end files/editor/FAT verification.
+
+See [Roadmap](docs/ROADMAP.md).
+
+## Project structure
+
+```text
+boot/                 AArch64 entry and early setup
+kernel/               kernel core, memory, processes, syscalls, VFS, GUI
+kernel/mm/            PMM, VMM, heap
+kernel/sched/         cooperative EL1 helper-thread scheduler
+drivers/              board boundary and device drivers
+drivers/boards/       QEMU reference board and experimental board ports
+programs/apps/         freestanding desktop applications
+programs/libkarm/      syscall and small userland runtime helpers
+programs/libkarmdesk/  GUI wrappers
+tests/                native host test suite
+tools/                host build utilities
+linker/               kernel linker scripts
+docs/                 architecture, ABI, status, risks, and maintenance policy
+```
+
+## Design principles
+
+- Keep the kernel small and readable.
+- Prefer explicit C and narrow AArch64 assembly boundaries.
+- Treat QEMU as the regression platform until hardware is proven.
+- Do not confuse implemented code with verified behavior.
+- Add tests and update documentation in the same change as public behavior.
+- Port ideas from classic small operating systems, not architecture-specific source code.
 
 ## License
 
-ArmoniOS is licensed under the [GNU General Public License v2.0](LICENSE), the
-same license as KolibriOS.
-
----
-
-## Acknowledgements
-
-- [KolibriOS](https://kolibrios.org) — direct inspiration for philosophy and design
-- [MenuetOS](https://www.menuetos.net/) — the original single-file OS concept
-- [Raspberry Pi bare metal examples](https://github.com/isometimes/rpi4-osdev) — hardware reference
-- [OSDev Wiki](https://wiki.osdev.org) — the indispensable community reference
+ArmoniOS is licensed under [GNU GPL-2.0](LICENSE).
