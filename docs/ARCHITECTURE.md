@@ -1,74 +1,124 @@
 # Architecture
 
-ArmoniOS is a compact monolithic AArch64 kernel for the QEMU `virt` machine,
-with Raspberry Pi work kept behind board layers. This document describes the
-current architecture; detailed ABI tables live in `SYSCALLS.md`, and fixed
-addresses live in `MEMORY_MAP.md`.
+ArmoniOS is a compact monolithic AArch64 kernel whose verified development platform is QEMU `virt`. Raspberry Pi code exists only as an experimental future port.
 
-## Privilege Model
+This document describes the implementation as it exists, including known architectural limitations. Operational status lives in `CURRENT_STATE.md`; active defects and exit criteria live in `TECHNICAL_RISKS.md`.
 
-- EL1: kernel, drivers, scheduler, VFS, GUI compositor, and syscall handling.
-- EL0: freestanding user apps.
-- EL2/EL3: not used by the current QEMU path.
+## Privilege model
 
-There is no driver isolation or POSIX compatibility layer. Drivers are linked
-into the kernel and are expected to stay small and auditable.
+- **EL1:** kernel, drivers, VFS, GUI compositor, exception handling, syscall dispatch, and cooperative helper threads.
+- **EL0:** freestanding KLI1 applications.
+- **EL2/EL3:** not used by the verified QEMU path. A physical board may enter at EL2 and needs a deliberate transition before normal kernel initialization.
 
-## Boot
+Drivers are linked into the kernel. There is no driver isolation, libc, POSIX layer, or hosted runtime.
 
-QEMU loads the kernel at the board link address and passes a DTB. The early path
-is:
+## Boot flow
+
+QEMU loads the kernel at the board linker address and passes the DTB pointer in `x0`.
 
 ```text
 boot/start.S
+  -> preserve DTB pointer
+  -> install early stack
+  -> install exception vectors
   -> clear BSS
-  -> set early stack
-  -> call kernel_main
+  -> call kernel_main(dtb)
 
 kernel_main
-  -> board early init / UART
+  -> board early init and UART
   -> DTB memory discovery
-  -> PMM, heap, VMM/MMU
-  -> VFS/bootfs/tmpfs
-  -> IRQ/timer/scheduler setup
-  -> optional storage/FAT32, display, network, input, USB
-  -> panel boot with recovery
-  -> scheduler start
+  -> PMM and process table
+  -> console and heap
+  -> VMM/MMU identity mapping
+  -> VFS, bootfs, tmpfs
+  -> timer, IRQs, EL0 dispatch
+  -> optional storage and FAT32
+  -> optional virtio GPU
+  -> optional network
+  -> input, PCI, USB/HID
+  -> launch panel in EL0
+  -> start cooperative EL1 helper scheduler
 ```
 
-Boot phase status is tracked in `kernel/init_status.{c,h}` and visible through
-`k> status`.
+Boot phases are recorded in `kernel/init_status.{c,h}` and exposed through the kernel console.
 
-## Memory
+## Memory architecture
 
-The current QEMU implementation keeps the kernel and MMIO identity-mapped while
-EL0 processes run with per-process `TTBR0_EL1` page tables. Fixed user image and
-stack layout is centralized in `kernel/layout.h`.
+### Physical memory manager
 
-Each process tracks user-accessible regions in `process->user_regions[]`.
-Syscalls validate user pointers through `kernel/syscall_helpers.{c,h}` before
-copying data across the EL0/EL1 boundary.
+The PMM uses a fixed bitmap and currently manages at most 128 MiB. This matches the default QEMU configuration but is not a general Raspberry Pi memory policy.
 
-PMM-owned regions are released by process cleanup. The loader uses PMM pages for
-per-process image and stack storage; these are no longer static BSS arrays.
+The kernel reserves its loaded image and DTB before allocating pages for page tables, application images, stacks, anonymous mappings, GUI backing buffers, and kernel heap arenas.
 
-## Processes And Scheduling
+### Virtual memory
 
-`kernel/process.{c,h}` owns process slots, saved EL0 context, user-region
-metadata, page-table ownership, and zombie cleanup. Dispatch to the next
-runnable process funnels through:
+The VMM implements AArch64 4 KiB, four-level stage-1 translation tables.
 
-```c
-int process_dispatch_next(process_t *current, exception_frame_t *frame,
-                          process_dispatch_policy_t policy);
-```
+Current behavior:
 
-The dispatch policy distinguishes exit/fault paths from yield/preemption paths.
-Timer IRQ and syscall yield share the same activation logic.
+- the early kernel builds an identity map of the detected RAM range;
+- that RAM range is mapped for EL1 as read/write/execute;
+- board MMIO is identity-mapped as device memory;
+- each EL0 process has a separate TTBR0 root;
+- every process TTBR0 also contains the full kernel/RAM identity map needed while handling exceptions;
+- process image pages are user read/execute;
+- process stack and ordinary anonymous pages are user read/write unless callers request other supported flags;
+- TTBR1 is disabled;
+- changing process TTBR0 invalidates the complete EL1 TLB.
 
-## Syscalls
+This provides basic EL0 separation, but it is not a hardened split-address-space design. `RISK-008` tracks the intended TTBR1, W^X, ASID, and scoped-invalidation work.
 
-Syscalls use `svc #0`:
+### Process user regions
+
+Each process records a fixed set of disjoint user virtual ranges. These records are used to decide whether a syscall pointer belongs to the current process.
+
+Important current limitation: the region metadata used by syscall helpers does not distinguish readable from writable ranges. `sys_user_buf_in()` and `sys_user_buf_out()` currently apply the same membership check. This means the phrase “validated writable user buffer” must not be used until `RISK-001` is closed.
+
+## Processes and scheduling
+
+`kernel/process.{c,h}` owns:
+
+- fixed process slots;
+- PID and state;
+- saved EL0 registers, PC, SP, and PSTATE;
+- per-process TTBR0 root;
+- registered user regions and owned physical pages;
+- zombie state and cleanup.
+
+EL0 dispatch uses `process_dispatch_next()` and a round-robin scan of ready slots.
+
+### EL0 processes
+
+EL0 processes are preemptive in the current architecture:
+
+- IRQ entry saves the interrupted process frame;
+- timer handling runs;
+- the dispatcher may select another ready process;
+- the selected process TTBR0 and trap frame are activated before exception return.
+
+Voluntary yield and exit/fault paths share the same process activation logic.
+
+### EL1 helper threads
+
+The scheduler under `kernel/sched/` is cooperative. It is used for EL1 helper work such as console/input polling. The timer updates scheduler counters but does not preempt an executing EL1 helper thread.
+
+Therefore the accurate description is:
+
+> preemptive EL0 processes with cooperative EL1 helper threads.
+
+`RISK-010` tracks this documentation and future-design distinction.
+
+## Exceptions and faults
+
+- `svc #0` from EL0 enters syscall dispatch.
+- Other synchronous lower-EL exceptions mark the current process exited and attempt to dispatch another process.
+- An unexpected EL1 exception enters the fatal diagnostic path and waits forever.
+
+Because kernel syscall bodies currently dereference validated user virtual addresses directly, a bad permission assumption at the user-copy boundary can become an EL1 fault rather than a recoverable user error. This is part of `RISK-001`.
+
+## Syscall boundary
+
+The ABI uses:
 
 ```text
 x8      syscall number
@@ -76,63 +126,140 @@ x0..x6  arguments
 x0      return value; negative values are kernel error codes
 ```
 
-Numbers are pinned in `kernel/syscall_numbers.h` and covered by
-`tests/test_syscall_abi.c`. `SYSCALLS.md` is the reference table.
+Numbers are frozen in `kernel/syscall_numbers.h` and exercised by host ABI tests.
 
-## Drivers And Board Boundary
+Public pointer handling is centralized in `kernel/syscall_helpers.{c,h}`. The current helpers provide process-range validation and c-string copying, but not permission-aware or fault-contained user copies.
 
-Generic kernel code includes `drivers/board.h`. Board-specific physical
-addresses and platform details live under `drivers/boards/<board>/`.
+See `SYSCALLS.md` for exact calls and current limitations.
 
-Driver examples:
+## VFS and file descriptors
 
-- `drivers/uart/pl011.c` for UART character transport;
-- `drivers/fb/fb.c` for linear framebuffer primitives;
-- `drivers/gpu/virtio_gpu.c` for QEMU scanout;
-- `drivers/storage/virtio_blk.c` and `drivers/storage/emmc.c`;
-- `drivers/net/virtio_net.c`;
-- `drivers/usb/xhci.c` plus HID helpers.
+The VFS is a fixed-table in-kernel facade over mounted node callbacks. It supports bootfs, tmpfs, and dynamic FAT32 root-file nodes.
 
-`kernel/gui.h` forward-declares `fb_t`; implementation files include
-`fb/fb.h` only where concrete framebuffer fields are needed.
+Current descriptor architecture:
 
-## GUI
+- one global table of eight VFS open-file entries;
+- each entry stores node pointer, offset, flags, and used state;
+- syscall-visible descriptor `3+` indexes that global table;
+- no owner PID is stored;
+- process exit does not close descriptors automatically.
 
-The GUI is a kernel-owned compositor, not a userland display server. The old
-`kernel/gui.c` monolith is split by responsibility:
+This is suitable for early single-process bring-up but not a correct multi-process resource model. `RISK-002` blocks v1.0 until descriptors are process-owned and reclaimed.
 
-- `gui_events`: per-window event queues;
-- `gui_cursor`: cursor state, drag state, cursor regions;
-- `gui_input`: hit testing and input dispatch;
-- `gui_backing`: owner-drawn backing buffers;
-- `gui_pool`: window lifecycle and lookup;
-- `gui_compositor`: damage tracking, drawing, render entry points.
+## Filesystems and storage
 
-Windows are process-owned. Owner-only operations are checked through syscall
-helpers; panel operations that intentionally cross process ownership use
-specific syscalls such as `sys_window_focus` and `sys_window_for_pid`.
+### bootfs
 
-## Userland
+Shipping application images are embedded into the kernel and exposed under `/armonios/<name>`.
 
-User apps live under `programs/apps/` and link against:
+### tmpfs
 
-- `programs/libkarm` for syscall trampolines, `crt0`, and small C helpers;
+The current tmpfs is a small fixed in-memory file implementation used for simple kernel/VFS validation.
+
+### FAT32
+
+The current FAT32 bridge supports:
+
+- 512-byte sectors;
+- short 8.3 root names;
+- root-directory list/open/create/read/write/rename/delete;
+- cluster-chain growth for the supported file path;
+- dynamic `/fat/<name>` VFS nodes;
+- invalidation of dynamic nodes after rename/delete.
+
+It does not claim long-file-name support, subdirectories, arbitrary partition discovery, journaling, crash recovery, or broad compatibility testing.
+
+The QEMU block path is verified through `make qemu-fs-test`. The current visible desktop target does not attach the block image; see `RISK-003`.
+
+## GUI architecture
+
+The GUI is a kernel-owned compositor rather than a userland display server.
+
+Responsibilities are split across:
+
+- `gui_events` — per-window queues;
+- `gui_cursor` — cursor state, drag state, and cursor regions;
+- `gui_input` — hit testing and input dispatch;
+- `gui_backing` — per-window content buffers;
+- `gui_pool` — lifecycle, ownership, lookup, and focus;
+- `gui_compositor` — z-order drawing and damage tracking.
+
+Windows carry an owner PID. Most mutating syscalls require ownership. A small set of presentation calls is intentionally cross-process so the panel can find, focus, restore, and display state for application windows.
+
+Normal application creation does not currently guarantee that a new window receives focus when another window is focused. This is visible in the files-to-editor workflow and tracked by `RISK-004`.
+
+## Input and device polling
+
+Input events enter one shared queue from:
+
+- UART keyboard translation;
+- virtio-input;
+- directly attached USB boot-protocol HID devices.
+
+The kernel polls several devices from both the timer path and helper loop. This is intentionally simple but should be treated carefully if concurrency, SMP, or more EL1 threads are introduced.
+
+USB support is currently a basic QEMU xHCI path with directly attached keyboard/mouse devices. USB hubs are not supported.
+
+## Networking
+
+The network code is a small direct stack over virtio-net containing enough Ethernet, ARP, IPv4, UDP, and DHCP behavior to obtain a QEMU user-network lease.
+
+There is no application socket ABI, TCP, general UDP API, DNS query implementation, or HTTP client.
+
+`qemu-net` currently launches the VM but is not a deterministic release test; see `RISK-005`.
+
+## Board boundary
+
+Generic kernel code includes `drivers/board.h`. Physical addresses and board-specific initialization belong under `drivers/boards/<board>/`.
+
+The QEMU board is the reference implementation.
+
+The RPi4 board directory is not a supported implementation. It does not currently satisfy all functions declared by the generic board contract and the eMMC code is experimental. See `PORTING.md`, `RISK-006`, and `RISK-007`.
+
+A future board interface should distinguish mandatory capabilities from optional ones instead of naming generic operations after virtio-specific devices.
+
+## Userland and KLI1
+
+User programs live under `programs/apps/` and link against:
+
+- `programs/libkarm` for startup, syscall trampolines, I/O, and small helpers;
 - `programs/libkarmdesk` for GUI wrappers.
 
-Shipping apps are `panel`, `shell`, `editor`, `files`, `monitor`, and
-`clock`.
+The shipping set is:
 
-## Filesystems And Storage
+- `panel`
+- `shell`
+- `editor`
+- `files`
+- `monitor`
+- `clock`
 
-The VFS exposes bootfs, tmpfs, and FAT32 mounts. FAT32 root files can be opened
-dynamically through `/fat/<name>`, and `SYS_OPEN` supports `O_CREAT` for
-`/fat/<8.3-name>`. FAT32 parser/VFS behavior has host tests, and the QEMU
-storage integration path is checked by `make qemu-fs-test`.
+KLI1 is a small flat-image format with a fixed header and entry offsets. The current linker script explicitly orders the image header, text, rodata, and end marker.
 
-## Coding Standards
+Mutable `.data` and `.bss` are not yet an explicit tested contract. Current applications avoid relying on general static mutable storage. `RISK-009` requires the format either to reject these sections or define how the loader initializes them.
 
-- Freestanding C11 and small AArch64 assembly boundaries.
-- No libc/POSIX assumptions in kernel or userland runtime.
-- Keep hardware behavior explicit; avoid vague abstraction names.
-- Prefer focused host tests for pure C logic.
-- Keep kernel binary size under `KERNEL_SIZE_LIMIT`.
+## Testing architecture
+
+Native host tests exercise pure-C contracts and mocked driver paths. They provide good regression coverage for logic, but they cannot prove device MMIO or full exception-return behavior.
+
+`qemu-fs-test` is deterministic because it captures guest serial output and checks required markers. The framebuffer, USB, and network launch targets currently lack equivalent final assertions.
+
+Release evidence must always state whether it came from:
+
+- static inspection;
+- host tests;
+- build/link;
+- deterministic QEMU output;
+- visible manual QEMU use;
+- physical hardware.
+
+## Design direction
+
+Near-term architectural priorities are:
+
+1. permission-aware and fault-contained user copies;
+2. process-owned kernel resources, beginning with file descriptors;
+3. deterministic QEMU runtime tests;
+4. an explicit KLI1 mutable-storage contract;
+5. shared TTBR1 kernel mappings and section permissions;
+6. a capability-oriented board interface before serious hardware work.

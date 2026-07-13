@@ -1,56 +1,46 @@
 # Porting Guide
 
-ArmoniOS is designed so that porting to a new ARM64 board keeps generic kernel
-code board-agnostic. Board-specific physical addresses, interrupt routing,
-storage, input, display, and bus details belong behind `drivers/board.h` and
-`drivers/boards/<board>/`.
+ArmoniOS currently has one verified development platform: QEMU `virt`.
 
----
+The repository also contains experimental Raspberry Pi 4 files. They are scaffolding for future bring-up, not a working or build-verified port. Hardware claims must follow `DOCUMENTATION_POLICY.md`.
 
-## Architecture Goal
+Active board risks:
 
-ArmoniOS should be structured so that the following components remain portable
-and avoid board-specific constants:
+- `RISK-006` — incomplete Raspberry Pi board contract;
+- `RISK-007` — experimental and contradictory eMMC implementation.
 
-- `kernel/mm/` — physical and virtual memory management
-- `kernel/sched/` — scheduler and context switch
-- `kernel/ipc/` — message passing
-- `kernel/vfs.c`, `kernel/tmpfs.c`, `kernel/fat32.c` — VFS and filesystems
-- `kernel/gui_*.{c,h}` — window manager and compositor
-- syscall dispatch and user-pointer validation
+## Portability goal
 
-The following components are board-specific and should live behind
-`drivers/boards/<board>/` or an equivalent platform layer:
+Generic kernel code should remain independent of board physical addresses and controller-specific initialization.
 
-- UART base address and register type
-- interrupt controller and IRQ numbers
-- timer source
-- display / framebuffer discovery
-- storage backend (virtio-blk, eMMC/SD, NVMe, etc.)
-- USB host controller and PCIe host bridge, when present
-- network controller
-- virtio-mmio and virtio-input discovery, when present
+Portable subsystems should include:
 
-**Current reference board:** QEMU `virt` lives under
-`drivers/boards/qemu_virt/`. Its board layer owns early UART init, GIC setup,
-UART IRQ number, MMIO mappings, virtio-mmio range constants, PCIe ECAM/MMIO
-mappings for xHCI, virtio-blk storage, and virtio-input polling.
+- process and scheduler logic;
+- PMM/VMM policy where board memory maps are supplied correctly;
+- syscall dispatch and user-copy helpers;
+- IPC;
+- VFS, tmpfs, and FAT32 logic;
+- GUI compositor and application ABI;
+- device-independent input events.
 
-**USB note:** the active USB backend is the generic PCI xHCI driver under
-`drivers/usb/`. QEMU `virt` reaches it through ECAM + PCI BAR assignment.
-Raspberry Pi 4 still needs BCM2711 PCIe host bridge setup in
-`drivers/boards/rpi4/` before the VL805 xHCI controller can be discovered.
+Board or platform code must own:
 
-**Next portability rule:** keep moving new board-specific devices behind
-`drivers/boards/<board>/` helpers instead of adding raw MMIO addresses to
-generic kernel code.
+- initial exception level and CPU bring-up;
+- kernel load address;
+- UART selection and pin/clock setup;
+- interrupt controller and IRQ routing;
+- timer source;
+- memory-map fallback and firmware reservations;
+- framebuffer or display-controller setup;
+- storage controller;
+- PCIe host bridge;
+- USB host controller discovery;
+- network controller;
+- board-specific DMA/cache requirements.
 
----
+## Current board contract
 
-## Current Board Contract
-
-Generic kernel code includes `drivers/board.h`. Every board build must provide
-these functions:
+Generic code includes `drivers/board.h`. The present interface requires each selected board build to provide:
 
 ```c
 const char *board_name(void);
@@ -81,317 +71,212 @@ int board_virtio_input_init(void);
 int board_virtio_input_poll(void);
 ```
 
-A board may stub unsupported features with safe failure values, but it must do so
-explicitly. For example, a non-virtio board can return `0` from the virtio range
-functions and `-1` from `board_virtio_input_init()` / `board_virtio_input_poll()`.
+This contract is transitional and has two problems:
 
----
+1. generic names include virtio-specific capabilities that physical boards may not have;
+2. generic kernel code calls some optional paths unconditionally.
 
-## How to Add a New Board
+Until the interface is redesigned, every board build must still define all required symbols. Unsupported operations must return explicit safe failures rather than remaining undefined.
 
-### Step 1: Create a board directory
+## Current board status
 
-```
-drivers/
-└── boards/
-    ├── qemu_virt/       ← reference implementation
-    │   ├── board.h
-    │   └── board.c
-    ├── rpi4/
-    │   ├── board.h
-    │   └── board.c
-    └── your_board/
-        ├── board.h      ← you create this
-        └── board.c
-```
+### QEMU `virt`
 
-### Step 2: Keep the board interface split
+Status:
 
-Generic kernel code includes `drivers/board.h`. A board-specific header under
-`drivers/boards/<board>/board.h` should include that generic contract and keep
-only private constants for the board implementation.
+- default build target;
+- locally build-verified;
+- storage path QEMU-verified through `qemu-fs-test`;
+- visible desktop partially manually verified;
+- reference implementation for the current board contract.
+
+QEMU-specific responsibilities include:
+
+- PL011 UART;
+- GICv2;
+- virtio-mmio range;
+- PCI ECAM/MMIO mapping;
+- virtio block, GPU, input, and network discovery;
+- xHCI discovery through PCI BAR assignment.
+
+### Raspberry Pi 4
+
+Status:
+
+- experimental source files exist;
+- not build-verified;
+- not link-verified;
+- not serial-verified;
+- not hardware-verified;
+- not storage-verified;
+- not display-verified.
+
+Known facts from static inspection:
+
+- the backend does not currently implement every function required by `drivers/board.h`;
+- the generic kernel calls virtio-input board functions that the backend does not provide;
+- the eMMC code must not be treated as a functional driver;
+- there is no documented EL2-to-EL1 bring-up path for physical firmware entry;
+- there is no secondary-core parking milestone;
+- there is no validated framebuffer acquisition path;
+- BCM2711 PCIe host initialization is not implemented for VL805 xHCI discovery.
+
+Therefore `make BOARD=rpi4` is an experimental target name, not evidence of support.
+
+## Required board capability direction
+
+Before adding more boards, prefer a capability-oriented interface such as:
 
 ```c
-// drivers/boards/your_board/board.h
+typedef struct {
+    int (*storage_init)(void);
+    int (*storage_read)(uint32_t lba, uint32_t count, void *buffer);
+    int (*storage_write)(uint32_t lba, uint32_t count, const void *buffer);
 
-#pragma once
-#include <stdint.h>
+    int (*input_init)(void);
+    int (*input_poll)(void);
 
-#include "drivers/board.h"
-
-#define YOUR_BOARD_UART_BASE       0x09000000ULL
-#define YOUR_BOARD_UART_IRQ        33
-#define YOUR_BOARD_GIC_DIST_BASE   0x08000000ULL
-#define YOUR_BOARD_GIC_CPU_BASE    0x08010000ULL
-#define YOUR_BOARD_VIRTIO_BASE     0x00000000ULL
-#define YOUR_BOARD_VIRTIO_SIZE     0x00000000ULL
-#define YOUR_BOARD_VIRTIO_STRIDE   0x00001000ULL
+    int (*display_init)(void);
+    int (*network_init)(void);
+} board_ops_t;
 ```
 
-### Step 3: Implement `board.c`
+The exact design is not frozen, but generic code should be able to ask whether a capability exists rather than assuming virtio on every board.
 
-Use `drivers/boards/qemu_virt/board.c` as the live reference. A minimal board
-skeleton looks like this:
+## Adding a board
 
-```c
-// drivers/boards/your_board/board.c
+### 1. Create board files
 
-#include "boards/your_board/board.h"
-
-#include "irq/gicv2.h"       // or your interrupt controller
-#include "kernel/mm/vmm.h"
-#include "uart/pl011.h"      // or your UART type
-
-const char *board_name(void) {
-    return "your-board";
-}
-
-void board_early_init(void) {
-    uart_init(YOUR_BOARD_UART_BASE);
-}
-
-int board_map_mmio(uint64_t *pgd) {
-    int status = vmm_map_page(pgd, YOUR_BOARD_UART_BASE,
-                              YOUR_BOARD_UART_BASE,
-                              VMM_FLAG_READ | VMM_FLAG_WRITE |
-                                  VMM_FLAG_DEVICE);
-    if (status == 0) {
-        status = vmm_map_range(pgd, YOUR_BOARD_GIC_DIST_BASE,
-                               YOUR_BOARD_GIC_DIST_BASE, 0x20000,
-                               VMM_FLAG_READ | VMM_FLAG_WRITE |
-                                   VMM_FLAG_DEVICE);
-    }
-    return status;
-}
-
-void board_irq_init(void) {
-    gicv2_init(YOUR_BOARD_GIC_DIST_BASE, YOUR_BOARD_GIC_CPU_BASE);
-}
-
-void board_irq_enable(uint32_t irq) {
-    gicv2_enable_irq(irq);
-}
-
-uint32_t board_irq_ack(void) {
-    return gicv2_ack_irq();
-}
-
-void board_irq_end(uint32_t irq) {
-    gicv2_end_irq(irq);
-}
-
-int board_irq_is_spurious(uint32_t irq) {
-    return irq == GIC_SPURIOUS_IRQ;
-}
-
-uint32_t board_uart0_irq(void) {
-    return YOUR_BOARD_UART_IRQ;
-}
-
-uint64_t board_virtio_mmio_base(void) {
-    return YOUR_BOARD_VIRTIO_BASE;
-}
-
-uint64_t board_virtio_mmio_size(void) {
-    return YOUR_BOARD_VIRTIO_SIZE;
-}
-
-uint64_t board_virtio_mmio_stride(void) {
-    return YOUR_BOARD_VIRTIO_STRIDE;
-}
-
-int board_emmc_read(uint32_t lba, uint32_t count, void *buffer) {
-    (void)lba;
-    (void)count;
-    (void)buffer;
-    return -1;
-}
-
-int board_emmc_write(uint32_t lba, uint32_t count, const void *buffer) {
-    (void)lba;
-    (void)count;
-    (void)buffer;
-    return -1;
-}
-
-int board_storage_init(void) {
-    return -1;
-}
-
-int board_storage_read(uint32_t lba, uint32_t count, void *buffer) {
-    (void)lba;
-    (void)count;
-    (void)buffer;
-    return -1;
-}
-
-int board_storage_write(uint32_t lba, uint32_t count, const void *buffer) {
-    (void)lba;
-    (void)count;
-    (void)buffer;
-    return -1;
-}
-
-uint32_t board_virtio_input_irq(void) {
-    return 0;
-}
-
-int board_virtio_input_init(void) {
-    return -1;
-}
-
-int board_virtio_input_poll(void) {
-    return -1;
-}
+```text
+drivers/boards/<board>/board.h
+drivers/boards/<board>/board.c
+linker/linker_<board>.ld
 ```
 
-Replace the storage and input stubs only after the board has a proven boot +
-UART milestone. Keep unsupported optional paths failing cleanly instead of
-pretending they work.
+Keep physical addresses in the board-specific header or implementation.
 
-### Step 4: Select the board at build time
+### 2. Establish a build-only milestone
 
-```bash
-# qemu_virt is the default. Override it on the command line:
-make BOARD=your_board
-```
-
-The Makefile compiles `drivers/boards/$(BOARD)/board.o`. Do not add the board
-directory to the global include path unless there is a specific reason; generic
-kernel files should keep resolving `#include "drivers/board.h"` to the generic
-contract.
-
----
-
-## Porting Checklist
-
-Work through this list in order. Each item depends on the previous.
-
-### Phase A: Boot
-
-- [ ] Identify where your board's boot ROM or bootloader loads the kernel.
-- [ ] Add or update the board linker script under `linker/`.
-- [ ] For QEMU `virt`, the current link/load address is `0x40080000`.
-- [ ] For the planned Raspberry Pi 4 path, the current linker script uses
-      `0x80000`.
-- [ ] Verify entry point: does your bootloader jump to `_start`?
-- [ ] Check initial exception level: are you at EL2 or EL1? EL2 needs a drop.
-
-**EL2 to EL1 drop sketch (if needed, add carefully to the boot path):**
-
-```asm
-// Check current EL
-mrs x0, CurrentEL
-lsr x0, x0, #2
-cmp x0, #2
-bne .not_el2
-
-// Drop to EL1
-msr elr_el2, x9        // return address
-mov x0, #0x3c5         // SPSR: EL1h, interrupts masked
-msr spsr_el2, x0
-eret
-.not_el2:
-```
-
-### Phase B: UART Output
-
-- [ ] Find your board's UART base address from the datasheet, firmware docs, or
-      Linux DTS.
-- [ ] Check UART type: PL011, 8250/16550, BCM mini UART, or custom.
-- [ ] Implement the board's early UART path.
-- [ ] Verify boot prints the earliest banner or a controlled failure marker.
-
-This is the most important hardware milestone. Nothing else matters until text
-output is reliable.
-
-### Phase C: Interrupts
-
-- [ ] Identify interrupt controller: GIC-400, GIC-500, or custom.
-- [ ] Find GIC distributor and CPU interface base addresses.
-- [ ] Initialize the GIC.
-- [ ] Verify timer interrupt fires at the expected rate.
-
-### Phase D: Memory
-
-- [ ] Find the board's RAM size from DTB, firmware API, or a board-specific
-      fallback.
-- [ ] Verify `dtb_get_memory()` sees the RAM map, or add a board-specific
-      fallback.
-- [ ] Verify PMM initializes without overwriting kernel or firmware regions.
-
-### Phase E: Storage
-
-The generic filesystem path now goes through `board_storage_*`.
-
-**QEMU `virt`:**
-- `board_storage_init/read/write` route to virtio-blk.
-- `make qemu-fs-test` covers the storage/VFS integration path.
-
-**Raspberry Pi 4 / SD or eMMC:**
-- Implement the eMMC/SD driver behind the board storage functions.
-- Keep raw eMMC helpers board-owned and expose only `board_storage_*` to generic
-  VFS code.
-
-### Phase F: Input
-
-The common input queue can be filled by UART, virtio-input, or USB HID.
-
-- [ ] Stub unsupported virtio-input paths with clean failure values.
-- [ ] For QEMU-like boards, implement `board_virtio_input_init()` and
-      `board_virtio_input_poll()` through the virtio-input driver.
-- [ ] For real boards, prefer USB HID once the host controller is visible.
-
-### Phase G: Display
-
-**Option 1: Linear framebuffer (simplest)**
-- Find framebuffer base address from DTB or firmware.
-- Feed the resolved base address, dimensions, pitch, and pixel format into the
-  framebuffer driver.
-
-**Option 2: Raspberry Pi mailbox (RPi 4/5)**
-```c
-uint32_t mailbox_fb_init(uint32_t width, uint32_t height) {
-    // Query framebuffer from VideoCore firmware via mailbox properties.
-}
-```
-
-**Option 3: DRM/KMS-like display controller work**
-- Parse the display controller from DTB.
-- Implement a minimal mode-set path only for hardware with open documentation.
-- Do not start here for the first hardware boot.
-
----
-
-## Device Tree (DTB)
-
-QEMU and most ARM boards pass a Device Tree Blob (DTB) to the kernel. ArmoniOS
-currently uses minimal DTB parsing for RAM and selected board/runtime discovery.
-Keep board-specific fallbacks in the board layer when a device tree is missing
-or incomplete.
-
-The DTB parser lives in `kernel/dtb.c`. Keep it small and add host tests before
-expanding its supported FDT surface.
-
----
-
-## Release Safety For Porting Work
-
-Porting must not regress the current QEMU baseline. Before merging board-layer,
-linker, storage, input, or boot changes, run the relevant gates from
-`docs/ROADMAP.md`:
+Before hardware work:
 
 ```sh
-make
-make size
-make -C tests test
-make stack-check
-make qemu-fs-test
-timeout 25s make qemu-fb
-timeout 25s make qemu-usb
-timeout 25s make qemu-net
+make BOARD=<board>
 ```
 
-For real hardware work, add a short serial log note to the relevant issue or
-document. Do not claim Raspberry Pi support in README until a real board reaches
-a documented boot milestone.
+must compile and link in CI.
+
+At this stage unsupported operations may return safe errors, but every required symbol must exist. Record the result as `BUILD-VERIFIED`, not hardware support.
+
+### 3. Establish controlled CPU entry
+
+Document:
+
+- firmware or bootloader;
+- initial exception level;
+- core ID behavior;
+- kernel load address;
+- DTB location and ownership;
+- cache/MMU state on entry.
+
+If the board enters at EL2, add a reviewed EL2-to-EL1 path before using EL1 exception registers. Park non-boot cores until SMP is deliberately implemented.
+
+### 4. Establish serial output
+
+Serial is the first hardware runtime milestone.
+
+Record:
+
+- exact board model and revision;
+- UART type;
+- GPIO alternate-function setup;
+- clock source and baud configuration;
+- cable/adapter details;
+- earliest stable marker;
+- repeat count across cold boots.
+
+No display, storage, or USB claim matters until serial is repeatable.
+
+### 5. Validate memory and timer
+
+- confirm DTB memory ranges;
+- reserve firmware, DTB, kernel, and MMIO correctly;
+- remove or explicitly document the current 128 MiB PMM limit;
+- verify interrupt acknowledge/end paths;
+- verify timer frequency and repeated ticks;
+- test process return from IRQ on hardware before running a desktop.
+
+### 6. Add display
+
+For Raspberry Pi 4, a firmware mailbox framebuffer is the preferred first display milestone.
+
+Validate:
+
+- physical framebuffer address;
+- ARM-visible address translation;
+- width, height, pitch, and pixel order;
+- cache attributes;
+- full-screen fill before attempting the compositor.
+
+Do not begin with a complex DRM/KMS-style stack.
+
+### 7. Add storage read-only first
+
+The generic filesystem path expects 512-byte logical sectors from `board_storage_*`.
+
+Required order:
+
+1. controller reset and clock setup;
+2. card identification and voltage negotiation;
+3. addressing-mode detection;
+4. one repeatable sector read;
+5. multiple sector reads;
+6. FAT boot-sector parse;
+7. read-only file access;
+8. writes only after corruption/recovery testing.
+
+Do not use the current `drivers/storage/emmc.c` as a known-good reference. It contains unresolved register-size, indexing, command-construction, and initialization issues tracked by `RISK-007`.
+
+### 8. Add USB and PCIe
+
+On Raspberry Pi 4, the VL805 xHCI controller requires BCM2711 PCIe host-bridge initialization before generic PCI/xHCI code can discover it.
+
+Validate the host bridge first, then PCI enumeration, then xHCI reset, then one directly attached keyboard. Hub support is a separate feature.
+
+### 9. Add network last
+
+Keep network controller work behind the board layer. Reuse generic protocol code only after frame send/receive is proven.
+
+## Port verification record
+
+Every hardware milestone must include:
+
+```text
+Date:
+Commit:
+Board model/revision:
+Firmware/bootloader:
+Boot files/config:
+Power supply:
+Serial adapter and settings:
+
+Build command and result:
+Hardware procedure:
+Observed markers:
+Number of successful cold boots:
+Known failures:
+```
+
+Photos or serial logs are useful evidence, but the reproduction text must remain sufficient without them.
+
+## Support claim levels
+
+Use these exact scopes:
+
+- **source present** — board files exist;
+- **build-verified** — target compiles and links;
+- **serial bring-up verified** — physical board reaches documented UART marker;
+- **subsystem verified** — one named subsystem passes a documented hardware workflow;
+- **desktop verified** — framebuffer, input, processes, and applications complete a named workflow;
+- **supported** — documented setup is repeatable and mandatory known risks are closed or accepted.
+
+ArmoniOS currently claims only QEMU development support. Raspberry Pi 4 is at the source-present experimental stage.
