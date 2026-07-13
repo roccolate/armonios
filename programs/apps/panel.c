@@ -54,6 +54,7 @@ typedef struct {
     uint32_t window_ids[PANEL_APP_WINDOW_CAP];
     uint32_t window_states[PANEL_APP_WINDOW_CAP];
     int window_count;
+    int process_count;
 } panel_app_t;
 
 typedef struct {
@@ -112,6 +113,7 @@ static void init_app(panel_app_t *app, const char *process_name,
     copy_text(app->label, sizeof(app->label), label);
     copy_text(app->path, sizeof(app->path), path);
     app->window_count = 0;
+    app->process_count = 0;
 }
 
 static void init_apps(panel_state_t *panel) {
@@ -126,6 +128,7 @@ static void init_apps(panel_state_t *panel) {
 
 static void clear_app_windows(panel_app_t *app) {
     app->window_count = 0;
+    app->process_count = 0;
     for (int i = 0; i < PANEL_APP_WINDOW_CAP; i++) {
         app->pids[i] = 0;
         app->window_ids[i] = 0;
@@ -152,14 +155,18 @@ static void refresh_app_model(panel_state_t *panel) {
         for (int app_index = 0; app_index < PANEL_APP_COUNT; app_index++) {
             panel_app_t *app = &panel->apps[app_index];
             if (!text_equal(panel->procs[proc_index].name,
-                            app->process_name) ||
-                app->window_count >= PANEL_APP_WINDOW_CAP) {
+                            app->process_name)) {
                 continue;
+            }
+
+            app->process_count++;
+            if (app->window_count >= PANEL_APP_WINDOW_CAP) {
+                break;
             }
 
             long window_id = gui_window_for_pid((long)pid, 0);
             if (window_id < 0) {
-                continue;
+                break;
             }
 
             uint32_t state = 0;
@@ -228,8 +235,8 @@ static void draw_app_button(panel_state_t *panel, int app_index) {
                               : COLOR_ITEM_BG;
     int label_width = text_width(app->label, LABEL_CAP);
     int label_x = x + (PANEL_APP_W - label_width) / 2;
-    panel_visual_state_t state = panel_visual_state(
-        app->window_states, app->window_count);
+    panel_visual_state_t state = panel_app_visual_state(
+        app->window_states, app->window_count, app->process_count);
 
     (void)gui_window_draw_rect(panel->wid, x, PANEL_ITEM_Y,
                                PANEL_APP_W, PANEL_ITEM_H, background);
@@ -245,8 +252,9 @@ static void draw_clock(panel_state_t *panel) {
     uint32_t background = panel->hover_target == PANEL_TARGET_CLOCK
                               ? COLOR_ITEM_HOVER
                               : COLOR_ITEM_BG;
-    panel_visual_state_t state = panel_visual_state(
-        clock_app->window_states, clock_app->window_count);
+    panel_visual_state_t state = panel_app_visual_state(
+        clock_app->window_states, clock_app->window_count,
+        clock_app->process_count);
 
     (void)gui_window_draw_rect(panel->wid, PANEL_CLOCK_X, PANEL_ITEM_Y,
                                PANEL_CLOCK_W, PANEL_ITEM_H, background);
@@ -314,6 +322,13 @@ static void activate_app(panel_state_t *panel, int app_index) {
             (void)gui_window_focus(window_id);
         }
         refresh_panel(panel);
+        return;
+    }
+
+    if (app->process_count > 0) {
+        kli_write_cstr(1, "panel: launch pending ");
+        kli_write_cstr(1, app->process_name);
+        kli_write_cstr(1, "\n");
         return;
     }
 
