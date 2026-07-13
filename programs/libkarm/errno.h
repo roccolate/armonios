@@ -19,6 +19,7 @@
 #define KLI_BADF   (-5L)
 #define KLI_INVAL  (-7L)
 #define KLI_AGAIN  (-11L)
+#define KLI_PERM   (-13L)
 
 static inline int kli_isok(long ret) {
     return ret >= 0;
