@@ -14,14 +14,27 @@
 
 #define PANEL_ITEM_Y 4
 #define PANEL_ITEM_H 32
-#define PANEL_APP_X 8
-#define PANEL_APP_W 104
+#define PANEL_MENU_BUTTON_X 8
+#define PANEL_MENU_BUTTON_W 72
+#define PANEL_APP_X 88
+#define PANEL_APP_W 96
 #define PANEL_APP_GAP 4
 #define PANEL_CLOCK_X 552
 #define PANEL_CLOCK_W 80
 
+#define PANEL_MENU_X 8
+#define PANEL_MENU_W 224
+#define PANEL_MENU_H 184
+#define PANEL_MENU_Y (PANEL_Y - PANEL_MENU_H - 4)
+#define PANEL_MENU_ITEM_X 8
+#define PANEL_MENU_ITEM_Y 32
+#define PANEL_MENU_ITEM_W (PANEL_MENU_W - 16)
+#define PANEL_MENU_ITEM_H 24
+#define PANEL_MENU_ITEM_GAP 4
+
 #define PANEL_TARGET_NONE (-1)
-#define PANEL_TARGET_CLOCK PANEL_PINNED_COUNT
+#define PANEL_TARGET_MENU PANEL_APP_COUNT
+#define PANEL_TARGET_CLOCK (PANEL_APP_COUNT + 1)
 
 #define PANEL_TICKS_PER_SECOND 100ULL
 
@@ -35,6 +48,15 @@ typedef enum {
     PANEL_VISUAL_MINIMIZED,
 } panel_visual_state_t;
 
+typedef enum {
+    PANEL_ACTION_NONE = 0,
+    PANEL_ACTION_LAUNCH,
+    PANEL_ACTION_WAIT,
+    PANEL_ACTION_FOCUS,
+    PANEL_ACTION_RESTORE,
+    PANEL_ACTION_MINIMIZE,
+} panel_activation_action_t;
+
 static inline int panel_app_x(int index) {
     return PANEL_APP_X + index * (PANEL_APP_W + PANEL_APP_GAP);
 }
@@ -42,6 +64,11 @@ static inline int panel_app_x(int index) {
 static inline int panel_target_at(int x, int y) {
     if (y < PANEL_ITEM_Y || y >= PANEL_ITEM_Y + PANEL_ITEM_H) {
         return PANEL_TARGET_NONE;
+    }
+
+    if (x >= PANEL_MENU_BUTTON_X &&
+        x < PANEL_MENU_BUTTON_X + PANEL_MENU_BUTTON_W) {
+        return PANEL_TARGET_MENU;
     }
 
     for (int i = 0; i < PANEL_PINNED_COUNT; i++) {
@@ -56,6 +83,26 @@ static inline int panel_target_at(int x, int y) {
     }
 
     return PANEL_TARGET_NONE;
+}
+
+static inline int panel_menu_item_y(int index) {
+    return PANEL_MENU_ITEM_Y + index *
+           (PANEL_MENU_ITEM_H + PANEL_MENU_ITEM_GAP);
+}
+
+static inline int panel_menu_item_at(int x, int y) {
+    if (x < PANEL_MENU_ITEM_X ||
+        x >= PANEL_MENU_ITEM_X + PANEL_MENU_ITEM_W) {
+        return -1;
+    }
+
+    for (int i = 0; i < PANEL_APP_COUNT; i++) {
+        int top = panel_menu_item_y(i);
+        if (y >= top && y < top + PANEL_MENU_ITEM_H) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 static inline panel_visual_state_t panel_visual_state(const uint32_t *states,
@@ -106,6 +153,30 @@ static inline int panel_pick_window(const uint32_t *states, int count) {
     return 0;
 }
 
+static inline panel_activation_action_t panel_activation_action(
+    const uint32_t *states, int window_count, int process_count) {
+    int target;
+
+    if (window_count <= 0) {
+        return process_count > 0 ? PANEL_ACTION_WAIT : PANEL_ACTION_LAUNCH;
+    }
+    if (states == 0) {
+        return PANEL_ACTION_NONE;
+    }
+    if (window_count == 1 &&
+        (states[0] & PANEL_WINDOW_STATE_FOCUSED) != 0U) {
+        return PANEL_ACTION_MINIMIZE;
+    }
+
+    target = panel_pick_window(states, window_count);
+    if (target < 0) {
+        return PANEL_ACTION_NONE;
+    }
+    return (states[target] & PANEL_WINDOW_STATE_MINIMIZED) != 0U
+               ? PANEL_ACTION_RESTORE
+               : PANEL_ACTION_FOCUS;
+}
+
 static inline void panel_format_uptime(uint64_t ticks, char out[9]) {
     uint64_t total_seconds = ticks / PANEL_TICKS_PER_SECOND;
     uint64_t hours = (total_seconds / 3600ULL) % 100ULL;
@@ -123,10 +194,17 @@ static inline void panel_format_uptime(uint64_t ticks, char out[9]) {
     out[8] = '\0';
 }
 
+_Static_assert(PANEL_MENU_BUTTON_X + PANEL_MENU_BUTTON_W <= PANEL_APP_X,
+               "panel menu overlaps pinned apps");
 _Static_assert(PANEL_APP_X + PANEL_PINNED_COUNT * PANEL_APP_W +
                    (PANEL_PINNED_COUNT - 1) * PANEL_APP_GAP <= PANEL_CLOCK_X,
                "panel app buttons overlap clock area");
 _Static_assert(PANEL_CLOCK_X + PANEL_CLOCK_W <= PANEL_SCREEN_W,
                "panel clock exceeds screen width");
+_Static_assert(PANEL_MENU_Y >= 0 && PANEL_MENU_Y + PANEL_MENU_H <= PANEL_Y,
+               "panel menu must remain above taskbar");
+_Static_assert(PANEL_MENU_ITEM_Y + PANEL_APP_COUNT * PANEL_MENU_ITEM_H +
+                   (PANEL_APP_COUNT - 1) * PANEL_MENU_ITEM_GAP <= PANEL_MENU_H,
+               "panel menu items exceed popup height");
 
 #endif
