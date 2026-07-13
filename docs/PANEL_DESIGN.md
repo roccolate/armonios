@@ -2,64 +2,96 @@
 
 ## Status
 
-The modern panel phase 1 is implemented on branch `agent/modern-panel-phase1` and remains **UNVERIFIED** until the branch passes the complete build, size, host, stack, QEMU framebuffer, and visible desktop gates.
+Modern panel phase 1 is isolated in draft PR #21 on branch `agent/modern-panel-phase1`.
 
-This work is userland-only. It does not change the syscall ABI or the kernel's built-in panel policy.
+Phase 2 is implemented on dependent branch `agent/modern-panel-phase2`. Both phases remain **UNVERIFIED** until the complete build, size, host, stack, QEMU framebuffer, and visible desktop gates pass.
 
-## Phase 1 behavior
+The implementation remains userland-only. It does not add a syscall, renumber the ABI, or broaden an owner-only window permission.
 
-The panel is a compact 40-pixel dock without a title bar. The kernel still classifies the window named `panel` as:
+## Taskbar behavior
+
+The panel is a compact 40-pixel dock without a visible title bar. The kernel classifies the window named `panel` as:
 
 - `GUI_WINDOW_DOCK`;
 - `GUI_WINDOW_NO_FOCUS`;
 - `GUI_WINDOW_NO_DRAG`;
 - `GUI_WINDOW_SKIP_TASKBAR`.
 
-The previous two-row launcher/task layout is replaced by one taskbar row:
+The taskbar is one row:
 
 ```text
-[ Shell ] [ Editor ] [ Files ] [ Monitor ]                 [ 00:00:00 ]
+[ Apps ] [ Shell ] [ Editor ] [ Files ] [ Monitor ]         [ 00:00:00 ]
 ```
 
-The first four applications are pinned. The clock area is both an uptime display and the task button for the Clock application.
+The first four applications are pinned. The clock area is both an uptime display and the task control for Clock.
 
-Each task target follows the same rules:
+Each task target follows these rules:
 
-1. no matching window: launch the application;
-2. minimized window: restore it;
-3. visible window: focus it;
-4. multiple matching windows: repeated clicks cycle through the group.
+1. no matching process or window: launch the application;
+2. matching process still opening its first window: wait instead of spawning a duplicate;
+3. minimized window: restore it;
+4. visible non-focused window: focus it;
+5. multiple matching windows: repeated clicks cycle through the group;
+6. one already-focused window: keep it focused.
 
 The panel groups at most four windows per application. Extra windows remain valid desktop windows but are not represented by additional instance marks.
 
+Clicking an already-focused app does **not** minimize it yet. `SYS_WINDOW_MINIMIZE` is owner-only, and the panel must not receive broad ownership over another process's window merely for desktop polish. A future change needs a narrowly scoped presentation permission with tests and documentation.
+
+## Application menu
+
+The `Apps` control opens a real second window owned by the panel process. It is not a painted placeholder.
+
+The menu:
+
+- lists Shell, Editor, Files, Monitor, and Clock;
+- launches or activates the selected application;
+- supports mouse hover and click;
+- supports Up, Down, Enter, and Escape;
+- closes when it loses focus;
+- restores the previously focused application when dismissed with Escape or by toggling the Apps button;
+- displays a small running/focused marker beside each application.
+
+The popup uses a one-pixel kernel title area. This preserves normal keyboard focus while ensuring clicks in the menu content do not start a window drag. The one-pixel area is not intended as visible decoration.
+
 ## State language
 
-Phase 1 deliberately retains the existing neutral palette. State is communicated through shape:
+The panel deliberately retains the existing neutral palette. State is communicated through shape:
 
 - closed: no bottom marker;
 - running: short solid bottom marker;
 - focused: wide bottom marker plus an inner top line;
 - minimized: split bottom marker;
 - multiple instances: small marks in the upper-right corner;
-- hover: existing hover background and hand cursor region.
+- hover: existing hover background and hand cursor region;
+- open application menu: marker under the Apps control.
 
-No color/theme decision should be inferred from this implementation.
+No color or theme decision should be inferred from this implementation.
 
 ## Architecture
 
-Pure panel behavior lives in `programs/apps/panel_model.h`:
+Pure behavior lives in `programs/apps/panel_model.h`:
 
-- geometry and hit testing;
+- taskbar and menu geometry;
+- hit testing;
 - aggregate visual state;
+- activation decisions;
 - grouped-window target selection;
 - uptime formatting.
 
-`programs/apps/panel.c` owns runtime integration:
+The KLI1 panel remains one translation unit:
+
+- `programs/apps/panel.c` provides the small panel-specific window-creation adapter;
+- `programs/apps/panel_runtime.inc` owns taskbar/menu runtime integration;
+- the `.inc` file is included exactly once by `panel.c` and is tracked by the Makefile dependency flags.
+
+Runtime integration uses the existing interfaces:
 
 - `SYS_PROCLIST` polling;
 - `SYS_WINDOW_FOR_PID` lookup;
 - `SYS_WINDOW_STATE` inspection;
 - launch, focus, and restore behavior;
+- process-owned popup creation and destruction;
 - drawing and event handling.
 
 The focused host runner is:
@@ -74,16 +106,16 @@ It is also part of:
 bash tools/verify.sh
 ```
 
-## Deferred phase 2
+## Deferred work
 
-The following features require separate review and are not part of phase 1:
+The following still require separate review:
 
-- application menu or popup window;
-- click-active-to-minimize across process ownership;
+- panel-scoped click-active-to-minimize permission;
 - global shortcuts such as Super and Alt-Tab;
 - compositor-to-panel lifecycle events replacing polling;
 - pin reordering or persistent settings;
-- icon and color theme work.
+- icons and color theme work;
+- tooltips and context menus.
 
 Do not add placeholder controls for deferred behavior. Every visible control in the shipping panel must perform a real action.
 
@@ -98,12 +130,16 @@ make qemu-fb-visible
 Verify:
 
 1. panel occupies one compact row and does not receive keyboard focus;
-2. each pinned button launches its application once;
-3. clicking a running application focuses it;
-4. clicking a minimized application restores it;
-5. grouped application instances cycle on repeated clicks;
-6. focused, running, minimized, and multiple-instance marks update;
-7. the integrated uptime clock advances;
-8. clicking the clock launches or activates Clock;
-9. no app window is hidden behind an incorrectly sized dock;
-10. Files → Editor → FAT32 workflow still works.
+2. Apps opens a popup above the taskbar;
+3. popup content cannot be dragged;
+4. Up/Down change selection, Enter activates, and Escape closes;
+5. clicking outside the popup closes it without leaving a stale window;
+6. each pinned button launches its application once;
+7. clicking a running application focuses it;
+8. clicking a minimized application restores it;
+9. grouped application instances cycle on repeated clicks;
+10. state and instance markers update;
+11. uptime advances and clicking it launches or activates Clock;
+12. no app window is hidden behind an incorrectly sized dock;
+13. Files → Editor → FAT32 workflow still works;
+14. no user fault, scheduler stall, stale focus, or compositor blank frame occurs.
