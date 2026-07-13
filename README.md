@@ -22,7 +22,7 @@ The current codebase includes:
 - PCI/xHCI and basic USB HID support;
 - native host tests for core kernel, VFS, filesystem, driver-parser, GUI, and ABI logic.
 
-Important limitations remain. In particular, user-output buffers are not yet checked for write permission, VFS file descriptors are global rather than process-owned, the visible desktop target does not currently attach its FAT disk, and Raspberry Pi support is not build- or hardware-verified.
+Important limitations remain. In particular, user-output buffers on `main` are not yet checked for write permission, VFS file descriptors are global rather than process-owned, the repaired visible FAT/editor workflow has not yet been rerun, GitHub Actions is blocked before checkout, and Raspberry Pi support is not build- or hardware-verified.
 
 Read these before making or evaluating claims:
 
@@ -52,14 +52,24 @@ sudo apt update && sudo apt install -y \
   make
 ```
 
-### Build
+### Run the automated local baseline
 
 ```bash
 git clone https://github.com/roccolate/armonios
 cd armonios
+bash tools/verify.sh
+```
+
+The script records the current commit and runs the kernel build, binary-size gate, native host tests, userland stack check, and FAT32 QEMU serial-marker smoke test. It stops on the first failure.
+
+Equivalent individual commands are:
+
+```bash
 make
 make size
 make -C tests test
+make stack-check
+make qemu-fs-test
 ```
 
 ### Run the serial target
@@ -76,7 +86,7 @@ Exit QEMU with `Ctrl+A`, then `X`.
 make qemu-fb-visible
 ```
 
-This target currently provides GPU and input devices. It does **not** yet attach the generated FAT32 block image, so the `files` application will not expose the documented FAT workflow until that build-target defect is fixed. See `RISK-003` in `docs/TECHNICAL_RISKS.md`.
+This target now builds and attaches the generated FAT32 virtio block image together with GPU, USB keyboard, and mouse devices. The wiring change is implemented, but the complete create/edit/save/rename/reopen/delete workflow has not yet been rerun on the current commit. Treat the visible result as `UNVERIFIED` until a named tester records it in issue #1.
 
 ### Run the storage smoke test
 
@@ -98,7 +108,7 @@ At present these are runtime launch targets, not complete deterministic tests. A
 
 ## Current verified local baseline
 
-The latest verification recorded in issue #1 reports:
+The latest verification recorded in issue #1, before the visible-recovery merge, reports:
 
 ```text
 make                  passed
@@ -108,7 +118,7 @@ make stack-check      maximum 368 bytes, limit 3072
 make qemu-fs-test     passed after direct QEMU serial-file capture
 ```
 
-The full visible files/editor/FAT workflow is still incomplete and the remaining QEMU targets do not yet have deterministic pass records. See `docs/CURRENT_STATE.md` for exact evidence and scope.
+Those results are historical evidence, not proof for the current `main`. Run `bash tools/verify.sh` and record its exact commit before promoting the current baseline. The full visible files/editor/FAT workflow and deterministic framebuffer, USB, and network gates remain incomplete. See `docs/CURRENT_STATE.md` for exact evidence and scope.
 
 ## Architecture summary
 
@@ -163,12 +173,13 @@ The next release goal is a repeatable **v1.0 QEMU desktop release candidate**. T
 
 Major blockers include:
 
-1. permission-aware user-copy helpers;
+1. permission-aware user-copy helpers and a QEMU negative regression;
 2. process-owned file descriptors and exit cleanup;
-3. a visible desktop target with FAT storage;
-4. correct initial window focus for spawned apps;
+3. verification of the visible FAT attachment on the current commit;
+4. verification of initial focus for spawned app windows;
 5. deterministic framebuffer, USB, and network QEMU gates;
-6. successful end-to-end files/editor/FAT verification.
+6. successful end-to-end files/editor/FAT verification;
+7. restoring GitHub Actions runner execution and logs.
 
 See [Roadmap](docs/ROADMAP.md).
 
@@ -185,7 +196,7 @@ programs/apps/         freestanding desktop applications
 programs/libkarm/      syscall and small userland runtime helpers
 programs/libkarmdesk/  GUI wrappers
 tests/                native host test suite
-tools/                host build utilities
+tools/                host build and verification utilities
 linker/               kernel linker scripts
 docs/                 architecture, ABI, status, risks, and maintenance policy
 ```
