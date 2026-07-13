@@ -15,6 +15,7 @@
 #include "kernel/gui.h"
 #include "kernel/mm/pmm.h"
 #include "kernel/mm/vmm.h"
+#include "kernel/vfs.h"
 
 #define USER_REGION_ALIGN 4096ULL
 _Static_assert((USER_REGION_ALIGN & (USER_REGION_ALIGN - 1ULL)) == 0,
@@ -418,6 +419,7 @@ void process_mark_exited(process_t *process, uint64_t exit_code) {
     if (process->state == PROCESS_ZOMBIE) {
         return;
     }
+    (void)vfs_close_all_for_pid(process->pid);
     gui_destroy_windows_for_pid(gui_desktop(), process->pid);
 
     process->exit_code = exit_code;
