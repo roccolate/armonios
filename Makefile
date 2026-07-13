@@ -182,7 +182,7 @@ help:
 	@printf "  %-18s %s\n" "qemu-blk" "run QEMU with a generated FAT32 virtio-blk image"
 	@printf "  %-18s %s\n" "qemu-fs-test" "smoke-test FAT32 storage wiring in QEMU"
 	@printf "  %-18s %s\n" "qemu-fb" "run QEMU headless with virtio-gpu"
-	@printf "  %-18s %s\n" "qemu-fb-visible" "run QEMU with visible virtio-gpu, USB keyboard, and virtio mouse"
+	@printf "  %-18s %s\n" "qemu-fb-visible" "run visible desktop with FAT32, GPU, keyboard, and mouse"
 	@printf "  %-18s %s\n" "qemu-net" "run QEMU with virtio-net"
 	@printf "  %-18s %s\n" "qemu-usb" "run QEMU with xHCI USB keyboard and mouse"
 	@printf "  %-18s %s\n" "size" "print kernel ELF and binary size"
@@ -362,11 +362,13 @@ qemu-fb: qemu-check entry-check $(KERNEL_BIN)
 	    -kernel $(KERNEL_BIN) \
 	    -device virtio-gpu-device,xres=640,yres=480
 
-qemu-fb-visible: qemu-check entry-check $(KERNEL_BIN)
+qemu-fb-visible: qemu-check entry-check $(KERNEL_BIN) $(VIRTIO_BLK_IMG)
 	$(LOG_QEMU)qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 128M \
 	    -display gtk,gl=off -serial stdio \
 	    -global virtio-mmio.force-legacy=false \
 	    -kernel $(KERNEL_BIN) \
+	    -drive file=$(VIRTIO_BLK_IMG),if=none,format=raw,id=hd0 \
+	    -device virtio-blk-device,drive=hd0 \
 	    -device virtio-gpu-device,xres=640,yres=480 \
 	    -device qemu-xhci,id=xhci \
 	    -device usb-kbd,bus=xhci.0 \
