@@ -1,12 +1,80 @@
 # Roadmap
 
-This roadmap is intentionally conservative. ArmoniOS should become stable in QEMU before chasing hardware or multimedia scope.
+This roadmap is ordered by correctness and evidence. New features do not take priority over unresolved release blockers.
+
+Status claims must follow `DOCUMENTATION_POLICY.md`. Active blockers and their exit criteria live in `TECHNICAL_RISKS.md`.
 
 ## Current milestone: v1.0 QEMU desktop release candidate
 
-Goal: turn the current v0.9 desktop baseline into a repeatable, documented QEMU desktop release.
+**Current state:** v0.9 QEMU desktop alpha  
+**Goal:** a repeatable QEMU desktop whose core process, file, GUI, and test contracts can be trusted.
 
-### Required gates
+A v1.0 release candidate is not reached merely because the desktop appears. All P0 risks affecting QEMU v1.0 must be closed, mandatory runtime gates must assert success, and the visible FAT workflow must have a dated manual result.
+
+## Phase 0 — Documentation and baseline recovery
+
+- [x] Establish a documentation evidence policy.
+- [x] Create an active technical risk register.
+- [x] Replace broad status claims with an audited evidence matrix.
+- [x] Mark Raspberry Pi work as experimental rather than supported.
+- [ ] Keep issue and PR verification records synchronized with `CURRENT_STATE.md`.
+
+## Phase 1 — v1.0 correctness blockers
+
+### User-copy permissions — RISK-001
+
+- [ ] Store effective read/write/execute permissions with each registered user region.
+- [ ] Split pointer handling into `copy_from_user`, `copy_to_user`, and c-string helpers.
+- [ ] Reject kernel-to-user writes to read-only image pages.
+- [ ] Add host tests for readable, writable, boundary-crossing, and read-only destinations.
+- [ ] Add a QEMU test application that attempts an invalid output buffer and proves the kernel remains responsive.
+
+### Process-owned file descriptors — RISK-002
+
+- [ ] Define per-process descriptor ownership.
+- [ ] Make descriptor numbers local to the caller.
+- [ ] Close descriptors on exit, fault, kill, and explicit wait/reclaim.
+- [ ] Add tests proving one process cannot use or close another process's descriptor.
+- [ ] Add exhaustion/reuse tests across repeated process lifecycles.
+
+These two items block v1.0 regardless of desktop polish because they affect kernel correctness and isolation.
+
+## Phase 2 — Visible desktop workflow
+
+### Complete QEMU desktop target — RISK-003
+
+- [ ] Make `qemu-fb-visible` depend on `$(VIRTIO_BLK_IMG)`.
+- [ ] Attach the image through `virtio-blk-device`.
+- [ ] Confirm `files` sees `/fat` in the visible desktop.
+
+### Correct spawned-window focus — RISK-004
+
+- [ ] Define the focus policy for a newly created normal application window.
+- [ ] Ensure an editor spawned from `files` receives keyboard focus.
+- [ ] Add host coverage for the policy where practical.
+
+### Manual FAT workflow
+
+After the two fixes above, record the date, commit, environment, and tester for this workflow:
+
+1. Start the complete visible desktop target.
+2. Open `files` from the panel.
+3. List `/fat`.
+4. Create a new valid 8.3 root file.
+5. Open it in `editor`.
+6. Type content.
+7. Save with Ctrl-S.
+8. Close the editor.
+9. Return to `files`.
+10. Rename the file.
+11. Reopen the renamed file and confirm content persists.
+12. Delete the file.
+13. Refresh `/fat` and confirm the old and renamed paths are gone.
+14. Confirm no user fault, scheduler stall, compositor blank frame, stale path, or descriptor exhaustion.
+
+## Phase 3 — Deterministic release gates
+
+### Existing deterministic gates
 
 ```sh
 make
@@ -14,50 +82,74 @@ make size
 make -C tests test
 make stack-check
 make qemu-fs-test
+```
+
+### Gates that must be made deterministic — RISK-005
+
+Current launch commands:
+
+```sh
 timeout 25s make qemu-fb
 timeout 25s make qemu-usb
 timeout 25s make qemu-net
 ```
 
-Manual visible pass:
+Required changes:
 
-```sh
-make qemu-fb-visible
+- [ ] each target captures guest serial output;
+- [ ] each subsystem prints an explicit completion marker;
+- [ ] the target exits non-zero if the marker is absent;
+- [ ] timeout exit is not treated as success by itself;
+- [ ] CI runs all non-visual mandatory gates.
+
+Suggested markers:
+
+```text
+TEST framebuffer: PASS
+TEST usb-hid: PASS
+TEST dhcp: PASS
 ```
 
-### v1.0 desktop-core checklist
+## Phase 4 — KLI1 and memory contract decisions
 
-- [x] QEMU framebuffer desktop boots.
-- [x] Panel starts and launches apps.
-- [x] Shell/editor/files/monitor/clock are registered as bootfs apps.
-- [x] FAT32 root create/read/write/rename/delete/list exists.
-- [x] Dynamic `/fat/<name>` VFS nodes are invalidated after successful rename/delete.
-- [x] Host coverage exists for VFS static unmount and FAT32 dynamic node invalidation.
-- [ ] Full release gates pass after the FAT invalidation change.
-- [ ] Visible `files` -> `editor` -> FAT32 workflow is manually confirmed in QEMU.
-- [ ] `README.md`, `CURRENT_STATE.md`, `SYSCALLS.md`, and this roadmap match the verified behavior.
+### KLI1 mutable storage — RISK-009
 
-### Manual FAT workflow to confirm before v1.0
+Choose one documented v1.0 contract:
 
-In `make qemu-fb-visible`:
+- [ ] forbid `.data` and `.bss` and make application linking fail when they are emitted; or
+- [ ] extend KLI1 with explicit file-size/memory-size or data/BSS metadata and test loading.
 
-1. Open `files` from the panel.
-2. List `/fat`.
-3. Create a new 8.3 file.
-4. Open it in `editor`.
-5. Type content.
-6. Save with Ctrl-S.
-7. Close editor.
-8. Return to `files`.
-9. Rename the file.
-10. Reopen the renamed file and confirm content remains.
-11. Delete the file.
-12. Refresh/list `/fat` and confirm the deleted name is gone.
-13. Confirm no user fault, scheduler stall, compositor blank frame, or stale editor path.
+### Memory hardening — RISK-008
 
-## v1.1 desktop app polish
+This is at least a v1.x hardening goal and may be promoted to v1.0 if implementation work touches the same boundary:
 
-Start only after v1.0 is verified or the remaining v1.0 items are explicitly marked non-blocking.
+- [ ] move shared kernel mappings to TTBR1;
+- [ ] map kernel text RX, rodata R, mutable kernel data RW/NX, and MMIO device/NX;
+- [ ] introduce ASIDs;
+- [ ] replace global TLB invalidation on every process switch with scoped invalidation;
+- [ ] stop cloning the full RAM identity map into every process TTBR0.
+
+## v1.0 release-candidate exit criteria
+
+All items below are mandatory:
+
+- [ ] RISK-001 closed with host and QEMU evidence.
+- [ ] RISK-002 closed with isolation and cleanup tests.
+- [ ] RISK-003 closed.
+- [ ] RISK-004 closed.
+- [ ] RISK-005 closed for every mandatory runtime target.
+- [ ] KLI1 `.data`/`.bss` policy explicitly defined and enforced.
+- [ ] Full host suite passes.
+- [ ] Kernel size gate passes.
+- [ ] Stack gate passes.
+- [ ] All deterministic QEMU gates pass.
+- [ ] Visible FAT workflow passes and is recorded.
+- [ ] `README.md`, `CURRENT_STATE.md`, `ARCHITECTURE.md`, `MEMORY_MAP.md`, `SYSCALLS.md`, and this roadmap agree.
+- [ ] Every remaining P1 risk is closed or has a written acceptance rationale.
+
+## v1.1 desktop application polish
+
+Start only after the v1.0 correctness and verification gates are satisfied.
 
 Scope should remain mostly userland:
 
@@ -70,52 +162,77 @@ Scope should remain mostly userland:
 - `programs/libkarm/`
 - `programs/libkarmdesk/`
 
-Rules:
-
-- no broad kernel rewrite;
-- no new syscall unless a userland need is proven and documented;
-- keep app stack usage within the current stack-check limit;
-- prefer small helpers in `libkarm` / `libkarmdesk` only when they reduce duplication or app image size;
-- keep every UI behavior testable in `make qemu-fb-visible`.
-
-Candidate polish tasks:
+Candidate work:
 
 - clearer focused/minimized state in panel taskbar slots;
-- grouped shell help output;
-- better shell error messages;
+- prevent duplicate launches where the product behavior requires one instance;
+- grouped shell help and better error messages;
 - clearer editor modified/saved/open-failed status;
-- clearer files create/rename/delete feedback;
-- select newly created/renamed file after refresh;
-- keep monitor and clock useful as small system-info demos.
+- improved files create/rename/delete feedback;
+- selection preservation after refresh;
+- small reusable userland helpers only where they reduce duplication or image size.
+
+Do not use v1.1 polish as a reason to add new kernel syscalls without a demonstrated userland need.
 
 ## v1.5 Raspberry Pi 4 bring-up
 
-Only after QEMU v1.0 is stable.
+The current `rpi4` files are experimental scaffolding, not a working port.
 
-Goals:
+### Build-contract milestone — RISK-006
 
-- keep board code behind `drivers/board.h`;
-- preserve QEMU as the primary regression target;
-- bring up serial first;
-- bring up framebuffer only after basic boot is stable;
-- do not claim Raspberry Pi 4 support until real hardware boot is confirmed.
+- [ ] `make BOARD=rpi4` compiles and links in CI.
+- [ ] every required board function exists;
+- [ ] unsupported capabilities return explicit safe failures;
+- [ ] generic kernel code no longer assumes virtio capability functions exist on every board.
 
-## v2.0 engine / multimedia runtime
+### Serial milestone
 
-Only after the desktop core is stable.
+- [ ] handle the firmware's initial exception level and controlled EL2-to-EL1 transition;
+- [ ] park secondary cores;
+- [ ] document exact Pi model, firmware, boot files, and configuration;
+- [ ] reach a stable early serial marker on physical hardware.
 
-Start in userland first:
+### Timer and memory milestone
 
-- fixed-step game loop helper;
-- sprite/tile helpers using existing framebuffer/window primitives;
-- input helpers over existing keyboard/mouse events;
-- tiny demo app;
-- no audio/kernel multimedia ABI until a concrete userland need is proven.
+- [ ] validate DTB memory discovery;
+- [ ] reserve firmware/device regions correctly;
+- [ ] validate interrupts and timer ticks on hardware;
+- [ ] remove the 128 MiB QEMU-only PMM ceiling or document a temporary board limit.
 
-Not in scope until proven:
+### Storage milestone — RISK-007
 
+- [ ] replace or thoroughly correct the experimental eMMC/SD implementation;
+- [ ] validate controller initialization and card negotiation;
+- [ ] prove read-only sector access first;
+- [ ] prove FAT mount next;
+- [ ] enable writes only after repeatable read and corruption tests.
+
+### Display and input milestone
+
+- [ ] acquire a framebuffer through the Raspberry Pi firmware mailbox or another documented path;
+- [ ] validate pixel format, pitch, and cache behavior;
+- [ ] initialize the BCM2711 PCIe host bridge before attempting VL805 xHCI;
+- [ ] add USB HID only after serial, timer, memory, and display are stable.
+
+Do not claim Raspberry Pi support before the hardware evidence rules in `DOCUMENTATION_POLICY.md` are met.
+
+## v2.0 engine and multimedia runtime
+
+Begin only after the desktop core and application ABI are stable.
+
+Start in userland:
+
+- fixed-step loop helper;
+- sprite, tile, and blit helpers over the existing window API;
+- keyboard and mouse state helpers;
+- one small demo application;
+- performance measurement before new kernel ABI.
+
+Not in scope until a concrete need is proven:
+
+- audio kernel ABI;
+- GPU acceleration;
 - SMP;
 - full POSIX;
-- browser/network stack apps;
-- GPU acceleration;
-- complex package system.
+- browser-class networking;
+- dynamic packages or a complex loader.
