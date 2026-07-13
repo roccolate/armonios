@@ -1,0 +1,58 @@
+name: Verify ArmoniOS
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build, host tests, and FAT32 smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install toolchain and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            binutils-aarch64-linux-gnu \
+            gcc \
+            gcc-aarch64-linux-gnu \
+            make \
+            qemu-system-arm
+
+      - name: Build kernel and userland
+        run: make
+
+      - name: Enforce kernel size limit
+        run: make size
+
+      - name: Run native host tests
+        run: make -C tests test
+
+      - name: Enforce userland stack limit
+        run: make stack-check
+
+      - name: Run FAT32 QEMU smoke test
+        run: make qemu-fs-test
+
+      - name: Upload QEMU smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-fs-test-log
+          path: build/qemu-fs-test.log
+          if-no-files-found: warn
+          retention-days: 14
