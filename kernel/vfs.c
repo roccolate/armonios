@@ -3,13 +3,15 @@
 #include <stdint.h>
 
 #include "kernel/fat32.h"
+#include "kernel/process.h"
 
 /*
  * Small in-kernel virtual filesystem.
  *
- * VFS owns the path table, open-file offsets, and mounted list callbacks. It
- * does not allocate memory or own file contents; mounted filesystems keep
- * their backing storage and expose read/write/stat/list operations here.
+ * Paths and open-file state remain kernel-owned. The global open-file array is
+ * an internal handle pool; callers see descriptor numbers local to the current
+ * process. PID 0 is reserved for kernel/host-test callers that do not have a
+ * current EL0 process.
  */
 
 static vfs_node_t g_vfs_nodes[VFS_MAX_NODES];
@@ -31,10 +33,59 @@ typedef struct {
     const vfs_node_t *node;
     uint64_t offset;
     uint32_t flags;
+    uint32_t owner_pid;
+    uint32_t local_fd;
     uint8_t used;
 } vfs_open_file_t;
 
-static vfs_open_file_t g_open_files[VFS_MAX_OPEN_FILES];
+static vfs_open_file_t g_open_files[VFS_MAX_GLOBAL_OPEN_FILES];
+
+static uint32_t vfs_current_owner_pid(void) {
+    const process_t *process = process_current();
+
+    return process != 0 ? process->pid : 0U;
+}
+
+static void vfs_clear_open_file(vfs_open_file_t *file) {
+    if (file == 0) {
+        return;
+    }
+
+    file->node = 0;
+    file->offset = 0;
+    file->flags = VFS_O_RDONLY;
+    file->owner_pid = 0;
+    file->local_fd = 0;
+    file->used = 0;
+}
+
+static int vfs_owner_is_alive(uint32_t pid) {
+    const process_t *current;
+    const process_t *process;
+
+    if (pid == 0U) {
+        return 1;
+    }
+
+    current = process_current();
+    if (current != 0 && current->pid == pid) {
+        return current->state != PROCESS_UNUSED &&
+               current->state != PROCESS_ZOMBIE;
+    }
+
+    process = process_find(pid);
+    return process != 0 && process->state != PROCESS_UNUSED &&
+           process->state != PROCESS_ZOMBIE;
+}
+
+static void vfs_reap_dead_owners(void) {
+    for (uint32_t i = 0; i < VFS_MAX_GLOBAL_OPEN_FILES; i++) {
+        if (g_open_files[i].used != 0 &&
+            !vfs_owner_is_alive(g_open_files[i].owner_pid)) {
+            vfs_clear_open_file(&g_open_files[i]);
+        }
+    }
+}
 
 static void vfs_clear_node(uint32_t index) {
     if (index >= VFS_MAX_NODES) {
@@ -84,23 +135,70 @@ static void vfs_drop_open_files_for_node(const vfs_node_t *node) {
         return;
     }
 
-    for (uint32_t i = 0; i < VFS_MAX_OPEN_FILES; i++) {
+    for (uint32_t i = 0; i < VFS_MAX_GLOBAL_OPEN_FILES; i++) {
         if (g_open_files[i].used != 0 && g_open_files[i].node == node) {
-            g_open_files[i].node = 0;
-            g_open_files[i].offset = 0;
-            g_open_files[i].flags = VFS_O_RDONLY;
-            g_open_files[i].used = 0;
+            vfs_clear_open_file(&g_open_files[i]);
         }
     }
 }
 
+static int vfs_local_fd_in_use(uint32_t owner_pid, uint32_t local_fd) {
+    for (uint32_t i = 0; i < VFS_MAX_GLOBAL_OPEN_FILES; i++) {
+        if (g_open_files[i].used != 0 &&
+            g_open_files[i].owner_pid == owner_pid &&
+            g_open_files[i].local_fd == local_fd) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int vfs_find_free_local_fd(uint32_t owner_pid, uint32_t *local_fd) {
+    if (local_fd == 0) {
+        return -1;
+    }
+
+    for (uint32_t fd = 0; fd < VFS_MAX_OPEN_FILES; fd++) {
+        if (!vfs_local_fd_in_use(owner_pid, fd)) {
+            *local_fd = fd;
+            return 0;
+        }
+    }
+
+    return -1;
+}
+
+static vfs_open_file_t *vfs_find_free_global_handle(void) {
+    for (uint32_t i = 0; i < VFS_MAX_GLOBAL_OPEN_FILES; i++) {
+        if (g_open_files[i].used == 0) {
+            return &g_open_files[i];
+        }
+    }
+
+    return 0;
+}
+
 static vfs_open_file_t *vfs_fd_at(int fd) {
-    if (fd < 0 || fd >= (int)VFS_MAX_OPEN_FILES ||
-        g_open_files[fd].used == 0 || g_open_files[fd].node == 0) {
+    uint32_t owner_pid;
+
+    if (fd < 0 || fd >= (int)VFS_MAX_OPEN_FILES) {
         return 0;
     }
 
-    return &g_open_files[fd];
+    vfs_reap_dead_owners();
+    owner_pid = vfs_current_owner_pid();
+
+    for (uint32_t i = 0; i < VFS_MAX_GLOBAL_OPEN_FILES; i++) {
+        if (g_open_files[i].used != 0 &&
+            g_open_files[i].node != 0 &&
+            g_open_files[i].owner_pid == owner_pid &&
+            g_open_files[i].local_fd == (uint32_t)fd) {
+            return &g_open_files[i];
+        }
+    }
+
+    return 0;
 }
 
 static int vfs_path_equals(const char *left, const char *right) {
@@ -269,11 +367,8 @@ void vfs_reset(void) {
     for (uint32_t i = 0; i < VFS_MAX_NODES; i++) {
         vfs_clear_node(i);
     }
-    for (uint32_t i = 0; i < VFS_MAX_OPEN_FILES; i++) {
-        g_open_files[i].node = 0;
-        g_open_files[i].offset = 0;
-        g_open_files[i].flags = VFS_O_RDONLY;
-        g_open_files[i].used = 0;
+    for (uint32_t i = 0; i < VFS_MAX_GLOBAL_OPEN_FILES; i++) {
+        vfs_clear_open_file(&g_open_files[i]);
     }
     for (uint32_t i = 0; i < VFS_MAX_LIST_MOUNTS; i++) {
         g_list_mounts[i].list = 0;
@@ -518,6 +613,9 @@ int vfs_list(const char *path, uint8_t *buffer, uint64_t capacity,
 int vfs_open_flags(const char *path, uint32_t flags) {
     const vfs_node_t *node = vfs_find(path);
     uint32_t mode = vfs_open_access_mode(flags);
+    uint32_t owner_pid;
+    uint32_t local_fd;
+    vfs_open_file_t *file;
 
     if (!vfs_open_flags_valid(flags)) {
         return -1;
@@ -535,17 +633,24 @@ int vfs_open_flags(const char *path, uint32_t flags) {
         return -1;
     }
 
-    for (uint32_t i = 0; i < VFS_MAX_OPEN_FILES; i++) {
-        if (g_open_files[i].used == 0) {
-            g_open_files[i].node = node;
-            g_open_files[i].offset = 0;
-            g_open_files[i].flags = mode;
-            g_open_files[i].used = 1;
-            return (int)i;
-        }
+    vfs_reap_dead_owners();
+    owner_pid = vfs_current_owner_pid();
+    if (vfs_find_free_local_fd(owner_pid, &local_fd) != 0) {
+        return -1;
     }
 
-    return -1;
+    file = vfs_find_free_global_handle();
+    if (file == 0) {
+        return -1;
+    }
+
+    file->node = node;
+    file->offset = 0;
+    file->flags = mode;
+    file->owner_pid = owner_pid;
+    file->local_fd = local_fd;
+    file->used = 1;
+    return (int)local_fd;
 }
 
 int vfs_open(const char *path) {
@@ -621,7 +726,6 @@ int vfs_write_fd(int fd, const uint8_t *buffer, uint64_t size,
 
 int vfs_seek(int fd, uint64_t offset) {
     uint64_t size;
-
     vfs_open_file_t *file = vfs_fd_at(fd);
 
     if (file == 0 || vfs_node_size(file->node, &size) != 0 ||
@@ -634,16 +738,28 @@ int vfs_seek(int fd, uint64_t offset) {
 }
 
 int vfs_close(int fd) {
-    if (fd < 0 || fd >= (int)VFS_MAX_OPEN_FILES ||
-        g_open_files[fd].used == 0) {
+    vfs_open_file_t *file = vfs_fd_at(fd);
+
+    if (file == 0) {
         return -1;
     }
 
-    g_open_files[fd].node = 0;
-    g_open_files[fd].offset = 0;
-    g_open_files[fd].flags = VFS_O_RDONLY;
-    g_open_files[fd].used = 0;
+    vfs_clear_open_file(file);
     return 0;
+}
+
+uint32_t vfs_close_all_for_pid(uint32_t pid) {
+    uint32_t closed = 0;
+
+    for (uint32_t i = 0; i < VFS_MAX_GLOBAL_OPEN_FILES; i++) {
+        if (g_open_files[i].used != 0 &&
+            g_open_files[i].owner_pid == pid) {
+            vfs_clear_open_file(&g_open_files[i]);
+            closed++;
+        }
+    }
+
+    return closed;
 }
 
 int vfs_unlink(const char *path) {
