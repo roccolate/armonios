@@ -14,16 +14,17 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 
 | ID | Severity | Area | Status | Summary |
 |---|---:|---|---|---|
-| RISK-001 | P0 | Syscall boundary | OPEN | Output buffers are range-checked but not checked for write permission. |
+| RISK-001 | P0 | Syscall boundary | OPEN | Output buffers are range-checked but not checked for write permission on `main`. |
 | RISK-002 | P0 | VFS/process isolation | OPEN | VFS descriptors are global rather than owned by a process. |
-| RISK-003 | P1 | QEMU desktop target | OPEN | `qemu-fb-visible` does not attach the FAT32 virtio block image. |
-| RISK-004 | P1 | Desktop focus | OPEN | A spawned editor window does not request focus after creation. |
+| RISK-003 | P1 | QEMU desktop target | FIX IMPLEMENTED; OPEN PENDING VERIFICATION | `qemu-fb-visible` now attaches the FAT32 image, but the visible workflow has not been rerun. |
+| RISK-004 | P1 | Desktop focus | FIX IMPLEMENTED; OPEN PENDING VERIFICATION | New userland windows now request focus, but the files-to-editor flow has not been rerun. |
 | RISK-005 | P1 | Runtime verification | OPEN | Several QEMU release gates launch a VM but do not assert success markers. |
 | RISK-006 | P1 | Raspberry Pi 4 build | OPEN | The RPi4 board backend does not satisfy the complete board interface. |
 | RISK-007 | P0 for hardware track | Raspberry Pi storage | OPEN | The current eMMC implementation contains contradictory register and command handling and is not hardware-validated. |
 | RISK-008 | P1 | Memory protection | OPEN | Process page tables identity-map the full RAM range as kernel RWX. |
 | RISK-009 | P1 | KLI1 application format | OPEN | Mutable `.data` and `.bss` behavior is not an explicit, tested image-format contract. |
 | RISK-010 | P2 | Scheduling documentation | OPEN | EL0 processes are preemptive, but EL1 kernel threads are cooperative. |
+| RISK-011 | P1 | Verification infrastructure | OPEN | GitHub Actions jobs currently fail before checkout and expose no step logs. |
 
 ## RISK-001 — Output buffer permissions are not enforced
 
@@ -31,15 +32,18 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 **Affected release:** v1.0 QEMU desktop  
 **Evidence:** static code inspection
 
-`sys_user_buf_in()` and `sys_user_buf_out()` currently use the same region-membership check. Process regions record ownership metadata but do not expose read/write/execute permission metadata to the syscall helper layer.
+`sys_user_buf_in()` and `sys_user_buf_out()` on `main` currently use the same region-membership check. Process regions record ownership metadata but do not expose read/write/execute permission metadata to the syscall helper layer.
 
 The loader maps application images read/execute and stacks read/write. A syscall that writes to user memory can therefore accept an address inside a registered but non-writable image region. A kernel write through that address can fault in EL1 and enter the fatal exception path.
 
+Draft PR #9 implements a first mitigation slice by checking the process's actual EL0 PTEs and adding checked copy helpers. It remains unmerged and unverified; this risk therefore remains open on `main`.
+
 **Required direction:**
 
-- record effective user permissions for every process region;
+- enforce effective user permissions for every kernel/user transfer;
 - provide separate `copy_from_user`, `copy_to_user`, and c-string helpers;
 - require write permission for kernel-to-user copies;
+- migrate output-producing syscalls to the checked copy boundary where appropriate;
 - add negative tests for output syscalls targeting read-only image memory;
 - define recoverable behavior for a bad user destination without halting the kernel.
 
@@ -64,25 +68,29 @@ Consequences include cross-process close/read/write operations, shared offsets, 
 
 **Exit criteria:** host tests prove process A cannot use or close process B's descriptor, and descriptors are reclaimed after exit/fault/kill.
 
-## RISK-003 — Visible desktop target has no FAT disk
+## RISK-003 — Visible desktop FAT wiring requires verification
 
 **Severity:** P1  
 **Affected release:** v1.0 QEMU desktop  
-**Evidence:** Makefile inspection and manual QEMU observation recorded in issue #1
+**Evidence:** earlier Makefile inspection and manual observation; implementation commit `662f3ee4032ef09dac6872e1a06e8c60c3ac7611`
 
-The documented visible FAT workflow uses `make qemu-fb-visible`, but the target currently attaches GPU and input devices without the generated virtio block image. The `files` application therefore reports FAT as unavailable.
+The earlier documented visible FAT workflow used `make qemu-fb-visible`, but that target attached GPU and input devices without the generated virtio block image. The `files` application therefore reported FAT as unavailable.
 
-**Exit criteria:** the visible target attaches `$(VIRTIO_BLK_IMG)` and the full create/edit/save/rename/reopen/delete workflow passes.
+The target now depends on `$(VIRTIO_BLK_IMG)` and attaches it through a `virtio-blk-device`. This removes the static wiring defect, but no post-change build or visible QEMU run has been recorded.
 
-## RISK-004 — Spawned editor lacks initial focus
+**Exit criteria:** `bash tools/verify.sh` passes on the implementation commit and the full create/edit/save/rename/reopen/delete workflow passes in `make qemu-fb-visible`.
+
+## RISK-004 — New-window focus requires verification
 
 **Severity:** P1  
 **Affected release:** v1.0 QEMU desktop  
-**Evidence:** application and GUI code inspection plus issue #1 manual observation
+**Evidence:** earlier application/GUI inspection and manual observation; implementation commit `662f3ee4032ef09dac6872e1a06e8c60c3ac7611`
 
-The editor creates and titles a window but does not focus it. Window creation only selects a window automatically when no other application window is focused, so keyboard input can remain with `files` after spawning the editor.
+The earlier editor created and titled a window without explicitly focusing it. Window creation only selected a window automatically when no other application window was focused, so keyboard input remained with `files` after spawning the editor.
 
-**Exit criteria:** define and test the window-manager focus policy, then verify the visible `files` to `editor` workflow.
+The common `libkarmdesk` window-create wrapper now requests focus after a successful create. Kernel `GUI_WINDOW_NO_FOCUS` policy remains authoritative because the focus syscall can reject no-focus windows and the wrapper ignores that presentation-only failure.
+
+**Exit criteria:** `bash tools/verify.sh` passes and a named tester confirms that a file opened from `files` accepts keyboard input in `editor` immediately without an extra click.
 
 ## RISK-005 — QEMU gates are not all deterministic tests
 
@@ -158,6 +166,18 @@ Applications currently avoid this through restricted coding patterns and anonymo
 Timer IRQ preemption applies to EL0 process trap frames. EL1 helper threads change only through explicit yield/exit paths. Documentation must describe the system as preemptive for EL0 and cooperative for kernel threads.
 
 **Exit criteria:** documentation remains accurate, or a separately designed EL1 preemption mechanism is implemented and tested.
+
+## RISK-011 — GitHub Actions does not reach checkout
+
+**Severity:** P1  
+**Affected release:** v1.0 reproducibility  
+**Evidence:** repeated pull-request workflow runs for both the historical and replacement workflows
+
+GitHub creates the jobs, but they finish with failure before exposing any step or downloadable job log. The historical `CI - Tests` workflow and the new CI-only PR #11 show the same pattern, so no build or test failure can be inferred from those runs.
+
+Issue #12 tracks the required repository/account-level investigation. Until a runner reaches checkout, local `bash tools/verify.sh` output is the only available automated release evidence.
+
+**Exit criteria:** a GitHub-hosted runner reaches checkout, logs are available, the local verification baseline runs in CI, and the FAT32 serial log is preserved as an artifact.
 
 ## Closed risks
 
