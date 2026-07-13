@@ -25,13 +25,12 @@
 
 _start:
 #ifdef USERCOPY_RX_PROBE
-    // Preserve the process entry arguments while the probe issues syscalls.
+    // Preserve process-entry arguments while the probe issues syscalls.
     mov x19, x0
     mov x20, x1
 
     // SYS_MEMINFO writes two uint64_t values. `_start` is inside the app's
-    // read/execute image mapping, so a safe kernel must reject it with -13
-    // instead of attempting an EL1 write through the read-only PTE.
+    // read/execute image mapping, so a safe kernel must reject it with -13.
     adr x0, _start
     mov x8, #101                // SYS_MEMINFO
     svc #0
