@@ -1,115 +1,79 @@
 // ArmoniOS app: panel (C version, on libkarm + libkarmdesk)
 //
-// Draws a taskbar at the bottom of the screen with one launcher
-// button per registered app and a running-apps row underneath.
+// Compact taskbar for the QEMU desktop. Four pinned application buttons share
+// one row with an integrated uptime clock. A pinned button is both a launcher
+// and a grouped task button:
 //
-// Click handling:
-//   - Launcher button   -> focus/restore an existing app window, otherwise
-//                          sys_spawn("/armonios/<name>")
-//   - Running-apps slot -> if the window is minimised, restore it
-//                          through gui_window_restore; otherwise raise
-//                          it through SYS_WINDOW_FOCUS.
+//   - no window: launch the application;
+//   - minimized window: restore it;
+//   - visible window: focus it;
+//   - multiple windows: repeated clicks cycle through the group.
 //
-// The running-apps table is rebuilt every REFRESH_PERIOD yields by
-// polling SYS_PROCLIST and resolving each pid through
-// SYS_WINDOW_FOR_PID. For each non-self pid we also ask the kernel
-// for the window's state bitmap (sys_window_state) so the slot
-// can be drawn in the right colour: active for visible windows,
-// greyed for minimised ones.
-//
-// The panel itself is filtered out by comparing pid against
-// sys_getpid(), and SKIP_TASKBAR windows are filtered at the kernel
-// by gui_window_for_pid, so the taskbar only ever lists normal
-// app windows.
+// Running, focused, minimized, hover, and multi-window states are expressed by
+// geometry rather than by a new color theme. The panel continues to rely on the
+// kernel's built-in "panel" policy (DOCK, NO_FOCUS, NO_DRAG, SKIP_TASKBAR).
 
 #include <stddef.h>
 #include <stdint.h>
 
 #include "libkarm/syscall.h"
 #include "libkarmdesk/gui.h"
+#include "panel_model.h"
 
-// Geometry constants for a 640x480 virtio-gpu framebuffer.
-#define SCREEN_W        640
-#define SCREEN_H        480
-#define PANEL_H          56
-#define PANEL_Y         (SCREEN_H - PANEL_H)   // 424
-#define BTN_H            24
-#define BTN_Y           (PANEL_Y + 4)         // 428
-// 5 launchers must fit in 640 px with a 4 px left margin:
-//   4 + 5*BTN_W + 4*BTN_GAP == 640 -> BTN_W=124, BTN_GAP=4
-#define BTN_W           124
-#define BTN_GAP           4
-#define BTN_COUNT         5
-#define BTN_ROW_W       (BTN_COUNT * BTN_W + (BTN_COUNT - 1) * BTN_GAP)
-#define PANEL_CONTENT_W SCREEN_W
-#define PANEL_CONTENT_H PANEL_H
-
-#define RUN_ROW_Y        32
-#define RUN_ROW_H       (PANEL_H - RUN_ROW_Y)
-#define RUN_SLOT_W      124
-#define RUN_SLOT_GAP     4
-#define RUN_SLOT_COUNT    5
 #define REFRESH_PERIOD 20
-
-#define EVENT_CAP         8
-#define PROCLIST_MAX     16
 #define LAUNCH_SETTLE_YIELDS 20
+#define EVENT_CAP 8
+#define PROCLIST_MAX 16
+#define NAME_CAP 16
+#define LABEL_CAP 12
+#define PATH_CAP 32
 
-#define COLOR_BG          0xff202428U
-#define COLOR_BORDER      0xff808080U
-#define COLOR_TOPBAR      0xff506070U
-#define COLOR_BTN_BG      0xff3a4658U
-#define COLOR_BTN_HI      0xff5870a0U
-#define COLOR_BTN_TXT     0xffe0e8f0U
-#define COLOR_RUN_BG      0xff182028U
-#define COLOR_RUN_ACTIVE  0xff506880U
-#define COLOR_RUN_MIN     0xff3a3a3cU
-#define COLOR_RUN_TXT     0xffc0d0e0U
+/* Existing neutral palette. This change intentionally does not define a new
+ * visual theme; state is conveyed through indicator shape and thickness. */
+#define COLOR_BG 0xff202428U
+#define COLOR_BORDER 0xff808080U
+#define COLOR_EDGE 0xff506070U
+#define COLOR_ITEM_BG 0xff3a4658U
+#define COLOR_ITEM_HOVER 0xff5870a0U
+#define COLOR_TEXT 0xffe0e8f0U
+#define COLOR_MARK 0xffc0d0e0U
 
-#define GUI_CURSOR_HAND   1U
+#define GUI_CURSOR_HAND 1U
 
-#define NAME_CAP          16
-#define LABEL_CAP         10   // matches panel_labels stride in the old asm
-
-#define PATH_BUF_CAP      32
-
-// gui_event_t is defined by libkarmdesk/gui.h; the layout is locked
-// by _Static_assert(sizeof(gui_event_t) == 12).
-
-// sys_proclist entry: pid(u32) state(u32) name[16] -> 24 bytes.
 typedef struct {
     uint32_t pid;
     uint32_t state;
-    char     name[NAME_CAP];
+    char name[NAME_CAP];
 } proc_entry_t;
 
-// One slot per running app. minimized is a local cache of the
-// GUI_WINDOW_STATE_MINIMIZED bit returned by sys_window_state; we
-// only re-query on refresh so a click that toggles minimise is
-// reflected on the next poll, which is well below one frame.
 typedef struct {
-    uint32_t pid;
-    uint32_t window_id;
-    int      present;
-    int      minimized;
-    char     name[NAME_CAP];
-} running_slot_t;
+    char process_name[NAME_CAP];
+    char label[LABEL_CAP];
+    char path[PATH_CAP];
+    uint32_t pids[PANEL_APP_WINDOW_CAP];
+    uint32_t window_ids[PANEL_APP_WINDOW_CAP];
+    uint32_t window_states[PANEL_APP_WINDOW_CAP];
+    int window_count;
+} panel_app_t;
 
 typedef struct {
-    long           wid;
-    uint32_t       panel_pid;
-    int            hover;
-    int            yield_counter;
-    running_slot_t slots[RUN_SLOT_COUNT];
-    proc_entry_t   procs[PROCLIST_MAX];
-    char           button_labels[BTN_COUNT][LABEL_CAP];
-    gui_event_t    events[EVENT_CAP];
+    long wid;
+    uint32_t panel_pid;
+    int hover_target;
+    int yield_counter;
+    panel_app_t apps[PANEL_APP_COUNT];
+    proc_entry_t procs[PROCLIST_MAX];
+    uint64_t time_info[3];
+    char clock_text[9];
+    gui_event_t events[EVENT_CAP];
 } panel_state_t;
 
-static void refresh_running(panel_state_t *p);
-
-static void copy_label(char *dst, size_t dst_size, const char *src) {
+static void copy_text(char *dst, size_t dst_size, const char *src) {
     size_t i = 0;
+
+    if (dst_size == 0) {
+        return;
+    }
     while (i + 1 < dst_size && src[i] != '\0') {
         dst[i] = src[i];
         i++;
@@ -117,395 +81,330 @@ static void copy_label(char *dst, size_t dst_size, const char *src) {
     dst[i] = '\0';
 }
 
-static void clear_running_slots(panel_state_t *p) {
-    for (int i = 0; i < RUN_SLOT_COUNT; i++) {
-        p->slots[i].present = 0;
-        p->slots[i].pid = 0;
-        p->slots[i].window_id = 0;
-        p->slots[i].minimized = 0;
-        p->slots[i].name[0] = '\0';
-    }
-}
+static int text_equal(const char *left, const char *right) {
+    size_t i = 0;
 
-static int label_equals(const char *left, const char *right) {
-    int i = 0;
-
-    while (i < NAME_CAP && right[i] != '\0') {
+    while (left[i] != '\0' || right[i] != '\0') {
         if (left[i] != right[i]) {
             return 0;
         }
         i++;
     }
-
-    return i < NAME_CAP && left[i] == '\0';
+    return 1;
 }
 
-// Convert absolute framebuffer Y to panel-local Y. Negative results
-// mean the cursor is above the panel.
-static int abs_to_panel_y(int32_t ay) {
-    return (int)ay - PANEL_Y;
-}
+static int text_width(const char *text, int cap) {
+    int count = 0;
 
-static int row_hit(int x, int item_w, int item_gap, int item_count) {
-    if (x < 4) {
-        return -1;
+    while (count < cap && text[count] != '\0') {
+        count++;
     }
-    int adj = x - 4;
-    int stride = item_w + item_gap;
-    int idx = adj / stride;
-    int rem = adj - idx * stride;
-    if (rem >= item_w || idx < 0 || idx >= item_count) {
-        return -1;
+    return count * 8;
+}
+
+static int abs_to_panel_y(int32_t absolute_y) {
+    return (int)absolute_y - PANEL_Y;
+}
+
+static void init_app(panel_app_t *app, const char *process_name,
+                     const char *label, const char *path) {
+    copy_text(app->process_name, sizeof(app->process_name), process_name);
+    copy_text(app->label, sizeof(app->label), label);
+    copy_text(app->path, sizeof(app->path), path);
+    app->window_count = 0;
+}
+
+static void init_apps(panel_state_t *panel) {
+    /* Keep literals in .rodata and copy them into mmap-backed state. Avoid a
+     * static pointer table because the flat KLI1 image does not map .data. */
+    init_app(&panel->apps[0], "shell", "Shell", "/armonios/shell");
+    init_app(&panel->apps[1], "editor", "Editor", "/armonios/editor");
+    init_app(&panel->apps[2], "files", "Files", "/armonios/files");
+    init_app(&panel->apps[3], "monitor", "Monitor", "/armonios/monitor");
+    init_app(&panel->apps[4], "clock", "Clock", "/armonios/clock");
+}
+
+static void clear_app_windows(panel_app_t *app) {
+    app->window_count = 0;
+    for (int i = 0; i < PANEL_APP_WINDOW_CAP; i++) {
+        app->pids[i] = 0;
+        app->window_ids[i] = 0;
+        app->window_states[i] = 0;
     }
-    return idx;
 }
 
-static int button_hit(int x) {
-    return row_hit(x, BTN_W, BTN_GAP, BTN_COUNT);
-}
-
-static int slot_hit(int x) {
-    return row_hit(x, RUN_SLOT_W, RUN_SLOT_GAP, RUN_SLOT_COUNT);
-}
-
-static int name_text_width(const char *s) {
-    int n = 0;
-    while (s[n] != '\0' && n < NAME_CAP) {
-        n++;
+static void refresh_app_model(panel_state_t *panel) {
+    for (int i = 0; i < PANEL_APP_COUNT; i++) {
+        clear_app_windows(&panel->apps[i]);
     }
-    return n * 8;
-}
 
-static void draw_button(panel_state_t *p, int idx, int hovered) {
-    if (idx < 0 || idx >= BTN_COUNT) {
+    long count = kli_proclist(panel->procs, PROCLIST_MAX);
+    if (count <= 0) {
         return;
     }
-    int bx = 4 + idx * (BTN_W + BTN_GAP);
-    long bg = hovered ? (long)COLOR_BTN_HI : (long)COLOR_BTN_BG;
-    (void)gui_window_draw_rect(p->wid, bx, BTN_Y - PANEL_Y,
-                               BTN_W, BTN_H, bg);
-    (void)gui_window_draw_text(p->wid, bx + 8, BTN_Y - PANEL_Y + 6,
-                               COLOR_BTN_TXT, p->button_labels[idx]);
-}
 
-static void draw_running_row(panel_state_t *p) {
-    for (int i = 0; i < RUN_SLOT_COUNT; i++) {
-        int sx = 4 + i * (RUN_SLOT_W + RUN_SLOT_GAP);
-        long bg;
-        if (p->slots[i].present == 0) {
-            bg = (long)COLOR_RUN_BG;
-        } else if (p->slots[i].minimized != 0) {
-            bg = (long)COLOR_RUN_MIN;
-        } else {
-            bg = (long)COLOR_RUN_ACTIVE;
+    for (long proc_index = 0; proc_index < count; proc_index++) {
+        uint32_t pid = panel->procs[proc_index].pid;
+        if (pid == 0 || pid == panel->panel_pid) {
+            continue;
         }
-        (void)gui_window_draw_rect(p->wid, sx, RUN_ROW_Y,
-                                   RUN_SLOT_W, RUN_ROW_H, bg);
-        if (p->slots[i].present != 0) {
-            int text_w = name_text_width(p->slots[i].name);
-            int pad = (RUN_SLOT_W - text_w) / 2;
-            (void)gui_window_draw_text(p->wid, sx + pad, RUN_ROW_Y + 8,
-                                       COLOR_RUN_TXT, p->slots[i].name);
-        }
-    }
-}
 
-static void redraw_all(panel_state_t *p) {
-    // Background fill.
-    (void)gui_window_draw_rect(p->wid, 0, 0, SCREEN_W, PANEL_H, COLOR_BG);
-    // Top border.
-    (void)gui_window_draw_rect(p->wid, 0, 0, SCREEN_W, 1, COLOR_TOPBAR);
-    // Launcher buttons.
-    for (int i = 0; i < BTN_COUNT; i++) {
-        draw_button(p, i, p->hover == i ? 1 : 0);
-    }
-    // Separator above the running row.
-    (void)gui_window_draw_rect(p->wid, 0, RUN_ROW_Y - 1,
-                               SCREEN_W, 1, COLOR_TOPBAR);
-    // Running apps.
-    draw_running_row(p);
-    // Flush the full panel content area.
-    (void)gui_window_flush(p->wid, 0, 0, PANEL_CONTENT_W, PANEL_CONTENT_H);
-}
-
-// Build "/armonios/<label>" into out. Returns the length written.
-static size_t build_path(char *out, size_t out_size, const char *label) {
-    static const char prefix[] = "/armonios/";
-    size_t pi = 0;
-    while (pi + 1 < out_size && prefix[pi] != '\0') {
-        out[pi] = prefix[pi];
-        pi++;
-    }
-    size_t i = 0;
-    while (pi + 1 < out_size && label[i] != '\0' && i < LABEL_CAP) {
-        out[pi++] = label[i++];
-    }
-    if (pi < out_size) {
-        out[pi] = '\0';
-    }
-    return pi;
-}
-
-static long find_launcher_window(panel_state_t *p, int idx,
-                                 uint32_t *out_state) {
-    long existing = -1;
-    uint32_t existing_state = 0;
-    long n = kli_proclist(p->procs, PROCLIST_MAX);
-
-    if (n > 0) {
-        for (long i = 0; i < n; i++) {
-            uint32_t pid = p->procs[i].pid;
-            if (pid == 0 || pid == p->panel_pid ||
-                !label_equals(p->procs[i].name, p->button_labels[idx])) {
+        for (int app_index = 0; app_index < PANEL_APP_COUNT; app_index++) {
+            panel_app_t *app = &panel->apps[app_index];
+            if (!text_equal(panel->procs[proc_index].name,
+                            app->process_name) ||
+                app->window_count >= PANEL_APP_WINDOW_CAP) {
                 continue;
             }
-            existing = gui_window_for_pid((long)pid, 0);
-            if (existing >= 0) {
-                if (gui_window_state(existing, &existing_state) < 0) {
-                    existing_state = 0;
-                }
-                break;
+
+            long window_id = gui_window_for_pid((long)pid, 0);
+            if (window_id < 0) {
+                continue;
             }
+
+            uint32_t state = 0;
+            if (gui_window_state(window_id, &state) < 0) {
+                state = 0;
+            }
+
+            int slot = app->window_count++;
+            app->pids[slot] = pid;
+            app->window_ids[slot] = (uint32_t)window_id;
+            app->window_states[slot] = state;
+            break;
         }
     }
-
-    if (out_state != 0) {
-        *out_state = existing_state;
-    }
-    return existing;
 }
 
-static void launch_button(panel_state_t *p, int idx) {
-    if (idx < 0 || idx >= BTN_COUNT) {
+static void refresh_clock(panel_state_t *panel) {
+    if (kli_timeinfo(panel->time_info) < 0) {
+        copy_text(panel->clock_text, sizeof(panel->clock_text), "--:--:--");
         return;
     }
-    uint32_t existing_state = 0;
-    long existing = find_launcher_window(p, idx, &existing_state);
+    panel_format_uptime(panel->time_info[0], panel->clock_text);
+}
 
-    if (existing >= 0) {
-        kli_write_cstr(1, "panel: raise ");
-        kli_write_cstr(1, p->button_labels[idx]);
+static void draw_instance_marks(panel_state_t *panel, const panel_app_t *app,
+                                int x, int y, int width) {
+    int count = app->window_count;
+    if (count > PANEL_APP_WINDOW_CAP) {
+        count = PANEL_APP_WINDOW_CAP;
+    }
+
+    for (int i = 0; i < count; i++) {
+        int mark_x = x + width - 8 - i * 6;
+        (void)gui_window_draw_rect(panel->wid, mark_x, y + 5, 3, 3,
+                                   COLOR_MARK);
+    }
+}
+
+static void draw_state_indicator(panel_state_t *panel,
+                                 panel_visual_state_t state,
+                                 int x, int y, int width, int height) {
+    int center = x + width / 2;
+    int baseline = y + height - 4;
+
+    if (state == PANEL_VISUAL_RUNNING) {
+        (void)gui_window_draw_rect(panel->wid, center - 12, baseline,
+                                   24, 2, COLOR_MARK);
+    } else if (state == PANEL_VISUAL_FOCUSED) {
+        (void)gui_window_draw_rect(panel->wid, center - 28, baseline - 1,
+                                   56, 3, COLOR_MARK);
+        (void)gui_window_draw_rect(panel->wid, x + 2, y + 2,
+                                   width - 4, 1, COLOR_MARK);
+    } else if (state == PANEL_VISUAL_MINIMIZED) {
+        (void)gui_window_draw_rect(panel->wid, center - 13, baseline,
+                                   10, 2, COLOR_MARK);
+        (void)gui_window_draw_rect(panel->wid, center + 3, baseline,
+                                   10, 2, COLOR_MARK);
+    }
+}
+
+static void draw_app_button(panel_state_t *panel, int app_index) {
+    panel_app_t *app = &panel->apps[app_index];
+    int x = panel_app_x(app_index);
+    uint32_t background = panel->hover_target == app_index
+                              ? COLOR_ITEM_HOVER
+                              : COLOR_ITEM_BG;
+    int label_width = text_width(app->label, LABEL_CAP);
+    int label_x = x + (PANEL_APP_W - label_width) / 2;
+    panel_visual_state_t state = panel_visual_state(
+        app->window_states, app->window_count);
+
+    (void)gui_window_draw_rect(panel->wid, x, PANEL_ITEM_Y,
+                               PANEL_APP_W, PANEL_ITEM_H, background);
+    (void)gui_window_draw_text(panel->wid, label_x, PANEL_ITEM_Y + 10,
+                               COLOR_TEXT, app->label);
+    draw_instance_marks(panel, app, x, PANEL_ITEM_Y, PANEL_APP_W);
+    draw_state_indicator(panel, state, x, PANEL_ITEM_Y,
+                         PANEL_APP_W, PANEL_ITEM_H);
+}
+
+static void draw_clock(panel_state_t *panel) {
+    panel_app_t *clock_app = &panel->apps[PANEL_TARGET_CLOCK];
+    uint32_t background = panel->hover_target == PANEL_TARGET_CLOCK
+                              ? COLOR_ITEM_HOVER
+                              : COLOR_ITEM_BG;
+    panel_visual_state_t state = panel_visual_state(
+        clock_app->window_states, clock_app->window_count);
+
+    (void)gui_window_draw_rect(panel->wid, PANEL_CLOCK_X, PANEL_ITEM_Y,
+                               PANEL_CLOCK_W, PANEL_ITEM_H, background);
+    (void)gui_window_draw_text(panel->wid, PANEL_CLOCK_X + 8,
+                               PANEL_ITEM_Y + 10, COLOR_TEXT,
+                               panel->clock_text);
+    draw_instance_marks(panel, clock_app, PANEL_CLOCK_X, PANEL_ITEM_Y,
+                        PANEL_CLOCK_W);
+    draw_state_indicator(panel, state, PANEL_CLOCK_X, PANEL_ITEM_Y,
+                         PANEL_CLOCK_W, PANEL_ITEM_H);
+}
+
+static void draw_panel(panel_state_t *panel) {
+    (void)gui_window_draw_rect(panel->wid, 0, 0,
+                               PANEL_SCREEN_W, PANEL_HEIGHT, COLOR_BG);
+    (void)gui_window_draw_rect(panel->wid, 0, 0,
+                               PANEL_SCREEN_W, 1, COLOR_EDGE);
+
+    for (int i = 0; i < PANEL_PINNED_COUNT; i++) {
+        draw_app_button(panel, i);
+    }
+
+    (void)gui_window_draw_rect(panel->wid, PANEL_CLOCK_X - 8, 8,
+                               1, PANEL_HEIGHT - 16, COLOR_EDGE);
+    draw_clock(panel);
+    (void)gui_window_flush(panel->wid, 0, 0,
+                           PANEL_SCREEN_W, PANEL_HEIGHT);
+}
+
+static void redraw_target(panel_state_t *panel, int target) {
+    if (target >= 0 && target < PANEL_PINNED_COUNT) {
+        int x = panel_app_x(target);
+        draw_app_button(panel, target);
+        (void)gui_window_flush(panel->wid, x, PANEL_ITEM_Y,
+                               PANEL_APP_W, PANEL_ITEM_H);
+    } else if (target == PANEL_TARGET_CLOCK) {
+        draw_clock(panel);
+        (void)gui_window_flush(panel->wid, PANEL_CLOCK_X, PANEL_ITEM_Y,
+                               PANEL_CLOCK_W, PANEL_ITEM_H);
+    }
+}
+
+static void refresh_panel(panel_state_t *panel) {
+    refresh_app_model(panel);
+    refresh_clock(panel);
+    draw_panel(panel);
+}
+
+static void activate_app(panel_state_t *panel, int app_index) {
+    if (app_index < 0 || app_index >= PANEL_APP_COUNT) {
+        return;
+    }
+
+    panel_app_t *app = &panel->apps[app_index];
+    int target = panel_pick_window(app->window_states, app->window_count);
+    if (target >= 0) {
+        long window_id = (long)app->window_ids[target];
+        kli_write_cstr(1, "panel: activate ");
+        kli_write_cstr(1, app->process_name);
         kli_write_cstr(1, "\n");
-        if ((existing_state & GUI_WINDOW_STATE_MINIMIZED) != 0U) {
-            (void)gui_window_restore(existing);
+        if ((app->window_states[target] &
+             PANEL_WINDOW_STATE_MINIMIZED) != 0U) {
+            (void)gui_window_restore(window_id);
         } else {
-            (void)gui_window_focus(existing);
+            (void)gui_window_focus(window_id);
         }
-        refresh_running(p);
-        return;
-    }
-
-    char path[PATH_BUF_CAP];
-    size_t len = build_path(path, sizeof(path), p->button_labels[idx]);
-    if (len == 0) {
+        refresh_panel(panel);
         return;
     }
 
     kli_write_cstr(1, "panel: launch ");
-    kli_write_cstr(1, p->button_labels[idx]);
+    kli_write_cstr(1, app->process_name);
     kli_write_cstr(1, "\n");
+    if (kli_spawn(app->path, 0) < 0) {
+        kli_write_cstr(1, "panel: launch failed\n");
+        return;
+    }
 
-    (void)kli_spawn(path, 0);
-
-    /*
-     * Give the new process several turns to run main() and create its window
-     * before rebuilding the taskbar row. Spawning only proves the process slot
-     * was requested; the taskbar should follow the observable window state.
-     */
-    existing = -1;
     for (int i = 0; i < LAUNCH_SETTLE_YIELDS; i++) {
         (void)kli_yield();
-        existing = find_launcher_window(p, idx, &existing_state);
-        if (existing >= 0) {
+        refresh_app_model(panel);
+        if (app->window_count > 0) {
             break;
         }
     }
-    refresh_running(p);
+    refresh_panel(panel);
 }
 
-static void click_running_slot(panel_state_t *p, int idx) {
-    if (idx < 0 || idx >= RUN_SLOT_COUNT) {
-        return;
-    }
-    if (p->slots[idx].present == 0) {
-        return;
-    }
-    if (p->slots[idx].minimized != 0) {
-        (void)gui_window_restore((long)p->slots[idx].window_id);
-    } else {
-        (void)gui_window_focus((long)p->slots[idx].window_id);
+static void on_click(panel_state_t *panel, int32_t absolute_x,
+                     int32_t absolute_y) {
+    int target = panel_target_at((int)absolute_x,
+                                 abs_to_panel_y(absolute_y));
+    if (target >= 0 && target < PANEL_PINNED_COUNT) {
+        activate_app(panel, target);
+    } else if (target == PANEL_TARGET_CLOCK) {
+        activate_app(panel, PANEL_TARGET_CLOCK);
     }
 }
 
-static void on_click(panel_state_t *p, int32_t abs_x, int32_t abs_y) {
-    int x = (int)abs_x;
-    int y = abs_to_panel_y(abs_y);
-    if (y < 0) {
+static void on_move(panel_state_t *panel, int32_t absolute_x,
+                    int32_t absolute_y) {
+    int target = panel_target_at((int)absolute_x,
+                                 abs_to_panel_y(absolute_y));
+    if (target == panel->hover_target) {
         return;
     }
-    // Button row first.
-    if (y >= BTN_Y - PANEL_Y && y < BTN_Y - PANEL_Y + BTN_H) {
-        int idx = button_hit(x);
-        if (idx >= 0) {
-            launch_button(p, idx);
-        }
-        return;
-    }
-    // Running-apps row.
-    if (y >= RUN_ROW_Y && y < RUN_ROW_Y + RUN_ROW_H) {
-        int idx = slot_hit(x);
-        if (idx >= 0) {
-            click_running_slot(p, idx);
-        }
-    }
+
+    int old_target = panel->hover_target;
+    panel->hover_target = target;
+    redraw_target(panel, old_target);
+    redraw_target(panel, target);
 }
 
-static void on_move(panel_state_t *p, int32_t abs_x, int32_t abs_y) {
-    int x = (int)abs_x;
-    int y = abs_to_panel_y(abs_y);
-    int new_hover = -1;
-    if (y >= BTN_Y - PANEL_Y && y < BTN_Y - PANEL_Y + BTN_H) {
-        new_hover = button_hit(x);
+static void register_cursor_regions(panel_state_t *panel) {
+    for (int i = 0; i < PANEL_PINNED_COUNT; i++) {
+        (void)gui_cursor_register_region(panel->wid, (long)i,
+                                         (long)panel_app_x(i),
+                                         PANEL_ITEM_Y, PANEL_APP_W,
+                                         PANEL_ITEM_H, GUI_CURSOR_HAND);
     }
-    if (new_hover == p->hover) {
-        return;
-    }
-    int old_hover = p->hover;
-    p->hover = new_hover;
-
-    // The kernel walks the per-window cursor-shape regions every
-    // refresh, so each launcher button slot has its own HAND region
-    // (registered once in main) and the shape flips automatically
-    // as the cursor crosses each boundary. No global cursor_set_shape
-    // side effect, no risk of leaking HAND into the desktop above
-    // the panel.
-
-    // Repaint just the two affected buttons (old + new hover).
-    if (old_hover >= 0 && old_hover < BTN_COUNT) {
-        draw_button(p, old_hover, 0);
-    }
-    if (new_hover >= 0 && new_hover < BTN_COUNT) {
-        draw_button(p, new_hover, 1);
-    }
-    (void)gui_window_flush(p->wid, 0, BTN_Y - PANEL_Y,
-                           BTN_ROW_W, BTN_H);
-}
-
-static void refresh_running(panel_state_t *p) {
-    // Clear the slot table first; entries we can't repopulate stay
-    // empty until the next poll.
-    clear_running_slots(p);
-
-    long n = kli_proclist(p->procs, PROCLIST_MAX);
-    if (n <= 0) {
-        return;
-    }
-    int slot_idx = 0;
-    for (long i = 0; i < n && slot_idx < RUN_SLOT_COUNT; i++) {
-        uint32_t pid = p->procs[i].pid;
-        if (pid == 0 || pid == p->panel_pid) {
-            continue;
-        }
-        long wid = gui_window_for_pid((long)pid, 0);
-        if (wid < 0) {
-            continue;
-        }
-        // Ask the kernel for the window's state bitmap so we can
-        // render minimised slots in the greyed colour and skip the
-        // FOCUS path on click (they go through RESTORE instead).
-        uint32_t state = 0;
-        long sr = gui_window_state(wid, &state);
-        int minimized = (sr >= 0 &&
-                         (state & GUI_WINDOW_STATE_MINIMIZED) != 0U) ? 1 : 0;
-        p->slots[slot_idx].present = 1;
-        p->slots[slot_idx].pid = pid;
-        p->slots[slot_idx].window_id = (uint32_t)wid;
-        p->slots[slot_idx].minimized = minimized;
-        copy_label(p->slots[slot_idx].name, NAME_CAP,
-                   p->procs[i].name);
-        slot_idx++;
-    }
-
-    draw_running_row(p);
-    // Flush only the running row so the launcher row stays put.
-    (void)gui_window_flush(p->wid, 0, RUN_ROW_Y,
-                           PANEL_CONTENT_W, RUN_ROW_H);
-}
-
-static void init_button_labels(panel_state_t *p) {
-    /* Per-launcher labels are passed to copy_label directly as string
-     * literals. parking them in a static const char*[] array would
-     * put the pointer table in .data.rel.ro.local or .data, which
-     * programs/apps/image.ld does NOT pull into the .user_image
-     * section; the kernel's load stops at .user_image end, so
-     * labels[0] would read as NULL from beyond image_size and the
-     * strncpy walk would corrupt the stack. Inlining keeps every
-     * literal in .user.image.rodata. */
-    copy_label(p->button_labels[0], LABEL_CAP, "shell");
-    copy_label(p->button_labels[1], LABEL_CAP, "editor");
-    copy_label(p->button_labels[2], LABEL_CAP, "files");
-    copy_label(p->button_labels[3], LABEL_CAP, "monitor");
-    copy_label(p->button_labels[4], LABEL_CAP, "clock");
+    (void)gui_cursor_register_region(panel->wid, PANEL_TARGET_CLOCK,
+                                     PANEL_CLOCK_X, PANEL_ITEM_Y,
+                                     PANEL_CLOCK_W, PANEL_ITEM_H,
+                                     GUI_CURSOR_HAND);
 }
 
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
 
-    /* The flat app image does not map .bss. Keep mutable panel
-     * state in anonymous user memory instead of relying on the
-     * fixed 4 KB process stack. */
-    long state_addr = kli_mmap(0, sizeof(panel_state_t), 0);
-    if (state_addr < 0) {
+    long state_address = kli_mmap(0, sizeof(panel_state_t), 0);
+    if (state_address < 0) {
         kli_write_cstr(1, "panel: state mmap failed\n");
         return 1;
     }
-    panel_state_t *p = (panel_state_t *)(uintptr_t)state_addr;
-    p->wid = 0;
-    p->panel_pid = 0;
-    p->hover = -1;
-    p->yield_counter = 0;
-    clear_running_slots(p);
+
+    panel_state_t *panel = (panel_state_t *)(uintptr_t)state_address;
+    panel->wid = 0;
+    panel->panel_pid = 0;
+    panel->hover_target = PANEL_TARGET_NONE;
+    panel->yield_counter = 0;
+    copy_text(panel->clock_text, sizeof(panel->clock_text), "--:--:--");
+    init_apps(panel);
 
     kli_write_cstr(1, "panel: starting\n");
-    init_button_labels(p);
-
-    p->wid = gui_window_create(0, PANEL_Y, SCREEN_W, PANEL_H,
-                               COLOR_BG, COLOR_BORDER, "panel");
-    if (p->wid < 0) {
+    panel->wid = gui_window_create(0, PANEL_Y, PANEL_SCREEN_W, PANEL_HEIGHT,
+                                   COLOR_BG, COLOR_BORDER, "panel");
+    if (panel->wid < 0) {
         kli_write_cstr(1, "panel: window create failed\n");
-        // Park in a yield loop so the kernel debug console (k>) still
-        // gets a chance to run and 'ps' / 'proclist' queries see a
-        // process to point at, even when GUI setup failed.
         for (;;) {
             (void)kli_yield();
         }
     }
 
-    /*
-     * Install one HAND-shape cursor region per launcher button so
-     * the kernel draws the hand cursor automatically as the mouse
-     * crosses each button boundary. Coords are content-local, which
-     * means (0, 0) is the top-left of the panel content area
-     * (i.e. just below the title bar, if any). Using per-window
-     * regions instead of the global SYS_CURSOR_SET_SHAPE means the
-     * panel cannot leak a HAND cursor into the desktop above the
-     * panel when the cursor leaves the launcher row.
-     */
-    for (int idx = 0; idx < BTN_COUNT; idx++) {
-        int bx = 4 + idx * (BTN_W + BTN_GAP);
-        int by = BTN_Y - PANEL_Y;
-        (void)gui_cursor_register_region(p->wid, (long)idx, (long)bx,
-                                          (long)by, (long)BTN_W,
-                                          (long)BTN_H,
-                                          (long)GUI_CURSOR_HAND);
-    }
-
+    register_cursor_regions(panel);
     long pid = kli_getpid();
-    p->panel_pid = (pid > 0) ? (uint32_t)pid : 0;
-
-    redraw_all(p);
-    refresh_running(p);
+    panel->panel_pid = pid > 0 ? (uint32_t)pid : 0;
+    refresh_panel(panel);
     kli_write_cstr(1, "panel: ready\n");
 
 #ifdef PANEL_FORCE_FAULT
@@ -514,40 +413,36 @@ int main(int argc, char **argv) {
 #endif
 
 #ifdef PANEL_AUTO_TEST
-    /*
-     * Smoke test: launch every button once at boot so the UART log shows
-     * whether each app survives main(), creates its window, and stays alive.
-     * Disabled by default; enable by passing -DPANEL_AUTO_TEST to the
-     * compiler.
-     */
-    kli_write_cstr(1, "panel: auto-test launch every button\n");
-    for (int idx = 0; idx < BTN_COUNT; idx++) {
+    kli_write_cstr(1, "panel: auto-test launch every app\n");
+    for (int app_index = 0; app_index < PANEL_APP_COUNT; app_index++) {
         kli_write_cstr(1, "panel: auto-test click ");
-        kli_write_cstr(1, p->button_labels[idx]);
+        kli_write_cstr(1, panel->apps[app_index].process_name);
         kli_write_cstr(1, "\n");
-        launch_button(p, idx);
+        activate_app(panel, app_index);
         (void)kli_yield();
     }
 #endif
 
     for (;;) {
-        long n = gui_window_event(p->wid, p->events, EVENT_CAP);
-        if (n > 0) {
-            for (long i = 0; i < n; i++) {
-                if (p->events[i].type == GUI_EVENT_MOUSE_CLICK) {
-                    on_click(p, p->events[i].data1, p->events[i].data2);
-                } else if (p->events[i].type == GUI_EVENT_MOUSE_MOVE) {
-                    on_move(p, p->events[i].data1, p->events[i].data2);
+        long event_count = gui_window_event(panel->wid, panel->events,
+                                            EVENT_CAP);
+        if (event_count > 0) {
+            for (long i = 0; i < event_count; i++) {
+                if (panel->events[i].type == GUI_EVENT_MOUSE_CLICK) {
+                    on_click(panel, panel->events[i].data1,
+                             panel->events[i].data2);
+                } else if (panel->events[i].type == GUI_EVENT_MOUSE_MOVE) {
+                    on_move(panel, panel->events[i].data1,
+                            panel->events[i].data2);
                 }
             }
         }
 
-        p->yield_counter++;
-        if (p->yield_counter >= REFRESH_PERIOD) {
-            p->yield_counter = 0;
-            refresh_running(p);
+        panel->yield_counter++;
+        if (panel->yield_counter >= REFRESH_PERIOD) {
+            panel->yield_counter = 0;
+            refresh_panel(panel);
         }
-
         (void)kli_yield();
     }
 }
