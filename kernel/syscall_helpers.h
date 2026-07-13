@@ -5,9 +5,9 @@
  * Public helper contract for syscall implementations.
  *
  * Error values are shared by all syscall bodies and documented in
- * docs/SYSCALLS.md. The helper functions below keep user-buffer validation and
- * GUI window ownership checks centralized instead of duplicated in each
- * syscall case.
+ * docs/SYSCALLS.md. The helper functions below keep user-buffer validation,
+ * checked EL0/EL1 copies, and GUI window ownership checks centralized instead
+ * of duplicated in each syscall case.
  */
 
 #include <stdint.h>
@@ -29,6 +29,10 @@ int64_t sys_owner_window_badf(process_t *process, uint64_t window_id,
                               gui_window_t **out_window);
 int64_t sys_user_buf_in(const process_t *process, uint64_t ptr, uint64_t len);
 int64_t sys_user_buf_out(const process_t *process, uint64_t ptr, uint64_t len);
+int64_t sys_copy_from_user(const process_t *process, void *out, uint64_t ptr,
+                           uint64_t len);
+int64_t sys_copy_to_user(const process_t *process, uint64_t ptr,
+                         const void *input, uint64_t len);
 int64_t sys_user_copy_cstr(const process_t *process, uint64_t ptr,
                            char *out, uint64_t capacity);
 
