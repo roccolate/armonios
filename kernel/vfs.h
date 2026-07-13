@@ -4,7 +4,12 @@
 #include <stdint.h>
 
 #define VFS_MAX_NODES 24U
+/*
+ * Descriptors returned by vfs_open* are local to the current process.
+ * The internal handle pool is larger and never exposed to EL0.
+ */
 #define VFS_MAX_OPEN_FILES 8U
+#define VFS_MAX_GLOBAL_OPEN_FILES (VFS_MAX_OPEN_FILES * 16U)
 #define VFS_MAX_PATH 64U
 
 #define VFS_O_RDONLY  0U
@@ -18,11 +23,9 @@
  * Fixed-table kernel VFS facade.
  *
  * Paths are absolute, copied into VFS-owned storage at mount time, and capped
- * by VFS_MAX_PATH. File descriptors are process-global kernel descriptors used
- * by the syscall layer; this VFS intentionally does not allocate or normalize
- * paths.
+ * by VFS_MAX_PATH. File descriptors are local to the current process; the VFS
+ * translates them to kernel-private open-file handles and owns their offsets.
  */
-
 typedef struct {
     uint64_t size;
 } vfs_stat_t;
@@ -49,8 +52,8 @@ void vfs_reset(void);
 int vfs_mount_static(const vfs_node_t *nodes, uint32_t count);
 
 /*
- * Remove a mounted static VFS node by path. Open descriptors pointing at that
- * node are invalidated so later descriptor operations fail cleanly instead of
+ * Remove a mounted static VFS node by path. Open handles pointing at that node
+ * are invalidated so later descriptor operations fail cleanly instead of
  * touching stale filesystem state. List mounts are not affected.
  */
 int vfs_unmount_static(const char *path);
@@ -73,6 +76,7 @@ int vfs_write_fd(int fd, const uint8_t *buffer, uint64_t size,
                  uint64_t *bytes_written);
 int vfs_seek(int fd, uint64_t offset);
 int vfs_close(int fd);
+uint32_t vfs_close_all_for_pid(uint32_t pid);
 
 /*
  * vfs_unlink removes a single file from its underlying filesystem.
@@ -80,10 +84,8 @@ int vfs_close(int fd);
  *
  * Currently only the FAT32 mount is wired up: paths starting with
  * "/fat/" go through fat32_delete / fat32_rename. Other prefixes
- * (tmpfs, bootfs) reject the call with ERR_NOENT. The arguments
- * are validated against the caller's registered user regions by
- * the syscall layer; vfs_unlink / vfs_rename assume the inputs
- * are already safe to dereference.
+ * (tmpfs, bootfs) reject the call. The syscall layer validates user
+ * pointers before these helpers receive kernel-owned path strings.
  */
 int vfs_unlink(const char *path);
 int vfs_rename(const char *old_path, const char *new_path);
