@@ -1,72 +1,42 @@
 # Contributing to ArmoniOS
 
-First: thank you for considering contributing. ArmoniOS is built on the idea
-that an OS can be understood by a single person — and that only works if the
-code stays clean, minimal, and well-documented.
+ArmoniOS is intended to remain small enough that one developer can understand the whole system. That requires disciplined scope, explicit evidence, and documentation that never upgrades intention into fact.
 
----
+## Read first
 
-## Before You Start
+Read these documents in order:
 
-Read these documents first:
+1. `DOCUMENTATION_POLICY.md` — how claims and verification are recorded;
+2. `CURRENT_STATE.md` — audited operational status;
+3. `TECHNICAL_RISKS.md` — active correctness and release risks;
+4. `ROADMAP.md` — work order and release exit criteria;
+5. `ARCHITECTURE.md` — current implementation model;
+6. `SYSCALLS.md` and `GUI_ABI_NOTES.md` — user/kernel ABI;
+7. `MEMORY_MAP.md` — current address and translation model;
+8. `PORTING.md` — board contract and hardware rules.
 
-1. [README.md](../README.md) — project overview and philosophy
-2. [ARCHITECTURE.md](ARCHITECTURE.md) — how the system is structured
-3. [CURRENT_STATE.md](CURRENT_STATE.md) — live baseline and known product gaps
-4. [ROADMAP.md](ROADMAP.md) — release order and gates
-5. [SYSCALLS.md](SYSCALLS.md) — ABI reference for userland/kernel boundaries
+`TECH_DEBT_REVIEW.md` is historical context, not the active backlog.
 
-If you're new to OS development, the [OSDev Wiki](https://wiki.osdev.org) and
-the [ARM Architecture Reference Manual](https://developer.arm.com/documentation/ddi0487)
-are the two most important external references.
+## Current project rule
 
----
+The project is stabilizing the QEMU desktop. Correctness and deterministic verification take priority over new features.
 
-## Current Project Rule
+Until the v1.0 blockers are closed:
 
-ArmoniOS is currently stabilizing the QEMU desktop baseline. Unless the roadmap
-says otherwise, favor small, testable changes that preserve the current desktop
-flow over speculative new subsystems.
+- do not broaden the kernel ABI for convenience;
+- do not begin multimedia or game-engine work in the kernel;
+- do not claim Raspberry Pi support;
+- do not treat a timeout-only QEMU launch as a passing test;
+- do not describe user pointers as writable unless permissions are enforced;
+- do not add more global process-visible resources.
 
-For v1.0-bound work:
+The active P0 priorities are permission-aware user copies and process-owned file descriptors.
 
-- Keep QEMU `virt` stable and repeatable.
-- Do not claim Raspberry Pi hardware support until a real board reaches a
-  documented serial/boot milestone.
-- Do not introduce POSIX, libc, hosted runtimes, or large external dependencies.
-- Do not renumber syscalls or alter GUI event layouts.
-- Keep kernel binary size under `KERNEL_SIZE_LIMIT`.
-- Update docs and tests in the same change when a public ABI, build target, or
-  user-visible workflow changes.
+## Development setup
 
----
-
-## What We Need Help With
-
-Check the issue tracker for open issues tagged:
-
-- `good first issue` — well-scoped tasks, good starting points
-- `driver` — hardware driver work
-- `kernel` — core kernel changes
-- `docs` — documentation improvements
-- `testing` — QEMU test cases and verification
-
-Things we always need:
-
-- Bug reports with minimal reproduction steps
-- Documentation fixes for unclear or stale behavior
-- Host tests for pure C logic
-- QEMU-reproducible runtime checks
-- Small driver improvements that do not destabilize the baseline
-
----
-
-## Development Setup
-
-See the [README](../README.md#building) for the full setup. Short version:
+On Ubuntu or WSL2:
 
 ```bash
-# WSL2 / Ubuntu
 sudo apt update && sudo apt install -y \
   qemu-system-arm \
   gcc-aarch64-linux-gnu \
@@ -77,10 +47,17 @@ sudo apt update && sudo apt install -y \
 git clone https://github.com/yourname/armonios
 cd armonios
 make
-make help
 ```
 
-The default board is `qemu_virt`. For most development, start with:
+The default board is `qemu_virt`.
+
+## Verification levels
+
+Use the evidence labels defined in `DOCUMENTATION_POLICY.md`.
+
+### Fast local checks
+
+For documentation-neutral pure C changes, begin with the smallest relevant test and then run:
 
 ```bash
 make
@@ -88,9 +65,22 @@ make size
 make -C tests test
 ```
 
-For changes that affect kernel, drivers, boot, syscalls, app images, storage,
-input, networking, GUI, or user-visible desktop behavior, run the release gates
-from `docs/ROADMAP.md`:
+### Userland changes
+
+When applications or userland libraries change:
+
+```bash
+make
+make size
+make -C tests test
+make stack-check
+```
+
+Run the visible desktop when behavior can be observed only through windows or input.
+
+### Kernel, ABI, VFS, storage, GUI, driver, or boot changes
+
+Run:
 
 ```bash
 make
@@ -98,173 +88,186 @@ make size
 make -C tests test
 make stack-check
 make qemu-fs-test
-timeout 25s make qemu-fb
-timeout 25s make qemu-usb
-timeout 25s make qemu-net
 ```
 
-Before a release tag, also run one visible desktop pass:
+Then run the relevant deterministic QEMU tests. At present, framebuffer, USB, and network launch targets are not sufficient by themselves because they do not assert final markers. Report them as launches unless you inspected and recorded the required guest output.
 
-```bash
-make qemu-fb-visible
+### Raspberry Pi changes
+
+Before any hardware claim:
+
+1. `make BOARD=rpi4` must compile and link;
+2. the exact physical board and firmware setup must be recorded;
+3. a serial milestone must be reproduced;
+4. later subsystem claims must have their own evidence.
+
+The current RPi4 backend is experimental and should not be used as a known-good driver reference.
+
+## Required pull-request evidence
+
+Every PR must contain:
+
+```text
+What changed:
+Why:
+Affected contracts:
+
+Commands run:
+- command -> exact result/marker
+
+Manual checks:
+- workflow -> result and tester
+
+Not run:
+- check -> reason
+
+Known limitations or follow-up:
+- item
 ```
 
----
+Never write “all tests pass” when only a subset was run. Never write “works in QEMU” when only host tests ran.
 
-## Code Standards
+## Documentation ownership
 
-### Language
+The author of a behavior-changing change owns the corresponding documentation update.
 
-- Kernel core: **C11** only. No C++.
-- Boot and context switch: **AArch64 ASM** (GNU assembler syntax, `.S` files).
-- Kernel and userland code stay freestanding. Use the project's own helpers
-  instead of assuming libc/POSIX behavior.
-- Rust, Lua, scripting runtimes, and other hosted runtimes do not belong in the
-  kernel.
+Update in this order:
+
+1. tests and implementation;
+2. `TECHNICAL_RISKS.md` when risk state changes;
+3. `CURRENT_STATE.md` with exact evidence;
+4. architecture, memory, ABI, or porting documents when contracts changed;
+5. `ROADMAP.md` when ordering or exit criteria changed;
+6. `README.md` last.
+
+Do not add current status to `TECH_DEBT_REVIEW.md`.
+
+## Code standards
+
+### Language and runtime
+
+- Kernel and userland: freestanding C11.
+- Boot, exceptions, and context switching: GNU AArch64 assembly in `.S` files.
+- No C++ in the kernel or shipping userland.
+- No libc, POSIX, or hosted-runtime assumptions.
+- Keep assembly boundaries narrow and commented.
 
 ### Style
 
-```c
-// Functions: snake_case
-void pmm_init(uint64_t base, uint64_t size);
+- 4-space indentation;
+- braces on the same line;
+- `snake_case` functions and variables;
+- `UPPER_SNAKE_CASE` constants;
+- `_t` suffix for typedef names where useful;
+- `g_` prefix for mutable file-scope globals;
+- fixed-width integer types at ABI and hardware boundaries;
+- overflow-safe range arithmetic for addresses and sizes.
 
-// Types: snake_case with _t suffix
-typedef struct process process_t;
+Public contracts in headers should explain ownership, valid ranges, failure behavior, and whether calls may run in IRQ context.
 
-// Constants and macros: UPPER_SNAKE_CASE
-#define PAGE_SIZE  4096
-#define MAX_PROCS  256
+### Freestanding application rules
 
-// Global mutable state: g_ prefix
-static uint32_t g_proc_count = 0;
+The current KLI1 contract does not define ordinary mutable `.data` and `.bss` behavior. Until `RISK-009` is closed:
 
-// No typedef for structs unless it adds clarity
-struct process { ... };           // OK
-typedef struct process process_t;  // also OK, use consistently
-```
-
-### Formatting
-
-- 4-space indentation. No tabs.
-- Opening brace on the same line: `if (x) {`
-- Maximum line length: 100 characters where practical.
-- Every public function in a `.h` file gets a doc comment when it is part of a
-  public kernel, driver, board, or userland contract.
-
-```c
-/**
- * pmm_alloc_page - Allocate a single 4KB physical page frame.
- *
- * Returns the physical address of the allocated frame,
- * or 0 if no memory is available.
- */
-uint64_t pmm_alloc_page(void);
-```
+- avoid non-zero mutable file-scope application data;
+- avoid relying on large zero-initialized application globals;
+- use stack storage only within the measured stack limit;
+- use anonymous mappings for large mutable application state;
+- inspect the application ELF/bin when adding new storage patterns.
 
 ### Assembly
 
-- Use `.S` (uppercase) so the C preprocessor runs on it.
-- Comment every non-obvious instruction.
-- Follow AAPCS64: `x0`–`x7` args, `x0` return, `x8`–`x15` caller-saved,
-  `x19`–`x28` callee-saved.
-- Save/restore callee-saved registers if your function uses them.
+Follow AAPCS64 and keep C/assembly layouts protected by static assertions where possible.
 
-### ABI Changes
+Comment:
 
-- Syscall numbers are frozen in `kernel/syscall_numbers.h`.
-- `SYSCALLS.md` is the authoritative human-readable syscall reference.
-- Window/compositor wrappers live in `programs/libkarmdesk`; process, memory,
-  I/O, IPC, and system-info wrappers live in `programs/libkarm`.
-- Any syscall, struct layout, event id, flag, or wrapper change must update the
-  relevant tests and docs in the same commit.
+- exception-level assumptions;
+- register ownership;
+- stack layout;
+- page-table or TLB barriers;
+- exact saved-context layout.
 
-### Commit Messages
+## ABI changes
 
-Follow [Conventional Commits](https://www.conventionalcommits.org/):
+Syscall numbers and user-visible structures are frozen unless an intentional ABI extension is approved.
 
+Any ABI change must update:
+
+- kernel constants and dispatch;
+- userland wrappers;
+- host ABI tests;
+- shipping applications affected;
+- `SYSCALLS.md` or `GUI_ABI_NOTES.md`;
+- `CURRENT_STATE.md` if behavior or evidence changed.
+
+Do not silently change:
+
+- syscall numbers;
+- argument registers;
+- event IDs;
+- struct field order or width;
+- KLI1 header layout;
+- descriptor semantics.
+
+## Board abstraction rules
+
+Generic kernel code should not contain board physical addresses.
+
+A board implementation must satisfy the complete generic contract or return explicit safe failures for unsupported optional capabilities. Do not leave required symbols missing.
+
+Prefer capability-neutral generic names. New generic code should not assume that every physical board exposes virtio-mmio or virtio-input.
+
+## Commit messages
+
+Use conventional commits:
+
+```text
+type(scope): concise description
 ```
-type(scope): short description (max 72 chars)
 
-Optional longer body explaining WHY, not what.
-```
+Common types:
 
-Types:
+- `feat`
+- `fix`
+- `docs`
+- `refactor`
+- `test`
+- `chore`
 
-- `feat` — new feature
-- `fix` — bug fix
-- `docs` — documentation only
-- `refactor` — code restructuring, no behavior change
-- `test` — adding or fixing tests
-- `chore` — build system, toolchain, CI
+Keep commits focused. Documentation recovery and behavior changes may be separate commits, but a PR cannot merge with contradictory final documentation.
 
-Examples:
+## PR checklist
 
-```
-feat(mm): add bitmap physical memory allocator
+- [ ] Scope is small enough to review.
+- [ ] No unrelated files are included.
+- [ ] `make` result recorded.
+- [ ] `make size` result recorded for kernel or embedded-app changes.
+- [ ] Relevant host tests recorded.
+- [ ] `make stack-check` recorded for userland changes.
+- [ ] Relevant deterministic QEMU evidence recorded.
+- [ ] Manual UI or hardware steps name the tester and environment.
+- [ ] Unrun checks are listed explicitly.
+- [ ] New risks or changed risk status are recorded.
+- [ ] `CURRENT_STATE.md` was updated when evidence changed.
+- [ ] ABI documents match the code.
+- [ ] README claims remain a summary of verified documents.
 
-fix(uart): handle TX FIFO full condition in putc
+## Changes that will not be accepted
 
-docs(arch): clarify page table layout for user space
-
-feat(sched): implement round-robin preemptive scheduler
-```
-
----
-
-## Pull Request Process
-
-1. Fork the repository and create a branch: `git checkout -b feat/your-feature`.
-2. Write your code following the standards above.
-3. Run the smallest relevant tests first, then the roadmap gates for broad
-   kernel/driver/ABI/desktop changes.
-4. Document any new public APIs or user-visible behavior.
-5. Open a PR with:
-   - a clear title following the commit convention;
-   - a description of what changed and why;
-   - exact commands used for verification;
-   - any open questions or known limitations.
-
-### PR Checklist
-
-- [ ] `make` passes without warnings
-- [ ] `make size` passes and stays below `KERNEL_SIZE_LIMIT`
-- [ ] `make -C tests test` passes
-- [ ] `make stack-check` passes when userland apps or wrappers changed
-- [ ] Relevant QEMU smoke target passes (`qemu-fb`, `qemu-fs-test`, `qemu-usb`,
-      `qemu-net`, etc.)
-- [ ] One `make qemu-fb-visible` manual pass was run for user-visible desktop
-      changes
-- [ ] No libc/POSIX assumptions were introduced
-- [ ] New public functions or ABI changes are documented
-- [ ] `SYSCALLS.md`, wrappers, and ABI tests are in sync for syscall changes
-- [ ] Commit messages follow the convention
-- [ ] No unrelated changes are included
-
----
-
-## What We Won't Accept
-
-- C++ in the kernel
-- POSIX compatibility layers
-- libc or hosted runtime assumptions in kernel/userland
-- Pulling in external libraries without a strong reason and explicit discussion
-- Code that requires Linux-specific runtime features to compile the target
-- "Temporary" hacks without a corresponding issue tracking the cleanup
-- Raspberry Pi support claims without a real hardware milestone
-- Changes that increase kernel binary size significantly without a proportional
-  feature gain
-
----
+- unsupported hardware claims;
+- code-present-equals-working documentation;
+- timeout-only tests presented as passing subsystem tests;
+- new global process-visible state without ownership and cleanup design;
+- unsafe user-pointer dereferences without a documented boundary;
+- broad rewrites without staged tests;
+- hidden ABI breaks;
+- speculative POSIX/libc or large runtime additions;
+- temporary hacks without a tracked risk or issue.
 
 ## Communication
 
-- Issues: for bugs, feature requests, and tasks
-- Discussions: for design questions and open-ended conversation
-- Keep communication in English while the codebase and docs are English
-
----
+Use issues for defects and scoped work. Use pull requests for reviewable changes. Keep repository code and technical documentation in English so one canonical set of contracts exists.
 
 ## License
 
-By contributing, you agree that your code will be licensed under
-[GPL-2.0](../LICENSE).
+Contributions are licensed under GPL-2.0.
