@@ -78,6 +78,14 @@ static inline panel_visual_state_t panel_visual_state(const uint32_t *states,
     return any_visible != 0 ? PANEL_VISUAL_RUNNING : PANEL_VISUAL_MINIMIZED;
 }
 
+static inline panel_visual_state_t panel_app_visual_state(
+    const uint32_t *states, int window_count, int process_count) {
+    if (window_count > 0) {
+        return panel_visual_state(states, window_count);
+    }
+    return process_count > 0 ? PANEL_VISUAL_RUNNING : PANEL_VISUAL_CLOSED;
+}
+
 static inline int panel_pick_window(const uint32_t *states, int count) {
     if (states == 0 || count <= 0) {
         return -1;
