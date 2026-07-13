@@ -69,11 +69,19 @@ _Static_assert(sizeof(gui_event_t) == 12,
 #define GUI_CURSOR_ARROW 0U
 #define GUI_CURSOR_HAND  1U
 
+// Userland-created windows are presentation windows and should receive keyboard
+// focus immediately. Kernel-owned/no-focus windows (for example the panel) keep
+// their kernel policy: SYS_WINDOW_FOCUS rejects them and the create result is
+// still returned unchanged.
 static inline long gui_window_create(long x, long y, long w, long h,
                                      long bg, long border,
                                      const char *title) {
-    return __syscall7(SYS_WINDOW_CREATE, x, y, w, h, bg, border,
-                      (long)(uintptr_t)title);
+    long window_id = __syscall7(SYS_WINDOW_CREATE, x, y, w, h, bg, border,
+                                (long)(uintptr_t)title);
+    if (window_id >= 0) {
+        (void)__syscall1(SYS_WINDOW_FOCUS, window_id);
+    }
+    return window_id;
 }
 
 static inline long gui_window_destroy(long window_id) {
