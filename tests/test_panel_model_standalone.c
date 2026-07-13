@@ -28,6 +28,8 @@ int main(void) {
     CHECK(panel_target_at(10, PANEL_ITEM_Y - 1) == PANEL_TARGET_NONE);
 
     CHECK(panel_visual_state(states, 0) == PANEL_VISUAL_CLOSED);
+    CHECK(panel_app_visual_state(states, 0, 0) == PANEL_VISUAL_CLOSED);
+    CHECK(panel_app_visual_state(states, 0, 1) == PANEL_VISUAL_RUNNING);
     states[0] = 0;
     CHECK(panel_visual_state(states, 1) == PANEL_VISUAL_RUNNING);
     states[0] = PANEL_WINDOW_STATE_MINIMIZED;
