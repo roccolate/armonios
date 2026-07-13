@@ -1,85 +1,106 @@
 # Codex Handoff
 
-This document is the first file to read before using Codex or another coding agent on ArmoniOS.
+This is the first file an AI coding agent should read before changing ArmoniOS.
 
-ArmoniOS is an assembly-first, bare-metal AArch64 operating system inspired by KolibriOS/MenuetOS. It is not Linux, POSIX, or libc-based.
+ArmoniOS is a freestanding AArch64 operating system. It is not Linux, POSIX, libc-based, or a hosted desktop application.
+
+## Read-first order
+
+1. `docs/DOCUMENTATION_POLICY.md`
+2. `docs/CURRENT_STATE.md`
+3. `docs/TECHNICAL_RISKS.md`
+4. `docs/ROADMAP.md`
+5. `docs/ARCHITECTURE.md`
+6. `docs/SYSCALLS.md`
+7. `docs/MEMORY_MAP.md`
+8. `docs/GUI_ABI_NOTES.md`
+9. `docs/PORTING.md`
+10. relevant source and tests
+
+`docs/TECH_DEBT_REVIEW.md` is historical and must not be treated as proof that no current debt exists.
 
 ## Current baseline
 
-The current baseline is **v0.9 QEMU desktop**.
+- **Product label:** v0.9 QEMU desktop alpha
+- **Target:** v1.0 QEMU desktop release candidate
+- **Verified primary platform:** QEMU `virt`
+- **Raspberry Pi status:** experimental source only, not build- or hardware-verified
 
-The immediate goal is **v1.0 QEMU desktop release candidate**:
+The current baseline includes real EL0 processes, syscalls, VFS/FAT32, a graphical compositor, six applications, QEMU virtio paths, and extensive host tests.
 
-- stable QEMU framebuffer desktop;
-- stable panel, shell, editor, files, monitor, and clock apps;
-- stable FAT32 root workflow through `files` and `editor`;
-- release gates passing repeatedly.
+Do not upgrade that description into “stable” or “secure.”
 
-## Current focus: FAT files/editor workflow
+## Highest-priority work
 
-Issue #1 tracks the v1.0 FAT workflow.
+The work order is not open-ended. Address these before application polish or new subsystems.
 
-The code now invalidates dynamic `/fat/<name>` VFS nodes after successful rename/delete, and host coverage exists in `tests/test_vfs_fat32_invalidation.c`.
+### P0 — RISK-001: permission-aware user copies
 
-Codex should next run the local gates and visible workflow:
+Current user-pointer helpers verify only that a range belongs to the process. Input and output helpers apply the same check, so kernel-to-user copies do not prove the destination is writable.
 
-```sh
-make
-make size
-make -C tests test
-make stack-check
-make qemu-fs-test
-timeout 25s make qemu-fb
-timeout 25s make qemu-usb
-timeout 25s make qemu-net
-make qemu-fb-visible
-```
+Required outcome:
 
-Manual visible flow:
+- effective permissions recorded per process region;
+- `copy_from_user`, `copy_to_user`, and c-string helpers;
+- output calls reject read-only image memory;
+- invalid user destinations cannot halt EL1;
+- host and QEMU negative tests.
 
-1. Open `files` from the panel.
-2. List `/fat`.
-3. Create a new 8.3 file.
-4. Open it in `editor`.
-5. Type content.
-6. Save with Ctrl-S.
-7. Close editor.
-8. Return to `files`.
-9. Rename the file.
-10. Reopen the renamed file and confirm content remains.
-11. Delete the file.
-12. Refresh/list `/fat` and confirm the deleted name is gone.
-13. Confirm no user fault, scheduler stall, compositor blank frame, or stale editor path.
+### P0 — RISK-002: process-owned file descriptors
 
-Do not close issue #1 until gates and visible workflow are verified.
+The VFS currently exposes one global eight-entry descriptor table.
 
-## Read-first docs
+Required outcome:
 
-Read these before coding:
+- descriptors owned by or local to a process;
+- cross-process access rejected;
+- offsets not unintentionally shared;
+- process exit/fault/kill closes descriptors;
+- lifecycle and isolation tests.
 
-1. `README.md`
-2. `docs/CURRENT_STATE.md`
-3. `docs/ROADMAP.md`
-4. `docs/SYSCALLS.md`
-5. `docs/GUI_ABI_NOTES.md`
-6. `docs/PORTING.md`
-7. `docs/MEMORY_MAP.md`
-8. `docs/TECH_DEBT_REVIEW.md`
+### P1 — Complete visible FAT workflow
+
+- attach `$(VIRTIO_BLK_IMG)` to `qemu-fb-visible`;
+- define/fix focus for an editor spawned by `files`;
+- manually verify create/edit/save/rename/reopen/delete;
+- record the date, commit, environment, and tester.
+
+### P1 — Deterministic QEMU gates
+
+`qemu-fs-test` checks serial markers. `qemu-fb`, `qemu-usb`, and `qemu-net` currently do not.
+
+Convert mandatory runtime targets into tests that fail when a final subsystem marker is absent. An external timeout is not a pass condition.
 
 ## Hard rules
 
-- Keep QEMU stable before Raspberry Pi work.
-- Do not claim real Raspberry Pi 4 boot until verified on hardware.
-- Do not add new syscalls unless a real userland need exists and docs/tests are updated.
-- Keep app and kernel stack usage within `make stack-check` limits.
-- Avoid broad rewrites.
-- Prefer small, testable changes.
-- Keep docs synchronized with behavior.
-- Be explicit about commands run and commands not run.
+- Do not assume documentation is correct; reconcile claims with code and tests.
+- Do not treat code presence as build or runtime evidence.
+- Do not claim a check was run unless the current agent actually ran it or clearly attributes an existing record.
+- Keep QEMU stable before hardware or multimedia work.
+- Avoid broad rewrites; make the smallest complete change that closes one risk or exit criterion.
+- Preserve syscall numbers and user-visible struct layouts.
+- Add tests before closing a risk.
+- Update `TECHNICAL_RISKS.md` and `CURRENT_STATE.md` when risk or evidence changes.
+- Update README last.
+- Keep repository code and technical docs in English.
 
-## Current release gates
+## Architecture facts that agents must preserve
 
-Run these before claiming v1.0 readiness:
+- EL0 processes are preemptive through IRQ trap frames.
+- EL1 helper threads are cooperative.
+- Each process has a separate TTBR0 root.
+- Current process tables also identity-map full RAM for EL1 as RWX.
+- TTBR1 and ASIDs are not used.
+- The PMM manages at most 128 MiB.
+- File descriptors are currently global and unsafe for a stable multi-process contract.
+- KLI1 does not yet define general mutable `.data`/`.bss` behavior.
+- FAT32 scope is root-only and short-name-only.
+- USB scope is basic directly attached boot-protocol HID; no hub claim.
+- Networking is a minimal internal DHCP path, not a socket API.
+
+## Verification commands
+
+### Deterministic or established checks
 
 ```sh
 make
@@ -87,51 +108,74 @@ make size
 make -C tests test
 make stack-check
 make qemu-fs-test
+```
+
+### Current launch targets requiring explicit marker inspection
+
+```sh
 timeout 25s make qemu-fb
 timeout 25s make qemu-usb
 timeout 25s make qemu-net
 ```
 
-Manual visual check:
+Do not report the second group as passing tests merely because timeout exit code 124 was accepted.
+
+### Visible desktop
 
 ```sh
 make qemu-fb-visible
 ```
 
-## ABI anchors
+The current target does not include the FAT block image. Fix RISK-003 before using it for the documented FAT workflow.
 
-Current syscall ranges:
+## Required workflow for an agent task
 
-- Process: `1..8`
-- Memory: `20..21`
-- I/O and VFS: `40..48`
-- IPC: `60..61`
-- GUI/window: `70..86`
-- System info: `100..102`
+1. Read the active risk and its exit criteria.
+2. Inspect implementation and tests; do not trust comments alone.
+3. Reproduce the defect when tools permit.
+4. Make the smallest complete change.
+5. Add focused tests that fail before the fix and pass after it.
+6. Run the smallest relevant checks first.
+7. Run broader gates required by the affected subsystem.
+8. Update documentation from actual evidence.
+9. Report commands not run and why.
+10. Leave the risk open if exit criteria are only partially satisfied.
 
-System info syscalls:
+## Handoff format
 
-- `SYS_TIMEINFO = 100`
-- `SYS_MEMINFO = 101`
-- `SYS_PROCLIST = 102`
+Every agent handoff must include:
 
-## Preferred work order
+```text
+Scope:
+Files changed:
+Behavior changed:
+Risk IDs affected:
 
-1. Reproduce or inspect the issue.
-2. Make the smallest correct change.
-3. Add or adjust host tests.
-4. Run relevant gates.
-5. Update docs if behavior changes.
-6. Report exactly what was run and what remains.
+Commands run:
+- command -> exact result/marker
 
-## Output expectation for future agents
+Manual checks:
+- workflow -> result and tester
 
-Every agent handoff should say:
+Not run:
+- check -> reason
 
-- files changed;
-- why each change was necessary;
-- commands run;
-- commands not run and why;
-- risks/follow-up.
+Remaining risks:
+- item
+```
 
-Never imply validation that did not happen.
+## Do not do next
+
+Unless explicitly requested after v1.0 blockers are addressed, do not:
+
+- add audio;
+- add a game engine to the kernel;
+- add new network protocols;
+- start SMP;
+- claim Raspberry Pi boot;
+- expand FAT32 features;
+- rewrite the compositor;
+- introduce POSIX/libc compatibility;
+- add new syscalls for application polish.
+
+The immediate objective is a trustworthy, repeatable QEMU desktop baseline.
