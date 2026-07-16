@@ -19,12 +19,18 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 | RISK-003 | P1 | QEMU desktop target | FIX IMPLEMENTED; OPEN PENDING VERIFICATION | `qemu-fb-visible` attaches FAT32, but the visible workflow has not been rerun. |
 | RISK-004 | P1 | Desktop focus | FIX IMPLEMENTED; OPEN PENDING VERIFICATION | New userland windows request focus, but files-to-editor has not been rerun. |
 | RISK-005 | P1 | Runtime verification | TEST FIX IMPLEMENTED; OPEN PENDING REAL QEMU | Deterministic framebuffer, USB, and DHCP runners are in `main`; no real logs exist yet. |
+| RISK-001 | P0 | Syscall boundary | OPEN | Output buffers are range-checked but not checked for write permission on `main`. |
+| RISK-002 | P0 | VFS/process isolation | OPEN | VFS descriptors are global rather than owned by a process. |
+| RISK-003 | P1 | QEMU desktop target | FIX IMPLEMENTED; OPEN PENDING VERIFICATION | `qemu-fb-visible` now attaches the FAT32 image, but the visible workflow has not been rerun. |
+| RISK-004 | P1 | Desktop focus | FIX IMPLEMENTED; OPEN PENDING VERIFICATION | New userland windows now request focus, but the files-to-editor flow has not been rerun. |
+| RISK-005 | P1 | Runtime verification | OPEN | Several QEMU release gates launch a VM but do not assert success markers. |
 | RISK-006 | P1 | Raspberry Pi 4 build | OPEN | The RPi4 board backend does not satisfy the complete board interface. |
 | RISK-007 | P0 for hardware track | Raspberry Pi storage | OPEN | The current eMMC implementation is contradictory and not hardware-validated. |
 | RISK-008 | P1 | Memory protection | OPEN | Process page tables identity-map the full RAM range as kernel RWX. |
 | RISK-009 | P1 | KLI1 application format | OPEN | Mutable `.data` and `.bss` behavior is not an explicit, tested image-format contract. |
 | RISK-010 | P2 | Scheduling documentation | OPEN | EL0 processes are preemptive, but EL1 kernel threads are cooperative. |
 | RISK-011 | P1 | Verification infrastructure | OPEN | GitHub Actions jobs fail before checkout and expose no step logs. |
+| RISK-011 | P1 | Verification infrastructure | OPEN | GitHub Actions jobs currently fail before checkout and expose no step logs. |
 
 ## RISK-001 — Output buffer permissions are not enforced on main
 
@@ -33,6 +39,7 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 **Evidence:** static code inspection
 
 `sys_user_buf_in()` and `sys_user_buf_out()` on `main` currently use the same region-membership check. The loader maps application images read/execute and stacks read/write, so an output syscall can accept an address inside a registered but non-writable image mapping. A subsequent EL1 write can fault in the kernel.
+`sys_user_buf_in()` and `sys_user_buf_out()` on `main` currently use the same region-membership check. Process regions record ownership metadata but do not expose read/write/execute permission metadata to the syscall helper layer.
 
 Draft PR #16 is based on current `main` and implements:
 
@@ -44,6 +51,16 @@ Draft PR #16 is based on current `main` and implements:
 - a QEMU runner requiring two successful probes, `panel: ready`, and `clock: starting`.
 
 Focused host and simulated-runner checks passed, but the full build and real QEMU regression have not run. The risk therefore remains open on `main`.
+Draft PR #9 implements a first mitigation slice by checking the process's actual EL0 PTEs and adding checked copy helpers. It remains unmerged and unverified; this risk therefore remains open on `main`.
+
+**Required direction:**
+
+- enforce effective user permissions for every kernel/user transfer;
+- provide separate `copy_from_user`, `copy_to_user`, and c-string helpers;
+- require write permission for kernel-to-user copies;
+- migrate output-producing syscalls to the checked copy boundary where appropriate;
+- add negative tests for output syscalls targeting read-only image memory;
+- define recoverable behavior for a bad user destination without halting the kernel.
 
 **Exit criteria:** PR #16 is merged after the full baseline passes, and `bash tools/qemu_usercopy_test.sh` records `ERR_PERM` behavior plus continued scheduling on the exact commit.
 
@@ -78,6 +95,14 @@ The earlier visible target omitted the block image. It now depends on `$(VIRTIO_
 
 **Exit criteria:** `bash tools/verify.sh` passes and a named tester completes create/edit/save/rename/reopen/delete in `make qemu-fb-visible` on the exact commit.
 
+**Evidence:** earlier Makefile inspection and manual observation; implementation commit `662f3ee4032ef09dac6872e1a06e8c60c3ac7611`
+
+The earlier documented visible FAT workflow used `make qemu-fb-visible`, but that target attached GPU and input devices without the generated virtio block image. The `files` application therefore reported FAT as unavailable.
+
+The target now depends on `$(VIRTIO_BLK_IMG)` and attaches it through a `virtio-blk-device`. This removes the static wiring defect, but no post-change build or visible QEMU run has been recorded.
+
+**Exit criteria:** `bash tools/verify.sh` passes on the implementation commit and the full create/edit/save/rename/reopen/delete workflow passes in `make qemu-fb-visible`.
+
 ## RISK-004 — New-window focus requires verification
 
 **Severity:** P1  
@@ -87,6 +112,13 @@ The earlier visible target omitted the block image. It now depends on `$(VIRTIO_
 The common `libkarmdesk` create wrapper now requests focus after a successful window create. Kernel `GUI_WINDOW_NO_FOCUS` policy remains authoritative because the focus syscall can reject protected windows.
 
 **Exit criteria:** a named tester confirms a file opened from `files` accepts keyboard input in `editor` immediately without an extra click, after the automated baseline passes.
+**Evidence:** earlier application/GUI inspection and manual observation; implementation commit `662f3ee4032ef09dac6872e1a06e8c60c3ac7611`
+
+The earlier editor created and titled a window without explicitly focusing it. Window creation only selected a window automatically when no other application window was focused, so keyboard input remained with `files` after spawning the editor.
+
+The common `libkarmdesk` window-create wrapper now requests focus after a successful create. Kernel `GUI_WINDOW_NO_FOCUS` policy remains authoritative because the focus syscall can reject no-focus windows and the wrapper ignores that presentation-only failure.
+
+**Exit criteria:** `bash tools/verify.sh` passes and a named tester confirms that a file opened from `files` accepts keyboard input in `editor` immediately without an extra click.
 
 ## RISK-005 — Deterministic QEMU tools require real execution
 
@@ -176,6 +208,13 @@ Timer IRQ preemption applies to EL0 process trap frames. EL1 helper threads chan
 GitHub creates jobs, but they finish before exposing any step or downloadable log. Issue #12 tracks the repository/account-level investigation. Until a runner reaches checkout, local command output is the only available automated release evidence.
 
 **Exit criteria:** a GitHub-hosted runner reaches checkout, logs are available, the local baseline runs in CI, and QEMU logs are preserved as artifacts.
+**Evidence:** repeated pull-request workflow runs for both the historical and replacement workflows
+
+GitHub creates the jobs, but they finish with failure before exposing any step or downloadable job log. The historical `CI - Tests` workflow and the new CI-only PR #11 show the same pattern, so no build or test failure can be inferred from those runs.
+
+Issue #12 tracks the required repository/account-level investigation. Until a runner reaches checkout, local `bash tools/verify.sh` output is the only available automated release evidence.
+
+**Exit criteria:** a GitHub-hosted runner reaches checkout, logs are available, the local verification baseline runs in CI, and the FAT32 serial log is preserved as an artifact.
 
 ## Closed risks
 
