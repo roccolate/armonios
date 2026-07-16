@@ -311,8 +311,8 @@ $(VIRTIO_BLK_IMG): $(MKFAT32_IMAGE) $(BUILD_DIR)/$(APPS_DIR)/shell.bin | $(BUILD
 	$(LOG_MKFAT32)$(MKFAT32_IMAGE) $@ $(BUILD_DIR)/$(APPS_DIR)/shell.bin
 
 entry-check: $(KERNEL_ELF)
-	$(LOG_CHECK)$(READELF) -h $(KERNEL_ELF) | grep "Entry point address:" | grep -q "$(LOAD_ADDR)"
-	$(Q)$(READELF) -s $(KERNEL_ELF) | grep " _start$$" | grep -q "0*$(LOAD_ADDR_HEX)"
+	$(LOG_CHECK)LC_ALL=C $(READELF) -h $(KERNEL_ELF) | grep "Entry point address:" | grep -q "$(LOAD_ADDR)"
+	$(Q)LC_ALL=C $(READELF) -s $(KERNEL_ELF) | grep " _start$$" | grep -q "0*$(LOAD_ADDR_HEX)"
 
 qemu: qemu-check entry-check $(KERNEL_BIN)
 	$(LOG_QEMU)qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 128M -nographic \

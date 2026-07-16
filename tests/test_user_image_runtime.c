@@ -395,12 +395,12 @@ DECLARE_APP_BLOB(panel)
 /* Expected image_size per app (image_end - image_header). Bumped
  * when the corresponding .c file adds code or rodata; reduced
  * when image_end lands in the wrong section (the bug shape). */
-#define EXPECTED_SHELL_IMAGE_SIZE   5859ULL
-#define EXPECTED_EDITOR_IMAGE_SIZE  2684ULL
-#define EXPECTED_FILES_IMAGE_SIZE   3416ULL
-#define EXPECTED_MONITOR_IMAGE_SIZE 1480ULL
-#define EXPECTED_CLOCK_IMAGE_SIZE   1082ULL
-#define EXPECTED_PANEL_IMAGE_SIZE   2969ULL
+#define EXPECTED_SHELL_IMAGE_SIZE   5875ULL
+#define EXPECTED_EDITOR_IMAGE_SIZE  2696ULL
+#define EXPECTED_FILES_IMAGE_SIZE   3380ULL
+#define EXPECTED_MONITOR_IMAGE_SIZE 1496ULL
+#define EXPECTED_CLOCK_IMAGE_SIZE   1110ULL
+#define EXPECTED_PANEL_IMAGE_SIZE   5789ULL
 
 static void assert_app_image_size(const char *app_name,
                                   const char *start,

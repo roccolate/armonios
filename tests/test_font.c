@@ -131,7 +131,7 @@ void test_font_draw_text_clips_at_framebuffer_edge(void) {
 }
 
 void test_font_draw_text_handles_newline(void) {
-    uint32_t pixels[128] = { 0 };
+    uint32_t pixels[256] = { 0 };
     fb_t fb;
 
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 16, 16, 16));
