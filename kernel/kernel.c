@@ -350,28 +350,22 @@ void kernel_on_timer_tick(void) {
 
 static int enable_identity_mmu(const dtb_memory_t *memory, uint64_t dtb_addr) {
     uint64_t *kernel_pgd = vmm_new_table();
-    int vmm_ok = 0;
 
     (void)dtb_addr;
 
+    if (kernel_pgd == 0) {
+        uart_puts("VMM map: no table\n");
+        return -1;
+    }
+
     /*
-     * The early kernel still runs with identity addresses. Map all reported
-     * RAM and board MMIO before enabling the MMU so existing pointers remain
-     * valid while later EL0 page tables get their own address spaces.
+     * Map kernel regions with W^X permissions before enabling the MMU.
+     * Kernel text is RX, rodata is R, data+bss+stack are RW+NX, MMIO
+     * regions are device+NX, and all remaining RAM pages are RW+NX so
+     * that user data and PMM allocations are never executable.
      */
-    if (kernel_pgd != 0) {
-        vmm_ok = vmm_map_range(kernel_pgd, memory->base, memory->base,
-                               memory->size,
-                               VMM_FLAG_READ | VMM_FLAG_WRITE | VMM_FLAG_EXEC);
-    } else {
-        vmm_ok = -1;
-    }
-
-    if (vmm_ok == 0) {
-        vmm_ok = board_map_mmio(kernel_pgd);
-    }
-
-    if (vmm_ok != 0) {
+    if (vmm_map_kernel_identity(kernel_pgd, memory->base, memory->size,
+                                 board_map_mmio) != 0) {
         uart_puts("VMM map: failed\n");
         return -1;
     }

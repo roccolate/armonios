@@ -51,9 +51,13 @@ SECTIONS {
         __app_clock_end = .;
     } :text
 
+    __text_end = .;
+
     .rodata : ALIGN(8) {
         *(.rodata*)
     } :rodata
+
+    __rodata_end = .;
 
     .data : ALIGN(8) {
         *(.data*)
@@ -66,6 +70,8 @@ SECTIONS {
         . = ALIGN(16);
         __bss_end = .;
     } :data
+
+    __data_end = .;
 
     . = ALIGN(16);
     . += 0x4000;

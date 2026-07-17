@@ -27,4 +27,8 @@ int vmm_unmap_range(uint64_t *pgd, uint64_t vaddr, uint64_t size);
 uint64_t vmm_virt_to_phys(uint64_t *pgd, uint64_t vaddr);
 uint64_t vmm_leaf_entry(uint64_t *pgd, uint64_t vaddr);
 
+int vmm_map_kernel_identity(uint64_t *pgd, uint64_t memory_base,
+                             uint64_t memory_size,
+                             int (*map_mmio)(uint64_t *));
+
 #endif

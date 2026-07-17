@@ -128,21 +128,9 @@ static int load_named_image(const char *name, user_image_t *image,
 }
 
 static int map_kernel_identity(uint64_t *pgd, uint64_t memory_base,
-                               uint64_t memory_size,
-                               panel_map_mmio_fn_t map_mmio) {
-    int status;
-
-    if (pgd == 0 || memory_size == 0) {
-        return -1;
-    }
-
-    status = vmm_map_range(pgd, memory_base, memory_base, memory_size,
-                           VMM_FLAG_READ | VMM_FLAG_WRITE | VMM_FLAG_EXEC);
-    if (status == 0 && map_mmio != 0) {
-        status = map_mmio(pgd);
-    }
-
-    return status;
+                                uint64_t memory_size,
+                                panel_map_mmio_fn_t map_mmio) {
+    return vmm_map_kernel_identity(pgd, memory_base, memory_size, map_mmio);
 }
 
 static int create_panel_page_table(process_t *process,
