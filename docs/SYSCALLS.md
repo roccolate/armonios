@@ -2,7 +2,7 @@
 
 ArmoniOS defines a small non-POSIX syscall ABI for freestanding AArch64 applications.
 
-This document describes the current implementation, including known unsafe or incomplete contracts. Operational verification lives in `CURRENT_STATE.md`; `RISK-001` and `RISK-002` in `TECHNICAL_RISKS.md` block a v1.0 isolation claim.
+This document describes the current implementation, including known unsafe or incomplete contracts. Operational verification lives in `CURRENT_STATE.md`; risk history and remaining exit criteria live in `TECHNICAL_RISKS.md`.
 
 ## Calling convention
 
@@ -19,23 +19,23 @@ Syscall numbers are frozen in `kernel/syscall_numbers.h`. Existing numbers and a
 
 ## Important current safety limits
 
-### User pointer checks are range-based, not permission-aware
+### User pointer checks are permission-aware, not fault-contained
 
-Every syscall pointer is checked against the current process's registered user ranges. This prevents one process from directly passing an address that belongs only to another process.
+Every syscall pointer is checked against the current process's registered user ranges and page table. This prevents one process from directly passing an address that belongs only to another process.
 
-However, the helper layer currently does **not** distinguish:
+The helper layer distinguishes:
 
 - readable source memory;
 - writable destination memory;
 - executable image memory.
 
-`sys_user_buf_in()` and `sys_user_buf_out()` perform the same membership check. Kernel-to-user syscalls can therefore accept a registered but read-only image address as an output destination. Do not describe output buffers as “validated writable buffers” until `RISK-001` is closed.
+`sys_user_buf_in()` requires valid EL0-readable pages. `sys_user_buf_out()` additionally rejects read-only pages with `ERR_PERM` before writing any byte. The remaining limitation is that actual byte copies are still normal kernel loads/stores, not fault-contained copyin/copyout.
 
-### VFS file descriptors are global
+### VFS file descriptors are process-local
 
-Descriptors `3+` currently index one eight-entry kernel-global VFS table. They are not owned by a PID, are not local to a process, and are not automatically closed on process exit.
+Descriptors `3+` are local to the current process. The VFS stores owner PID and local fd in an internal global handle pool, validates operations against `process_current()`, lazily reaps dead owners, and closes all descriptors from `process_mark_exited()`.
 
-The current ABI numbers remain documented, but the resource model is not considered a correct multi-process contract. See `RISK-002`.
+The current limit is eight open descriptors per process, backed by a fixed global pool sized for all process slots.
 
 ## Process syscalls
 
@@ -88,7 +88,7 @@ Current limitations:
 | # | Name | Arguments | Return | Current behavior |
 |---:|---|---|---|---|
 | 40 | `sys_open` | `x0=path, x1=flags` | fd/error | Open an existing VFS node or dynamically open/create a FAT root file. |
-| 41 | `sys_close` | `x0=fd` | 0/error | Close one entry in the global VFS descriptor table. |
+| 41 | `sys_close` | `x0=fd` | 0/error | Close one process-local VFS descriptor. |
 | 42 | `sys_read` | `x0=fd, x1=buf, x2=len` | bytes/error | Read one stdin byte or data from a VFS descriptor. |
 | 43 | `sys_write` | `x0=fd, x1=buf, x2=len` | bytes/error | Write to UART stdout/stderr or a writable VFS descriptor. |
 | 44 | `sys_seek` | `x0=fd, x1=offset, x2=whence` | offset/error | Set absolute file offset; only `whence=0` is supported. |
@@ -103,7 +103,7 @@ Descriptor numbers:
 0  stdin   shared input queue, non-blocking, at most one byte per call
 1  stdout  UART
 2  stderr  UART
-3+ VFS     kernel-global table, maximum 8 open entries total
+3+ VFS     process-local fd, maximum 8 open entries per process
 ```
 
 Open flags:
@@ -137,7 +137,7 @@ Current limitations:
 - fixed maximum message size;
 - non-blocking empty/full behavior returns `ERR_AGAIN`;
 - receive currently requires the expected fixed capacity;
-- destination output validation has the permission limitation described under `RISK-001`.
+- destination output validation is permission-aware but not fault-contained.
 
 ## Window and cursor syscalls
 
@@ -189,9 +189,9 @@ Most mutating window calls enforce `owner_pid == current_pid`. The following are
 - `sys_window_restore`;
 - `sys_window_state`.
 
-Current focus limitation: a normal newly created window is not guaranteed to receive focus when another application window is already focused. This affects the files-to-editor workflow and is tracked by `RISK-004`.
+Current focus policy: normal application wrappers request focus after successful window creation; the kernel rejects no-focus windows such as docks/taskbars. The focus syscall path is covered by `tools/qemu_focus_test.sh`; the remaining `RISK-004` gap is visible human confirmation of the files-to-editor flow.
 
-Any window syscall that writes results or events to user memory is also subject to `RISK-001` until writable-region checks exist.
+Any window syscall that writes results or events to user memory uses writable-page validation before copying. The copy itself is not fault-contained.
 
 ## System information syscalls
 
@@ -199,7 +199,7 @@ Any window syscall that writes results or events to user memory is also subject 
 |---:|---|---|---|
 | 100 | `sys_timeinfo` | `x0=info_ptr` | Three `uint64_t`: timer ticks, scheduler ticks, scheduler quantums. |
 | 101 | `sys_meminfo` | `x0=info_ptr` | Two `uint64_t`: total PMM pages and free PMM pages. |
-| 102 | `sys_proclist` | `x0=entries_ptr, x1=max_entries` | Bounded array of process entries. |
+| 102 | `sys_proclist` | `x0=entries_ptr, x1=max_entries` | Bounded array of non-zombie process entries. |
 
 A process entry is currently:
 
@@ -209,7 +209,7 @@ uint32_t state;
 char     name[16];
 ```
 
-These calls currently range-check their output pointers but do not prove write permission; see `RISK-001`.
+These calls validate writable user pages before copying their output. The copy itself is not fault-contained.
 
 ## Error codes
 

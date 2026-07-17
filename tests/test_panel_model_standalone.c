@@ -27,6 +27,10 @@ int main(void) {
                           PANEL_ITEM_Y + PANEL_ITEM_H - 1) == 3);
     CHECK(panel_target_at(panel_app_x(0) + PANEL_APP_W,
                           PANEL_ITEM_Y + 1) == PANEL_TARGET_NONE);
+    CHECK(PANEL_APP_W == 36);
+    CHECK(PANEL_MENU_BUTTON_W == 56);
+    CHECK(PANEL_APP_X + PANEL_PINNED_COUNT * PANEL_APP_W +
+              (PANEL_PINNED_COUNT - 1) * PANEL_APP_GAP <= PANEL_CLOCK_X);
     CHECK(panel_target_at(PANEL_CLOCK_X, PANEL_ITEM_Y) == PANEL_TARGET_CLOCK);
     CHECK(panel_target_at(PANEL_CLOCK_X + PANEL_CLOCK_W,
                           PANEL_ITEM_Y) == PANEL_TARGET_NONE);

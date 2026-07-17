@@ -25,8 +25,8 @@
 | `make stack-check` | HOST-VERIFIED | Maximum 368 bytes in `editor` with a 3072-byte limit. |
 | `make qemu-fs-test` | QEMU-VERIFIED | `storage: initialized`, `FAT32: mounted`, `FAT32 root: mounted`, `FAT32 shell bytes`, `FAT32 edit file: mounted`, `storage app image: FAT32`. |
 | `bash tools/qemu_usercopy_test.sh` | QEMU-VERIFIED | Six `USERCOPY: RX output rejected` probes across distinct EL0 processes followed by `panel: ready` and `clock: starting`. Log: `build-usercopy-test/qemu-usercopy-test.log`. |
-| `bash tools/qemu_marker_test.sh all` | QEMU-VERIFIED | `qemu-fb` (`VIRTIO gpu: windows`, `panel: ready`), `qemu-usb` (`USB: controller initialized`, `USB: enumeration ok`, `USB HID: 2 devices`), `qemu-net` (`network: initialized`, `[net] DHCP ack: IP=10.0.2.15`). |
-| `bash tools/qemu_fb_fat_test.sh` | QEMU-VERIFIED | Visible-desktop wiring: `FAT32: mounted`, `FAT32 root: mounted`, `VIRTIO gpu: windows`, `panel: ready` in the same boot. |
+| `bash tools/qemu_marker_test.sh all` | QEMU-VERIFIED | `qemu-fb` (`display: windows`, `panel: ready`), `qemu-usb` (`USB: controller initialized`, `USB: enumeration ok`, `USB HID: 2 devices`), `qemu-net` (`network: initialized`, `[net] DHCP ack: IP=10.0.2.15`). |
+| `bash tools/qemu_fb_fat_test.sh` | QEMU-VERIFIED | Visible-desktop wiring: `FAT32: mounted`, `FAT32 root: mounted`, `display: windows`, `panel: ready` in the same boot. |
 | `make qemu-fb-visible` interactive workflow | UNVERIFIED | The static wiring is provable from logs; the visible create/edit/save/rename/reopen/delete flow still needs a named human tester on a real QEMU display. |
 | `make BOARD=rpi4` | KNOWN-BROKEN | The RPi4 board backend does not satisfy the full interface used by generic kernel code. |
 | Physical Raspberry Pi 4 boot | PLANNED | No hardware boot claim. |

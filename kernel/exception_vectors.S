@@ -169,8 +169,8 @@ irq_entry:
     ldr x30, [sp, #240]
     add sp, sp, #288
 
-    /* Re-enable IRQ (clear I bit in DAIF) just before eret. */
-    msr daifclr, #2
+    /* ERET restores DAIF from SPSR_EL1. Do not unmask IRQ here: a pending
+     * timer interrupt could re-enter this epilogue before SP is restored. */
     eret
 .endm
 

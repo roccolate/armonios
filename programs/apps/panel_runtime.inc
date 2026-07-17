@@ -19,7 +19,6 @@
 #define COLOR_BORDER 0xff808080U
 #define COLOR_EDGE 0xff506070U
 #define COLOR_ITEM_BG 0xff3a4658U
-#define COLOR_ITEM_HOVER 0xff5870a0U
 #define COLOR_TEXT 0xffe0e8f0U
 #define COLOR_MARK 0xffc0d0e0U
 #define COLOR_MENU_BG 0xff202428U
@@ -30,6 +29,7 @@
 #define GUI_CURSOR_HAND 1U
 #define INPUT_KEY_UP 0x101
 #define INPUT_KEY_DOWN 0x102
+#define PROCESS_STATE_ZOMBIE 4U
 
 typedef struct {
     uint32_t pid;
@@ -54,10 +54,10 @@ typedef struct {
     uint32_t panel_pid;
     uint32_t menu_return_window;
     int menu_return_valid;
-    int hover_target;
     int menu_hover;
     int menu_selected;
     int yield_counter;
+    uint32_t app_signatures[PANEL_APP_COUNT];
     panel_app_t apps[PANEL_APP_COUNT];
     proc_entry_t procs[PROCLIST_MAX];
     uint64_t time_info[3];
@@ -67,6 +67,8 @@ typedef struct {
 } panel_state_t;
 
 static void refresh_panel(panel_state_t *panel);
+static void refresh_panel_full(panel_state_t *panel);
+static void refresh_panel_tick(panel_state_t *panel);
 static void activate_app(panel_state_t *panel, int app_index);
 
 static void copy_text(char *dst, size_t dst_size, const char *src) {
@@ -86,12 +88,6 @@ static int text_equal(const char *left, const char *right) {
         i++;
     }
     return 1;
-}
-
-static int text_width(const char *text, int cap) {
-    int count = 0;
-    while (count < cap && text[count] != '\0') count++;
-    return count * 8;
 }
 
 static int abs_to_panel_y(int32_t absolute_y) {
@@ -133,6 +129,7 @@ static void refresh_app_model(panel_state_t *panel) {
     for (long proc_index = 0; proc_index < count; proc_index++) {
         uint32_t pid = panel->procs[proc_index].pid;
         if (pid == 0 || pid == panel->panel_pid) continue;
+        if (panel->procs[proc_index].state == PROCESS_STATE_ZOMBIE) continue;
         for (int app_index = 0; app_index < PANEL_APP_COUNT; app_index++) {
             panel_app_t *app = &panel->apps[app_index];
             if (!text_equal(panel->procs[proc_index].name, app->process_name)) continue;
@@ -151,12 +148,41 @@ static void refresh_app_model(panel_state_t *panel) {
     }
 }
 
-static void refresh_clock(panel_state_t *panel) {
-    if (kli_timeinfo(panel->time_info) < 0) {
-        copy_text(panel->clock_text, sizeof(panel->clock_text), "--:--:--");
-        return;
+static uint32_t panel_app_signature(const panel_app_t *app) {
+    uint32_t sig = ((uint32_t)app->process_count << 16) |
+                   ((uint32_t)app->window_count & 0xffffU);
+    for (int i = 0; i < PANEL_APP_WINDOW_CAP; i++) {
+        sig = (sig * 33U) ^ app->window_ids[i];
+        sig = (sig * 33U) ^ app->window_states[i];
     }
-    panel_format_uptime(panel->time_info[0], panel->clock_text);
+    return sig;
+}
+
+static uint32_t refresh_app_model_changed(panel_state_t *panel) {
+    uint32_t changed = 0;
+    refresh_app_model(panel);
+    for (int i = 0; i < PANEL_APP_COUNT; i++) {
+        uint32_t sig = panel_app_signature(&panel->apps[i]);
+        if (sig != panel->app_signatures[i]) {
+            panel->app_signatures[i] = sig;
+            changed |= 1U << (uint32_t)i;
+        }
+    }
+    return changed;
+}
+
+static int refresh_clock(panel_state_t *panel) {
+    char next[9];
+    if (kli_timeinfo(panel->time_info) < 0) {
+        copy_text(next, sizeof(next), "--:--:--");
+    } else {
+        panel_format_uptime(panel->time_info[0], next);
+    }
+    if (text_equal(panel->clock_text, next)) {
+        return 0;
+    }
+    copy_text(panel->clock_text, sizeof(panel->clock_text), next);
+    return 1;
 }
 
 static void draw_instance_marks(panel_state_t *panel, const panel_app_t *app,
@@ -174,23 +200,31 @@ static void draw_state_indicator(panel_state_t *panel,
                                  int x, int y, int width, int height) {
     int center = x + width / 2;
     int baseline = y + height - 4;
+    int inset = width > 16 ? 6 : 2;
+    int run_w = width > 12 ? width - 12 : width;
+    int focus_w = width > 12 ? width - 12 : width;
+    int mini_w = width > 24 ? 8 : 4;
+    if (run_w > 24) run_w = 24;
     if (state == PANEL_VISUAL_RUNNING) {
-        (void)gui_window_draw_rect(panel->wid, center - 12, baseline, 24, 2, COLOR_MARK);
+        (void)gui_window_draw_rect(panel->wid, center - run_w / 2,
+                                   baseline, run_w, 2, COLOR_MARK);
     } else if (state == PANEL_VISUAL_FOCUSED) {
-        (void)gui_window_draw_rect(panel->wid, center - 28, baseline - 1, 56, 3, COLOR_MARK);
-        (void)gui_window_draw_rect(panel->wid, x + 2, y + 2, width - 4, 1, COLOR_MARK);
+        (void)gui_window_draw_rect(panel->wid, center - focus_w / 2,
+                                   baseline - 1, focus_w, 3, COLOR_MARK);
+        (void)gui_window_draw_rect(panel->wid, x + inset, y + 2,
+                                   width - 2 * inset, 1, COLOR_MARK);
     } else if (state == PANEL_VISUAL_MINIMIZED) {
-        (void)gui_window_draw_rect(panel->wid, center - 13, baseline, 10, 2, COLOR_MARK);
-        (void)gui_window_draw_rect(panel->wid, center + 3, baseline, 10, 2, COLOR_MARK);
+        (void)gui_window_draw_rect(panel->wid, center - mini_w - 2,
+                                   baseline, mini_w, 2, COLOR_MARK);
+        (void)gui_window_draw_rect(panel->wid, center + 2,
+                                   baseline, mini_w, 2, COLOR_MARK);
     }
 }
 
 static void draw_menu_button(panel_state_t *panel) {
-    uint32_t background = panel->hover_target == PANEL_TARGET_MENU
-                              ? COLOR_ITEM_HOVER : COLOR_ITEM_BG;
     (void)gui_window_draw_rect(panel->wid, PANEL_MENU_BUTTON_X, PANEL_ITEM_Y,
-                               PANEL_MENU_BUTTON_W, PANEL_ITEM_H, background);
-    (void)gui_window_draw_text(panel->wid, PANEL_MENU_BUTTON_X + 20,
+                               PANEL_MENU_BUTTON_W, PANEL_ITEM_H, COLOR_ITEM_BG);
+    (void)gui_window_draw_text(panel->wid, PANEL_MENU_BUTTON_X + 12,
                                PANEL_ITEM_Y + 10, COLOR_TEXT, "Apps");
     if (panel->menu_wid >= 0) {
         (void)gui_window_draw_rect(panel->wid, PANEL_MENU_BUTTON_X + 8,
@@ -199,32 +233,38 @@ static void draw_menu_button(panel_state_t *panel) {
     }
 }
 
+static const char *app_icon(int app_index) {
+    if (app_index == 0) return ">";
+    if (app_index == 1) return "E";
+    if (app_index == 2) return "F";
+    if (app_index == 3) return "M";
+    return "?";
+}
+
+static void draw_app_icon(panel_state_t *panel, int app_index, int x) {
+    (void)gui_window_draw_text(panel->wid, x + 14, PANEL_ITEM_Y + 10,
+                               COLOR_TEXT, app_icon(app_index));
+}
+
 static void draw_app_button(panel_state_t *panel, int app_index) {
     panel_app_t *app = &panel->apps[app_index];
     int x = panel_app_x(app_index);
-    uint32_t background = panel->hover_target == app_index
-                              ? COLOR_ITEM_HOVER : COLOR_ITEM_BG;
-    int label_width = text_width(app->label, LABEL_CAP);
     panel_visual_state_t state = panel_app_visual_state(
         app->window_states, app->window_count, app->process_count);
     (void)gui_window_draw_rect(panel->wid, x, PANEL_ITEM_Y,
-                               PANEL_APP_W, PANEL_ITEM_H, background);
-    (void)gui_window_draw_text(panel->wid,
-                               x + (PANEL_APP_W - label_width) / 2,
-                               PANEL_ITEM_Y + 10, COLOR_TEXT, app->label);
+                               PANEL_APP_W, PANEL_ITEM_H, COLOR_ITEM_BG);
+    draw_app_icon(panel, app_index, x);
     draw_instance_marks(panel, app, x, PANEL_ITEM_Y, PANEL_APP_W);
     draw_state_indicator(panel, state, x, PANEL_ITEM_Y, PANEL_APP_W, PANEL_ITEM_H);
 }
 
 static void draw_clock(panel_state_t *panel) {
     panel_app_t *clock_app = &panel->apps[PANEL_APP_COUNT - 1];
-    uint32_t background = panel->hover_target == PANEL_TARGET_CLOCK
-                              ? COLOR_ITEM_HOVER : COLOR_ITEM_BG;
     panel_visual_state_t state = panel_app_visual_state(
         clock_app->window_states, clock_app->window_count,
         clock_app->process_count);
     (void)gui_window_draw_rect(panel->wid, PANEL_CLOCK_X, PANEL_ITEM_Y,
-                               PANEL_CLOCK_W, PANEL_ITEM_H, background);
+                               PANEL_CLOCK_W, PANEL_ITEM_H, COLOR_ITEM_BG);
     (void)gui_window_draw_text(panel->wid, PANEL_CLOCK_X + 8,
                                PANEL_ITEM_Y + 10, COLOR_TEXT, panel->clock_text);
     draw_instance_marks(panel, clock_app, PANEL_CLOCK_X, PANEL_ITEM_Y, PANEL_CLOCK_W);
@@ -349,15 +389,43 @@ static void toggle_menu(panel_state_t *panel) {
     else open_menu(panel);
 }
 
-static void refresh_panel(panel_state_t *panel) {
-    refresh_app_model(panel);
+static void refresh_panel_full(panel_state_t *panel) {
+    (void)refresh_app_model_changed(panel);
     refresh_clock(panel);
     draw_panel(panel);
     if (panel->menu_wid >= 0) draw_menu(panel);
 }
 
+static void refresh_panel(panel_state_t *panel) {
+    (void)refresh_app_model_changed(panel);
+    refresh_clock(panel);
+
+    redraw_target(panel, PANEL_TARGET_MENU);
+    for (int i = 0; i < PANEL_PINNED_COUNT; i++) redraw_target(panel, i);
+    redraw_target(panel, PANEL_TARGET_CLOCK);
+    if (panel->menu_wid >= 0) draw_menu(panel);
+}
+
+static void refresh_panel_tick(panel_state_t *panel) {
+    uint32_t changed = refresh_app_model_changed(panel);
+    for (int i = 0; i < PANEL_PINNED_COUNT; i++) {
+        if ((changed & (1U << (uint32_t)i)) != 0U) {
+            redraw_target(panel, i);
+        }
+    }
+    if (refresh_clock(panel) != 0) {
+        redraw_target(panel, PANEL_TARGET_CLOCK);
+    } else if ((changed & (1U << (PANEL_APP_COUNT - 1))) != 0U) {
+        redraw_target(panel, PANEL_TARGET_CLOCK);
+    }
+    if (changed != 0U && panel->menu_wid >= 0) {
+        draw_menu(panel);
+    }
+}
+
 static void activate_app(panel_state_t *panel, int app_index) {
     if (app_index < 0 || app_index >= PANEL_APP_COUNT) return;
+    (void)refresh_app_model_changed(panel);
     panel_app_t *app = &panel->apps[app_index];
     panel_activation_action_t action = panel_activation_action(
         app->window_states, app->window_count, app->process_count);
@@ -412,12 +480,9 @@ static void on_click(panel_state_t *panel, int32_t absolute_x,
 
 static void on_move(panel_state_t *panel, int32_t absolute_x,
                     int32_t absolute_y) {
-    int target = panel_target_at((int)absolute_x, abs_to_panel_y(absolute_y));
-    if (target == panel->hover_target) return;
-    int old_target = panel->hover_target;
-    panel->hover_target = target;
-    redraw_target(panel, old_target);
-    redraw_target(panel, target);
+    (void)panel;
+    (void)absolute_x;
+    (void)absolute_y;
 }
 
 static void menu_choose(panel_state_t *panel, int app_index) {
@@ -515,10 +580,12 @@ int main(int argc, char **argv) {
     panel->panel_pid = 0;
     panel->menu_return_window = 0;
     panel->menu_return_valid = 0;
-    panel->hover_target = PANEL_TARGET_NONE;
     panel->menu_hover = -1;
     panel->menu_selected = 0;
     panel->yield_counter = 0;
+    for (int i = 0; i < PANEL_APP_COUNT; i++) {
+        panel->app_signatures[i] = 0;
+    }
     copy_text(panel->clock_text, sizeof(panel->clock_text), "--:--:--");
     init_apps(panel);
 
@@ -526,13 +593,14 @@ int main(int argc, char **argv) {
     panel->wid = gui_window_create(0, PANEL_Y, PANEL_SCREEN_W, PANEL_HEIGHT,
                                    COLOR_BG, COLOR_BORDER, "panel");
     if (panel->wid < 0) {
-        kli_write_cstr(1, "panel: window create failed\n");
+        kli_write_cstr(1, "panel: window create failed (no GUI available)\n");
+        kli_write_cstr(1, "panel: idling in headless mode\n");
         for (;;) (void)kli_yield();
     }
     register_cursor_regions(panel);
     long pid = kli_getpid();
     panel->panel_pid = pid > 0 ? (uint32_t)pid : 0;
-    refresh_panel(panel);
+    refresh_panel_full(panel);
     kli_write_cstr(1, "panel: ready\n");
 
 #ifdef PANEL_FORCE_FAULT
@@ -563,7 +631,7 @@ int main(int argc, char **argv) {
         panel->yield_counter++;
         if (panel->yield_counter >= REFRESH_PERIOD) {
             panel->yield_counter = 0;
-            refresh_panel(panel);
+            refresh_panel_tick(panel);
         }
         (void)kli_yield();
     }

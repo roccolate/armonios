@@ -234,3 +234,52 @@ void font_draw_text_clipped(fb_t *fb, uint32_t x, uint32_t y, uint32_t max_h,
         text++;
     }
 }
+
+void font_draw_text_rect_clipped(fb_t *fb, uint32_t x, uint32_t y,
+                                 uint32_t max_h, int32_t cx0, int32_t cy0,
+                                 int32_t cx1, int32_t cy1,
+                                 const char *text, uint32_t color) {
+    uint32_t cursor_x = x;
+    uint32_t cursor_y = y;
+
+    if (fb == 0 || text == 0 || max_h == 0 || cx1 <= cx0 || cy1 <= cy0) {
+        return;
+    }
+
+    while (*text != '\0') {
+        if (*text == '\n') {
+            cursor_x = x;
+            cursor_y += FONT_LINE_HEIGHT;
+            if (cursor_y - y >= max_h) {
+                return;
+            }
+        } else {
+            const uint8_t *glyph = font_glyph(*text);
+
+            if (glyph != 0) {
+                for (uint32_t row = 0; row < FONT_GLYPH_HEIGHT; row++) {
+                    uint32_t draw_y = cursor_y + row;
+                    if (draw_y - y >= max_h) {
+                        break;
+                    }
+                    if ((int32_t)draw_y < cy0 || (int32_t)draw_y >= cy1) {
+                        continue;
+                    }
+                    uint8_t bits = glyph[row];
+                    for (uint32_t col = 0; col < FONT_GLYPH_WIDTH; col++) {
+                        uint32_t draw_x = cursor_x + col;
+                        uint8_t mask =
+                            (uint8_t)(1U << (FONT_GLYPH_WIDTH - 1U - col));
+                        if ((bits & mask) != 0 &&
+                            (int32_t)draw_x >= cx0 &&
+                            (int32_t)draw_x < cx1) {
+                            fb_putpixel(fb, draw_x, draw_y, color);
+                        }
+                    }
+                }
+            }
+            cursor_x += FONT_CHAR_WIDTH;
+        }
+        text++;
+    }
+}

@@ -15,10 +15,10 @@
 #define PANEL_ITEM_Y 4
 #define PANEL_ITEM_H 32
 #define PANEL_MENU_BUTTON_X 8
-#define PANEL_MENU_BUTTON_W 72
-#define PANEL_APP_X 88
-#define PANEL_APP_W 96
-#define PANEL_APP_GAP 4
+#define PANEL_MENU_BUTTON_W 56
+#define PANEL_APP_X 72
+#define PANEL_APP_W 36
+#define PANEL_APP_GAP 6
 #define PANEL_CLOCK_X 552
 #define PANEL_CLOCK_W 80
 

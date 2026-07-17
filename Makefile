@@ -91,13 +91,15 @@ else
 STORAGE_DEV := $(BUILD_DIR)/drivers/storage/virtio_blk.o
 endif
 
-LDFLAGS := -T $(KERNEL_LINKER_SCRIPT) -nostdlib
+LDFLAGS := -T $(KERNEL_LINKER_SCRIPT) -nostdlib --gc-sections
 APP_LDFLAGS := --gc-sections
 
 DEPFLAGS := -MMD -MP
 ASFLAGS := -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -mcpu=cortex-a72 -g
 CFLAGS  := -Wall -Wextra -Werror -ffreestanding -nostdlib -nostartfiles \
            -fno-builtin -fno-stack-protector -mgeneral-regs-only \
+           -fno-pic -fno-pie \
+           -ffunction-sections -fdata-sections \
            -mcpu=cortex-a72 -std=c11 -Os -g -I . -I drivers
 # Userland C compiles with the same flags plus the libkarm include path
 # so app code can pull in <syscall.h>, <errno.h>, <string.h> from its
@@ -147,8 +149,13 @@ OBJS := \
     $(BUILD_DIR)/kernel/process.o \
     $(BUILD_DIR)/kernel/sched/sched.o \
     $(BUILD_DIR)/kernel/sched/switch.o \
+    $(BUILD_DIR)/kernel/syscall_gui.o \
     $(BUILD_DIR)/kernel/syscall_helpers.o \
+    $(BUILD_DIR)/kernel/syscall_info.o \
+    $(BUILD_DIR)/kernel/syscall_ipc.o \
+    $(BUILD_DIR)/kernel/syscall_process.o \
     $(BUILD_DIR)/kernel/syscall.o \
+    $(BUILD_DIR)/kernel/syscall_vfs.o \
     $(BUILD_DIR)/kernel/timer/timer.o \
     $(BUILD_DIR)/kernel/tmpfs.o \
     $(BUILD_DIR)/kernel/panel_boot_argv.o \
@@ -333,6 +340,7 @@ qemu-fs-test: qemu-check entry-check $(KERNEL_BIN) $(VIRTIO_BLK_IMG)
 	    timeout $(QEMU_FS_TEST_TIMEOUT) qemu-system-aarch64 \
 	        -machine virt -cpu cortex-a72 -m 128M \
 	        -display none -serial file:$(QEMU_FS_TEST_LOG) -monitor none \
+	        -no-reboot \
 	        -global virtio-mmio.force-legacy=false \
 	        -kernel $(KERNEL_BIN) \
 	        -drive file=$(VIRTIO_BLK_IMG),if=none,format=raw,id=hd0 \
@@ -341,6 +349,11 @@ qemu-fs-test: qemu-check entry-check $(KERNEL_BIN) $(VIRTIO_BLK_IMG)
 	    if [ $$status -ne 0 ] && [ $$status -ne 124 ]; then \
 	        cat $(QEMU_FS_TEST_LOG); \
 	        exit $$status; \
+	    fi; \
+	    if grep -q "__PANIC_HALT__" $(QEMU_FS_TEST_LOG); then \
+	        cat $(QEMU_FS_TEST_LOG); \
+	        echo "qemu-fs-test: kernel panic detected" >&2; \
+	        exit 1; \
 	    fi; \
 	    grep -q "storage: initialized" $(QEMU_FS_TEST_LOG) || \
 	        { cat $(QEMU_FS_TEST_LOG); exit 1; }; \

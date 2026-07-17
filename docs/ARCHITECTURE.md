@@ -57,7 +57,7 @@ The VMM implements AArch64 4 KiB, four-level stage-1 translation tables.
 Current behavior:
 
 - the early kernel builds an identity map of the detected RAM range;
-- that RAM range is mapped for EL1 as read/write/execute;
+- kernel text is mapped RX, rodata R/NX, data+bss+stack RW/NX, and remaining RAM RW/NX;
 - board MMIO is identity-mapped as device memory;
 - each EL0 process has a separate TTBR0 root;
 - every process TTBR0 also contains the full kernel/RAM identity map needed while handling exceptions;
@@ -66,13 +66,13 @@ Current behavior:
 - TTBR1 is disabled;
 - changing process TTBR0 invalidates the complete EL1 TLB.
 
-This provides basic EL0 separation, but it is not a hardened split-address-space design. `RISK-008` implemented kernel-page W^X (text RX, data+bss+stack RW+NX, MMIO device+NX); the remaining TTBR1, ASID, and scoped-invalidation work is future v1.1 material.
+This provides basic EL0 separation and kernel-page W^X, but it is not a hardened split-address-space design. The remaining TTBR1, ASID, and scoped-invalidation work is future v1.1 material.
 
 ### Process user regions
 
 Each process records a fixed set of disjoint user virtual ranges. These records are used to decide whether a syscall pointer belongs to the current process.
 
-Important current limitation: the region metadata used by syscall helpers does not distinguish readable from writable ranges. `sys_user_buf_in()` and `sys_user_buf_out()` currently apply the same membership check. This means the phrase “validated writable user buffer” must not be used until `RISK-001` is closed.
+The syscall helper layer first checks the registered process range, then walks the process page table. Input buffers require valid user-readable leaves; output buffers also require writable leaves and return `ERR_PERM` on read-only pages before writing any byte. `RISK-001` is closed, but the helpers still do direct kernel copies rather than fault-contained copy routines.
 
 ## Processes and scheduling
 
@@ -114,7 +114,7 @@ Therefore the accurate description is:
 - Other synchronous lower-EL exceptions mark the current process exited and attempt to dispatch another process.
 - An unexpected EL1 exception enters the fatal diagnostic path and waits forever.
 
-Because kernel syscall bodies currently dereference validated user virtual addresses directly, a bad permission assumption at the user-copy boundary can become an EL1 fault rather than a recoverable user error. This is part of `RISK-001`.
+Kernel syscall bodies still dereference validated user virtual addresses directly. Permission validation now rejects known read-only output pages before writes, but the copy path is not fault-contained against unexpected translation faults.
 
 ## Syscall boundary
 
@@ -128,7 +128,7 @@ x0      return value; negative values are kernel error codes
 
 Numbers are frozen in `kernel/syscall_numbers.h` and exercised by host ABI tests.
 
-Public pointer handling is centralized in `kernel/syscall_helpers.{c,h}`. The current helpers provide process-range validation and c-string copying, but not permission-aware or fault-contained user copies.
+Public pointer handling is centralized in `kernel/syscall_helpers.{c,h}`. The helpers provide process-range validation, page-table permission checks, c-string copying, and byte copy helpers. Fault-contained copy is still future work.
 
 See `SYSCALLS.md` for exact calls and current limitations.
 
@@ -138,13 +138,12 @@ The VFS is a fixed-table in-kernel facade over mounted node callbacks. It suppor
 
 Current descriptor architecture:
 
-- one global table of eight VFS open-file entries;
-- each entry stores node pointer, offset, flags, and used state;
-- syscall-visible descriptor `3+` indexes that global table;
-- no owner PID is stored;
-- process exit does not close descriptors automatically.
+- a global kernel handle pool stores node pointer, offset, flags, owner PID, and local fd;
+- each process sees local descriptor numbers `3..10`;
+- VFS operations translate the caller's local fd through the current PID;
+- dead owners are reaped lazily and `process_mark_exited()` closes all descriptors for the exiting PID.
 
-This is suitable for early single-process bring-up but not a correct multi-process resource model. `RISK-002` blocks v1.0 until descriptors are process-owned and reclaimed.
+`RISK-002` is closed for process-owned descriptors. The VFS remains a fixed-table kernel facade, not a POSIX filesystem layer.
 
 ## Filesystems and storage
 
@@ -169,7 +168,7 @@ The current FAT32 bridge supports:
 
 It does not claim long-file-name support, subdirectories, arbitrary partition discovery, journaling, crash recovery, or broad compatibility testing.
 
-The QEMU block path is verified through `make qemu-fs-test`. The current visible desktop target does not attach the block image; see `RISK-003`.
+The QEMU block path is verified through `make qemu-fs-test`. The visible desktop target also attaches the generated FAT32 block image; `tools/qemu_fb_fat_test.sh` verifies the FAT + display + panel wiring. The remaining `RISK-003` gap is the manual visible create/edit/save/rename/reopen/delete workflow.
 
 ## GUI architecture
 
@@ -186,7 +185,7 @@ Responsibilities are split across:
 
 Windows carry an owner PID. Most mutating syscalls require ownership. A small set of presentation calls is intentionally cross-process so the panel can find, focus, restore, and display state for application windows.
 
-Normal application creation does not currently guarantee that a new window receives focus when another window is focused. This is visible in the files-to-editor workflow and tracked by `RISK-004`.
+Normal application wrappers request focus after creating a window. The kernel still enforces `GUI_WINDOW_NO_FOCUS`, and `tools/qemu_focus_test.sh` verifies the focus syscall path. The remaining `RISK-004` gap is visible human confirmation of the files-to-editor workflow.
 
 ## Input and device polling
 
@@ -214,9 +213,9 @@ Generic kernel code includes `drivers/board.h`. Physical addresses and board-spe
 
 The QEMU board is the reference implementation.
 
-The RPi4 board directory is not a supported implementation. It does not currently satisfy all functions declared by the generic board contract and the eMMC code is experimental. See `PORTING.md`, `RISK-006`, and `RISK-007`.
+The board contract now exposes generic storage, display, input, IRQ, and capability entry points. QEMU implements display/input through virtio internally; generic kernel orchestration calls `board_display_*` and `board_input_*`. RPi4 returns explicit safe failures for missing display/input while still compiling and linking under `tests/run_board_build_test.sh`.
 
-A future board interface should distinguish mandatory capabilities from optional ones instead of naming generic operations after virtio-specific devices.
+The RPi4 board directory is still not a supported hardware implementation. The build-contract milestone (`RISK-006`) is closed; eMMC correctness and physical boot evidence remain under `RISK-007`.
 
 ## Userland and KLI1
 
@@ -236,13 +235,13 @@ The shipping set is:
 
 KLI1 is a small flat-image format with a fixed header and entry offsets. The current linker script explicitly orders the image header, text, rodata, and end marker.
 
-Mutable `.data` and `.bss` are not yet an explicit tested contract. Current applications avoid relying on general static mutable storage. `RISK-009` requires the format either to reject these sections or define how the loader initializes them.
+Mutable `.data` and `.bss` are forbidden for shipping app images. `programs/apps/image.ld` asserts that contract, and `tests/run_kli1_contract_test.sh` verifies both the six shipping apps and a synthetic violation.
 
 ## Testing architecture
 
 Native host tests exercise pure-C contracts and mocked driver paths. They provide good regression coverage for logic, but they cannot prove device MMIO or full exception-return behavior.
 
-`qemu-fs-test` is deterministic because it captures guest serial output and checks required markers. The framebuffer, USB, and network launch targets currently lack equivalent final assertions.
+`qemu-fs-test`, `tools/qemu_marker_test.sh`, `tools/qemu_focus_test.sh`, `tools/qemu_usercopy_test.sh`, and `tools/qemu_fb_fat_test.sh` are deterministic because they capture guest serial output and check required markers. They do not replace visible manual workflow evidence.
 
 Release evidence must always state whether it came from:
 
@@ -257,9 +256,8 @@ Release evidence must always state whether it came from:
 
 Near-term architectural priorities are:
 
-1. permission-aware and fault-contained user copies;
-2. process-owned kernel resources, beginning with file descriptors;
-3. deterministic QEMU runtime tests;
-4. an explicit KLI1 mutable-storage contract;
-5. shared TTBR1 kernel mappings and section permissions;
-6. a capability-oriented board interface before serious hardware work.
+1. fault-contained user copies;
+2. shared TTBR1 kernel mappings, ASIDs, and scoped TLB invalidation;
+3. deeper board capability separation for network/display/storage;
+4. physical RPi4 serial and storage evidence;
+5. manual visible desktop workflow evidence for the remaining GUI/FAT risks.

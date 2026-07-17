@@ -58,6 +58,13 @@ These two items block v1.0 regardless of desktop polish because they affect kern
 - [x] Ensure an editor spawned from `files` receives keyboard focus (kernel-side `GUI: focus` marker proves the syscall path).
 - [x] Add host coverage for the policy (`tools/qemu_focus_test.sh` runs against the auto-launch path; the visible flow still needs a named tester).
 
+### Fix compositor title-decoration artifacting
+
+- [x] Investigate and fix visible decoration fragments in `qemu-fb-visible`; root cause was titlebar/decorations being repainted without damage clipping during partial redraw.
+- [x] Audit the partial-redraw path for titlebar/decorations so it preserves z-order and never paints pixels outside the active damage/visible region.
+- [x] Add host coverage that reproduces overlapping titled windows and proves hidden or partially covered title controls do not bleed through the foreground window (`test_gui_partial_title_repaint_does_not_bleed_over_front_window`).
+- [ ] Confirm manually on `make qemu-fb-visible` that opening Files/Monitor/Editor leaves no stale close/minimize/maximize fragments, grey lines, or titlebar remnants.
+
 ### Manual FAT workflow
 
 After the two fixes above, record the date, commit, environment, and tester for this workflow:

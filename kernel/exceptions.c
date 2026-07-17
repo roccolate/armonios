@@ -63,16 +63,37 @@ static const char *exception_name(uint64_t kind) {
 }
 
 void exception_handler(uint64_t esr, uint64_t far, uint64_t elr, uint64_t kind) {
-    uart_puts("\nEXCEPTION: ");
+    uint64_t sp_val;
+    __asm__ volatile("mov %0, sp" : "=r"(sp_val));
+
+    uart_puts("\n");
+    uart_puts("================================================================\n");
+    uart_puts("KERNEL PANIC: unhandled exception in EL1\n");
+    uart_puts("================================================================\n");
+    uart_puts("kind:    ");
     uart_puts(exception_name(kind));
-    uart_puts("\nESR_EL1: ");
+    uart_puts("\n");
+    uart_puts("ESR_EL1: ");
     print_hex64(esr);
-    uart_puts("\nFAR_EL1: ");
-    print_hex64(far);
-    uart_puts("\nELR_EL1: ");
+    uart_puts("\n");
+    uart_puts("ELR_EL1: ");
     print_hex64(elr);
     uart_puts("\n");
+    uart_puts("FAR_EL1: ");
+    print_hex64(far);
+    uart_puts("\n");
+    uart_puts("SP_EL1:  ");
+    print_hex64(sp_val);
+    uart_puts("\n");
+    uart_puts("================================================================\n");
+    uart_puts("SYSTEM HALTED\n");
+    uart_puts("================================================================\n");
+    uart_puts("__PANIC_HALT__\n");
+    uart_puts("\n");
 
+    /* Halt every CPU. QEMU's -no-reboot or -action panic=shutdown will
+     * turn this wfe loop into a clean guest exit; otherwise the wfe
+     * burns cycles without observable side effects. */
     for (;;) {
         __asm__ volatile("wfe");
     }

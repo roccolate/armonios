@@ -33,6 +33,10 @@ const char *board_name(void) {
     return "rpi4-bcm2711";
 }
 
+uint32_t board_capabilities(void) {
+    return BOARD_CAP_STORAGE;
+}
+
 void board_early_init(void) {
     uart_init(RPI4_UART0_BASE);
 }
@@ -156,21 +160,30 @@ int board_storage_init(void) {
     return 0;
 }
 
-/*
- * virtio-input is a QEMU-only path. The RPi4 bring-up track does not wire
- * it yet, so the kernel must still link cleanly: we expose explicit safe
- * failures here. init_input() treats a non-zero init as "device absent"
- * and continues with serial input; the IRQ is never requested because
- * init returns -1; poll() is a no-op for the same reason.
- */
-uint32_t board_virtio_input_irq(void) {
-    return 0U;
-}
-
-int board_virtio_input_init(void) {
+int board_display_init(board_display_draw_fn_t draw, void *context) {
+    (void)draw;
+    (void)context;
     return -1;
 }
 
-int board_virtio_input_poll(void) {
+int board_display_redraw(board_display_draw_fn_t draw, void *context) {
+    (void)draw;
+    (void)context;
+    return -1;
+}
+
+/*
+ * RPi4 input is not wired yet. These safe failures keep the generic kernel
+ * running on serial-only bring-up while the board contract stays complete.
+ */
+uint32_t board_input_irq(void) {
+    return 0U;
+}
+
+int board_input_init(void) {
+    return -1;
+}
+
+int board_input_poll(void) {
     return -1;
 }

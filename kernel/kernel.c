@@ -10,7 +10,6 @@
 #include <stdint.h>
 
 #include "board.h"
-#include "gpu/virtio_gpu.h"
 #include "kernel/bootfs.h"
 #include "kernel/console.h"
 #include "kernel/dtb.h"
@@ -63,7 +62,7 @@ static void console_input_thread(void *arg) {
 
     for (;;) {
         input_uart_poll();
-        board_virtio_input_poll();
+        board_input_poll();
         usb_hid_poll_all();
 
         input_event_t event;
@@ -117,36 +116,36 @@ static init_status_t init_vfs(void) {
     tmpfs_reset();
 
     if (bootfs_mount_vfs() == 0) {
-        uart_puts("VFS bootfs: mounted\n");
+        uart_puts("bootfs: mounted\n");
         bootfs_ok = 1;
     } else {
-        uart_puts("VFS bootfs: failed\n");
+        uart_puts("bootfs: failed\n");
     }
 
     if (tmpfs_create("note") == 0 &&
         tmpfs_write("note", 0, note, sizeof(note) - 1U, &bytes_written) == 0 &&
         tmpfs_mount_vfs("/tmp/note", "note") == 0) {
-        uart_puts("VFS tmpfs: mounted\n");
+        uart_puts("tmpfs: mounted\n");
         tmpfs_ok = 1;
     } else {
-        uart_puts("VFS tmpfs: failed\n");
+        uart_puts("tmpfs: failed\n");
     }
 
     if (bootfs_read("shell", 0, magic, sizeof(magic),
                     &bytes_read) == 0 && bytes_read == sizeof(magic)) {
-        uart_puts("bootfs read: ok\n");
+        uart_puts("bootfs ok\n");
         bootfs_read_ok = 1;
     } else {
-        uart_puts("bootfs read: failed\n");
+        uart_puts("bootfs fail\n");
     }
 
     bytes_read = 0;
     if (vfs_read("/armonios/shell", 0, magic, sizeof(magic),
                  &bytes_read) == 0 && bytes_read == sizeof(magic)) {
-        uart_puts("VFS read: ok\n");
+        uart_puts("VFS ok\n");
         vfs_read_ok = 1;
     } else {
-        uart_puts("VFS read: failed\n");
+        uart_puts("VFS fail\n");
     }
 
     if (bootfs_ok == 0 || bootfs_read_ok == 0 || vfs_read_ok == 0) {
@@ -225,13 +224,13 @@ static int probe_fat32(void) {
     if (fat32_mount_vfs_root(&g_fat32_fs, "/fat") == 0) {
         uart_puts("FAT32 root: mounted\n");
     } else {
-        uart_puts("FAT32 root: absent\n");
+        uart_puts("FAT32 root: no\n");
     }
 
     if (fat32_mount_vfs_file(&g_fat32_fs, "/fat/shell.bin",
                              "SHELL.BIN") != 0 ||
         vfs_stat("/fat/shell.bin", &stat) != 0) {
-        uart_puts("FAT32 shell: absent\n");
+        uart_puts("FAT32 shell: no\n");
         return -1;
     }
 
@@ -243,7 +242,7 @@ static int probe_fat32(void) {
                              "EDIT.TXT") == 0) {
         uart_puts("FAT32 edit file: mounted\n");
     } else {
-        uart_puts("FAT32 edit file: absent\n");
+        uart_puts("FAT32 edit: no\n");
     }
     return 0;
 }
@@ -271,12 +270,12 @@ static init_status_t probe_storage(void) {
                         ((uint32_t)sector[2] << 16) |
                         ((uint32_t)sector[3] << 24);
 
-        uart_puts("storage sector0: ");
+        uart_puts("storage s0: ");
         print_hex64(word);
         uart_puts("\n");
         return probe_fat32() == 0 ? INIT_STATUS_OK : INIT_STATUS_WARN;
     } else {
-        uart_puts("storage read err: ");
+        uart_puts("storage err: ");
         print_hex64((uint64_t)(uint32_t)read_status);
         uart_puts("\n");
     }
@@ -284,41 +283,27 @@ static init_status_t probe_storage(void) {
     return INIT_STATUS_WARN;
 }
 
-static uint64_t g_gpu_base;
-static uint8_t g_gpu_ready;
+static uint8_t g_display_ready;
 
 /*
- * Display is optional for serial-only boots. When a virtio GPU is present,
- * gui_init_for_framebuffer owns desktop setup and later redraws reuse the
- * saved MMIO base.
+ * Display is optional for serial-only boots. The board owns the transport
+ * details; the kernel only supplies framebuffer draw callbacks.
  */
 static init_status_t init_display(void) {
-    uint64_t gpu_base;
+    g_display_ready = 0;
 
-    g_gpu_base = 0;
-    g_gpu_ready = 0;
-
-    if (virtio_gpu_probe_range(board_virtio_mmio_base(),
-                               board_virtio_mmio_size(),
-                               board_virtio_mmio_stride(), &gpu_base) != 0) {
+    if (board_display_init(gui_init_for_framebuffer, 0) != 0) {
         return INIT_STATUS_WARN;
     }
 
-    g_gpu_base = gpu_base;
-
-    if (virtio_gpu_draw(gpu_base, gui_init_for_framebuffer, 0) == 0) {
-        uart_puts("VIRTIO gpu: windows\n");
-        g_gpu_ready = 1;
-        return INIT_STATUS_OK;
-    } else {
-        uart_puts("VIRTIO gpu: failed\n");
-        return INIT_STATUS_WARN;
-    }
+    uart_puts("display: windows\n");
+    g_display_ready = 1;
+    return INIT_STATUS_OK;
 }
 
 static void flush_dirty_redraw(void) {
-    if (g_gpu_ready && gui_is_dirty()) {
-        (void)virtio_gpu_draw(g_gpu_base, gui_render, 0);
+    if (g_display_ready && gui_is_dirty()) {
+        (void)board_display_redraw(gui_render, 0);
         gui_clear_dirty();
     }
 }
@@ -342,7 +327,7 @@ static void poll_input_events(void) {
 
 /* Timer IRQ work that must happen even when no userspace thread is running. */
 void kernel_on_timer_tick(void) {
-    board_virtio_input_poll();
+    board_input_poll();
     usb_hid_poll_all();
     poll_input_events();
     net_poll();
@@ -354,7 +339,7 @@ static int enable_identity_mmu(const dtb_memory_t *memory, uint64_t dtb_addr) {
     (void)dtb_addr;
 
     if (kernel_pgd == 0) {
-        uart_puts("VMM map: no table\n");
+        uart_puts("VMM: no table\n");
         return -1;
     }
 
@@ -372,7 +357,7 @@ static int enable_identity_mmu(const dtb_memory_t *memory, uint64_t dtb_addr) {
 
     mmu_enable_identity(kernel_pgd);
 
-    uart_puts("MMU identity map: active\n");
+    uart_puts("MMU: active\n");
 
     return 0;
 }
@@ -406,8 +391,8 @@ static init_status_t init_network(void) {
  */
 static init_status_t init_input(void) {
     input_queue_init();
-    if (board_virtio_input_init() == 0) {
-        uart_puts("input: virtio-input initialized\n");
+    if (board_input_init() == 0) {
+        uart_puts("input: ok\n");
     }
     pci_device_t pci_devs[16];
     uint32_t pci_n = pci_enumerate(pci_devs, 16);
@@ -417,9 +402,9 @@ static init_status_t init_input(void) {
 
         uart_puts("PCI: ");
         print_dec64(pci_n);
-        uart_puts(" devices, ");
+        uart_puts(" dev, ");
         print_dec64(assigned);
-        uart_puts(" BARs assigned\n");
+        uart_puts(" BARs\n");
     }
     if (usb_init() > 0) {
         uart_puts("USB: controller initialized\n");
@@ -428,7 +413,7 @@ static init_status_t init_input(void) {
         uint8_t usb_address = 1;
         for (uint8_t port = 0; port < usb_ports; port++) {
             if (usb_port_reset(port) > 0) {
-                uart_puts("USB: device on port ");
+                uart_puts("USB port ");
                 print_dec64(port);
                 uart_puts("\n");
 
@@ -445,7 +430,7 @@ static init_status_t init_input(void) {
                     }
                     usb_address++;
                 } else {
-                    uart_puts("USB: enumeration skipped\n");
+                    uart_puts("USB: enum skip\n");
                 }
             }
         }
@@ -454,7 +439,7 @@ static init_status_t init_input(void) {
             uart_putc('0' + (char)g_usb_hid_state.count);
             uart_puts(" devices\n");
         } else {
-            uart_puts("USB HID: no boot-protocol devices\n");
+            uart_puts("USB HID: none\n");
         }
     }
 
@@ -513,7 +498,7 @@ void kernel_main(uint64_t dtb_addr) {
             if (storage_status == INIT_STATUS_OK) {
                 uart_puts("storage app image: FAT32\n");
             } else {
-                uart_puts("storage app image: bootfs fallback\n");
+                uart_puts("storage app image: bootfs\n");
             }
             init_status_set(INIT_PHASE_DISPLAY, init_display());
             init_status_set(INIT_PHASE_NETWORK, init_network());

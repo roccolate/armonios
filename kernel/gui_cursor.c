@@ -137,10 +137,6 @@ int gui_register_cursor_region(gui_desktop_t *desktop, uint32_t window_id,
 void gui_set_cursor(gui_desktop_t *desktop, int32_t x, int32_t y) {
     int32_t prev_x;
     int32_t prev_y;
-    int32_t ux0;
-    int32_t uy0;
-    int32_t ux1;
-    int32_t uy1;
 
     if (desktop == 0 || desktop->fb == 0) {
         return;
@@ -167,15 +163,10 @@ void gui_set_cursor(gui_desktop_t *desktop, int32_t x, int32_t y) {
     desktop->cursor.y = y;
     gui_refresh_cursor_shape(desktop);
 
-    ux0 = prev_x < x ? prev_x : x;
-    uy0 = prev_y < y ? prev_y : y;
-    ux1 = (prev_x + (int32_t)GUI_CURSOR_W) > (x + (int32_t)GUI_CURSOR_W)
-              ? prev_x + (int32_t)GUI_CURSOR_W
-              : x + (int32_t)GUI_CURSOR_W;
-    uy1 = (prev_y + (int32_t)GUI_CURSOR_H) > (y + (int32_t)GUI_CURSOR_H)
-              ? prev_y + (int32_t)GUI_CURSOR_H
-              : y + (int32_t)GUI_CURSOR_H;
-    gui_damage_add(desktop, ux0, uy0, ux1 - ux0, uy1 - uy0);
+    gui_damage_add(desktop, prev_x, prev_y,
+                   (int32_t)GUI_CURSOR_W, (int32_t)GUI_CURSOR_H);
+    gui_damage_add(desktop, x, y,
+                   (int32_t)GUI_CURSOR_W, (int32_t)GUI_CURSOR_H);
 }
 
 void gui_cursor_move(gui_desktop_t *desktop, int32_t dx, int32_t dy) {

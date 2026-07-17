@@ -56,7 +56,7 @@ run_vm() {
 run_fb() {
     local log
     log="$(run_vm fb -device virtio-gpu-device,xres=640,yres=480)"
-    require_marker "$log" "VIRTIO gpu: windows"
+    require_marker "$log" "display: windows"
     require_marker "$log" "panel: ready"
     printf 'PASS: qemu-fb markers (%s)\n' "$log"
 }

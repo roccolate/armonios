@@ -4,8 +4,8 @@
 
 Current GUI risks:
 
-- `RISK-001` — event/state/bounds output buffers are range-checked but not proven writable;
-- `RISK-004` — a newly spawned normal window is not guaranteed to receive focus.
+- GUI output buffers are permission-checked but not fault-contained;
+- `RISK-004` — the focus syscall path is automated, but the visible files-to-editor workflow still needs a named human tester.
 
 ## Live range
 
@@ -66,16 +66,9 @@ Current behavior:
 - the first focusable window receives focus when no window is focused;
 - mouse clicks can focus and raise a window;
 - `sys_window_focus` can focus and raise a selected window;
-- creating a new normal window while another app is focused does not automatically transfer focus.
+- libkarmdesk application wrappers request focus after creating a normal window.
 
-The last rule caused the observed `files` to `editor` workflow defect: the editor appeared while keyboard input remained with `files`.
-
-Before closing `RISK-004`, define one stable policy:
-
-- normal newly created app windows receive focus automatically; or
-- every launcher/spawned app must explicitly request focus and tests enforce that convention.
-
-The chosen rule must cover `GUI_WINDOW_NO_FOCUS` docks and taskbars without allowing them to steal application focus.
+The stable policy is wrapper-driven focus for normal app windows plus kernel-side rejection for `GUI_WINDOW_NO_FOCUS` docks and taskbars. `tools/qemu_focus_test.sh` verifies the syscall path with serial markers; visible human confirmation remains separate evidence.
 
 ## Event buffer
 
@@ -104,14 +97,17 @@ Event IDs are ABI:
 
 The call waits for a bounded number of scheduler turns and returns `ERR_AGAIN` when no event is available.
 
-The destination is currently validated only as a registered process range. The helper does not yet prove write permission. The same limitation applies to bounds and state output buffers.
+The destination is validated as a registered process range and writable EL0 pages. The same rule applies to bounds and state output buffers. Copies are not fault-contained against unexpected faults after validation.
 
 ## Drawing and backing buffers
 
 - owner drawing lands in a per-window kernel backing buffer;
 - title-bar height is added by the kernel, so owner coordinates remain content-local;
 - `sys_window_flush` adds a content-local damage rectangle;
+- damage rectangles are framebuffer-coordinate rectangles after syscall conversion;
 - the compositor clips/merges damage and can collapse to a full-redraw sentinel;
+- partial repaint clips every repaint to the active damage rectangle;
+- the cursor is drawn last, after windows, on both full and partial repaint;
 - backing storage is freed when the window is destroyed;
 - resize must allocate replacement storage successfully before discarding the old buffer.
 

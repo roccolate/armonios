@@ -3,6 +3,7 @@
 #include "unity/unity.h"
 #include "fb/fb.h"
 #include "../kernel/gui.h"
+#include "../kernel/gui_input.h"
 #include "../kernel/process.h"
 
 static uint32_t g_test_gui_pixels[640U * 480U];
@@ -555,11 +556,206 @@ void test_gui_title_bar_paints_bar_and_text(void) {
         }
     }
     /* Below the title bar the bg_color (0xff0000aa) shows because no
-     * owner draw has happened. The 4th row (index 3) is the separator
-     * line; the bg_color shows starting at y=4. The title text starts
-     * at x=2, so x=3 is a safe pixel that is neither text nor border. */
+     * owner draw has happened. The separator is part of the title bar,
+     * so content-local y=0 still maps to framebuffer y=3. */
+    TEST_ASSERT_EQUAL_UINT64(0xff0000aaU, pixels[3 * 8 + 3]);
     TEST_ASSERT_EQUAL_UINT64(0xff0000aaU, pixels[4 * 8 + 3]);
     TEST_ASSERT_EQUAL_UINT64(0xff0000aaU, pixels[5 * 8 + 3]);
+}
+
+void test_gui_title_separator_stays_inside_title_bar(void) {
+    uint32_t pixels[100] = { 0 };
+    fb_t fb;
+    gui_desktop_t desktop;
+    uint32_t window_id;
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 10, 10, 10));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_init(&desktop, &fb, 0xff101010U));
+    desktop.cursor.visible = 0;
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window_for_pid(
+                                 &desktop, 7U, 0, 0, 10, 10, 0xff0000aaU,
+                                 0xff808080U, "title", &window_id));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_window_set_title_bar_internal(
+                                 &desktop, window_id, 3U));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_window_draw_rect(
+                                 &desktop, window_id, 1, 0, 4, 1,
+                                 0xffff0000U));
+
+    gui_draw(&desktop);
+
+    TEST_ASSERT_TRUE(pixels[2 * 10U + 3U] != 0xffff0000U);
+    TEST_ASSERT_EQUAL_UINT64(0xffff0000U,
+                             (uint64_t)pixels[3 * 10U + 3U]);
+}
+
+void test_gui_partial_repaint_preserves_title_close_button(void) {
+    uint32_t pixels[20000] = { 0 };
+    fb_t fb;
+    gui_desktop_t desktop;
+    uint32_t window_id;
+    uint32_t cb_x = 0, cb_y = 0, cb_w = 0, cb_h = 0;
+    uint32_t sample_x;
+    uint32_t sample_y;
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)fb_init(&fb, pixels, 200, 100, 200));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_init(&desktop, &fb, 0xff101010U));
+    desktop.cursor.visible = 0;
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window_for_pid(
+                                 &desktop, 7U, 20, 10, 100, 60, 0xff0000aaU,
+                                 0xff808080U, "demo", &window_id));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_window_set_title_bar_internal(
+                                 &desktop, window_id, 12U));
+    TEST_ASSERT_TRUE(gui_close_box_rect(&desktop.windows[window_id],
+                                        &cb_x, &cb_y, &cb_w, &cb_h));
+
+    gui_draw(&desktop);
+    sample_x = cb_x + 1U;
+    sample_y = cb_y + 1U;
+    TEST_ASSERT_EQUAL_UINT64(0xffe04a4aU,
+                             (uint64_t)pixels[sample_y * 200U + sample_x]);
+
+    gui_damage_clear(&desktop);
+    gui_damage_add(&desktop, (int32_t)cb_x, (int32_t)cb_y,
+                   (int32_t)cb_w, (int32_t)cb_h);
+    gui_draw(&desktop);
+
+    TEST_ASSERT_EQUAL_UINT64(0xffe04a4aU,
+                             (uint64_t)pixels[sample_y * 200U + sample_x]);
+}
+
+void test_gui_cursor_damage_restores_partial_close_icon(void) {
+    uint32_t pixels[20000] = { 0 };
+    fb_t fb;
+    gui_desktop_t desktop;
+    uint32_t window_id;
+    uint32_t cb_x = 0, cb_y = 0, cb_w = 0, cb_h = 0;
+    uint32_t sample_x;
+    uint32_t sample_y;
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)fb_init(&fb, pixels, 200, 100, 200));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_init(&desktop, &fb, 0xff101010U));
+    desktop.cursor.visible = 0;
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window_for_pid(
+                                 &desktop, 7U, 20, 10, 100, 60, 0xff0000aaU,
+                                 0xff808080U, "demo", &window_id));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_window_set_title_bar_internal(
+                                 &desktop, window_id, 12U));
+    TEST_ASSERT_TRUE(gui_close_box_rect(&desktop.windows[window_id],
+                                        &cb_x, &cb_y, &cb_w, &cb_h));
+
+    sample_x = cb_x + 4U;
+    sample_y = cb_y + 3U;
+
+    gui_draw(&desktop);
+    TEST_ASSERT_EQUAL_UINT64(0xfff8f8f8U,
+                             (uint64_t)pixels[sample_y * 200U + sample_x]);
+
+    gui_damage_clear(&desktop);
+    desktop.cursor.visible = 1;
+    gui_set_cursor(&desktop, (int32_t)(cb_x + 4U), (int32_t)(cb_y + 2U));
+    gui_draw(&desktop);
+
+    gui_damage_clear(&desktop);
+    gui_set_cursor(&desktop, 5, 80);
+    gui_draw(&desktop);
+
+    TEST_ASSERT_EQUAL_UINT64(0xfff8f8f8U,
+                             (uint64_t)pixels[sample_y * 200U + sample_x]);
+}
+
+void test_gui_partial_title_repaint_does_not_bleed_over_front_window(void) {
+    uint32_t pixels[20000] = { 0 };
+    fb_t fb;
+    gui_desktop_t desktop;
+    uint32_t back_window;
+    uint32_t cb_x = 0, cb_y = 0, cb_w = 0, cb_h = 0;
+    uint32_t sample_x;
+    uint32_t sample_y;
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)fb_init(&fb, pixels, 200, 100, 200));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_init(&desktop, &fb, 0xff101010U));
+    desktop.cursor.visible = 0;
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window_for_pid(
+                                 &desktop, 7U, 20, 20, 140, 50, 0xff0000aaU,
+                                 0xff808080U, "back", &back_window));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_window_set_title_bar_internal(
+                                 &desktop, back_window, 12U));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window_for_pid(
+                                 &desktop, 8U, 100, 15, 80, 60, 0xff003300U,
+                                 0xff404040U, "", 0));
+    TEST_ASSERT_TRUE(gui_close_box_rect(&desktop.windows[back_window],
+                                        &cb_x, &cb_y, &cb_w, &cb_h));
+
+    gui_draw(&desktop);
+    sample_x = cb_x + 1U;
+    sample_y = cb_y + 2U;
+    TEST_ASSERT_EQUAL_UINT64(0xff003300U,
+                             (uint64_t)pixels[sample_y * 200U + sample_x]);
+
+    gui_damage_clear(&desktop);
+    gui_damage_add(&desktop, (int32_t)desktop.windows[back_window].x,
+                   (int32_t)desktop.windows[back_window].y, 4, 4);
+    gui_draw(&desktop);
+
+    TEST_ASSERT_EQUAL_UINT64(0xff003300U,
+                             (uint64_t)pixels[sample_y * 200U + sample_x]);
+}
+
+void test_gui_partial_title_text_repaint_is_clipped_to_damage_rect(void) {
+    uint32_t pixels[20000] = { 0 };
+    fb_t fb;
+    gui_desktop_t desktop;
+    uint32_t back_window;
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)fb_init(&fb, pixels, 200, 100, 200));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_init(&desktop, &fb, 0xff101010U));
+    desktop.cursor.visible = 0;
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window_for_pid(
+                                 &desktop, 7U, 20, 20, 150, 50, 0xff0000aaU,
+                                 0xff808080U, "BACK WINDOW TITLE",
+                                 &back_window));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_window_set_title_bar_internal(
+                                 &desktop, back_window, 12U));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window_for_pid(
+                                 &desktop, 8U, 55, 16, 90, 60, 0xff003300U,
+                                 0xff404040U, "", 0));
+
+    gui_draw(&desktop);
+    gui_damage_clear(&desktop);
+    gui_damage_add(&desktop, 20, 20, 2, 2);
+    gui_draw(&desktop);
+
+    for (uint32_t y = 18; y < 74; y++) {
+        for (uint32_t x = 57; x < 143; x++) {
+            TEST_ASSERT_TRUE(pixels[y * 200U + x] != 0xfff0f4f8U);
+        }
+    }
 }
 
 void test_gui_cursor_shape_changes_over_clickable_title_decoration(void) {
@@ -1692,6 +1888,32 @@ void test_gui_damage_draw_text_pushes_tight_rect(void) {
                              (uint64_t)(uint32_t)desktop.damage_rects[0].h);
 }
 
+void test_gui_owner_draw_marks_desktop_dirty_without_flush(void) {
+    uint32_t pixels[64] = { 0 };
+    fb_t fb;
+    gui_desktop_t *desktop;
+    uint32_t window_id;
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 8, 8, 8));
+    gui_init_for_framebuffer(&fb, 0);
+    desktop = gui_desktop();
+    TEST_ASSERT_NOT_NULL(desktop);
+    desktop->cursor.visible = 0;
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window(
+                                 desktop, 1, 1, 5, 5, 0xff000000U,
+                                 0xffffffffU, &window_id));
+    gui_clear_dirty();
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_window_draw_rect(
+                                 desktop, window_id, 0, 0, 2, 2,
+                                 0xffff0000U));
+
+    TEST_ASSERT_EQUAL_UINT64(1, (uint64_t)gui_is_dirty());
+    TEST_ASSERT_EQUAL_UINT64(1U, desktop->damage_count);
+}
+
 void test_gui_damage_draw_rect_pushes_content_rect(void) {
     uint32_t pixels[64] = { 0 };
     fb_t fb;
@@ -1980,6 +2202,113 @@ void test_gui_damage_partial_repaint_with_multiple_disjoint_rects(void) {
     /* Pixels just outside the first rect must be untouched. */
     TEST_ASSERT_EQUAL_UINT64(0xff777777U, pixels[4]);
     TEST_ASSERT_EQUAL_UINT64(0xff777777U, pixels[4 * 32U + 0U]);
+}
+
+void test_gui_partial_window_repaint_does_not_overwrite_cursor_outside_damage(void) {
+    uint32_t pixels[64 * 16] = { 0 };
+    fb_t fb;
+    gui_desktop_t desktop;
+    uint32_t window_id;
+    uint32_t cursor_pixel;
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 64, 16, 64));
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)gui_init(&desktop, &fb, 0xff101010U));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window(
+                                 &desktop, 0, 0, 64, 16, 0xff003000U,
+                                 0xffffffffU, &window_id));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_window_draw_rect(
+                                 &desktop, window_id, 0, 0, 64, 16,
+                                 0xff003000U));
+    gui_set_cursor(&desktop, 2, 2);
+    gui_damage_add_full(&desktop);
+    gui_draw(&desktop);
+    cursor_pixel = pixels[2 * 64U + 2U];
+    TEST_ASSERT_TRUE(cursor_pixel != 0xff003000U);
+
+    gui_damage_clear(&desktop);
+    gui_damage_add(&desktop, 48, 4, 8, 8);
+    gui_draw(&desktop);
+
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)cursor_pixel,
+                             (uint64_t)pixels[2 * 64U + 2U]);
+}
+
+void test_gui_minimized_windows_are_not_composited(void) {
+    uint32_t pixels[100] = { 0 };
+    fb_t fb;
+    gui_desktop_t desktop;
+    uint32_t window_id;
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 10, 10, 10));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_init(&desktop, &fb, 0xff202020U));
+    desktop.cursor.visible = 0;
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window(
+                                 &desktop, 1, 1, 6, 6, 0xff00aa00U,
+                                 0xff303030U, &window_id));
+    gui_draw(&desktop);
+    TEST_ASSERT_EQUAL_UINT64(0xff00aa00U,
+                             (uint64_t)pixels[3U * 10U + 3U]);
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_window_minimize(
+                                 &desktop, window_id));
+    gui_damage_add_full(&desktop);
+    gui_draw(&desktop);
+
+    TEST_ASSERT_TRUE(pixels[3U * 10U + 3U] != 0xff00aa00U);
+}
+
+void test_gui_cursor_is_painted_after_full_window_composition(void) {
+    uint32_t pixels[400] = { 0 };
+    fb_t fb;
+    gui_desktop_t desktop;
+    uint32_t window_id;
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 20, 20, 20));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_init(&desktop, &fb, 0xff202020U));
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window(
+                                 &desktop, 0, 0, 20, 20, 0xff00aa00U,
+                                 0xff303030U, &window_id));
+    gui_set_cursor(&desktop, 5, 5);
+    gui_damage_add_full(&desktop);
+    gui_draw(&desktop);
+
+    TEST_ASSERT_EQUAL_UINT64(0xff101010U,
+                             (uint64_t)pixels[5U * 20U + 5U]);
+}
+
+void test_gui_cursor_is_painted_after_partial_window_composition(void) {
+    uint32_t pixels[400] = { 0 };
+    fb_t fb;
+    gui_desktop_t desktop;
+    uint32_t window_id;
+
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fb_init(&fb, pixels, 20, 20, 20));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_init(&desktop, &fb, 0xff202020U));
+
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)gui_create_window(
+                                 &desktop, 0, 0, 20, 20, 0xff00aa00U,
+                                 0xff303030U, &window_id));
+    gui_set_cursor(&desktop, 5, 5);
+    gui_draw(&desktop);
+
+    pixels[5U * 20U + 5U] = 0xff00aa00U;
+    gui_damage_clear(&desktop);
+    gui_damage_add(&desktop, 5, 5, 1, 1);
+    gui_draw(&desktop);
+
+    TEST_ASSERT_EQUAL_UINT64(0xff101010U,
+                             (uint64_t)pixels[5U * 20U + 5U]);
 }
 
 void test_gui_damage_full_sentinel_re_paints_everything(void) {

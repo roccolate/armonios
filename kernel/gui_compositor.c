@@ -99,6 +99,235 @@ static void gui_draw_cursor(fb_t *fb, int32_t x, int32_t y, uint8_t shape) {
     }
 }
 
+static int gui_rects_overlap(int32_t ax, int32_t ay, int32_t aw, int32_t ah,
+                             int32_t bx, int32_t by, int32_t bw, int32_t bh) {
+    return ax + aw > bx && ax < bx + bw && ay + ah > by && ay < by + bh;
+}
+
+static void gui_fillrect_clipped(fb_t *fb, int32_t x, int32_t y, int32_t w,
+                                 int32_t h, int32_t cx0, int32_t cy0,
+                                 int32_t cx1, int32_t cy1, uint32_t color) {
+    int32_t x1 = x + w;
+    int32_t y1 = y + h;
+
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+    if (x < cx0) {
+        x = cx0;
+    }
+    if (y < cy0) {
+        y = cy0;
+    }
+    if (x1 > cx1) {
+        x1 = cx1;
+    }
+    if (y1 > cy1) {
+        y1 = cy1;
+    }
+    if (x1 <= x || y1 <= y) {
+        return;
+    }
+    fb_fillrect(fb, (uint32_t)x, (uint32_t)y,
+                (uint32_t)(x1 - x), (uint32_t)(y1 - y), color);
+}
+
+static int32_t gui_iabs32(int32_t value) {
+    return value < 0 ? -value : value;
+}
+
+static void gui_putpixel_clipped(fb_t *fb, int32_t x, int32_t y,
+                                 int32_t cx0, int32_t cy0, int32_t cx1,
+                                 int32_t cy1, uint32_t color) {
+    if (x < cx0 || x >= cx1 || y < cy0 || y >= cy1 ||
+        x < 0 || y < 0) {
+        return;
+    }
+
+    fb_putpixel(fb, (uint32_t)x, (uint32_t)y, color);
+}
+
+static void gui_draw_line_clipped(fb_t *fb, int32_t x0, int32_t y0,
+                                  int32_t x1, int32_t y1, int32_t cx0,
+                                  int32_t cy0, int32_t cx1, int32_t cy1,
+                                  uint32_t color) {
+    int32_t dx = gui_iabs32(x1 - x0);
+    int32_t sx = x0 < x1 ? 1 : -1;
+    int32_t dy = -gui_iabs32(y1 - y0);
+    int32_t sy = y0 < y1 ? 1 : -1;
+    int32_t err = dx + dy;
+
+    for (;;) {
+        int32_t e2;
+
+        gui_putpixel_clipped(fb, x0, y0, cx0, cy0, cx1, cy1, color);
+        if (x0 == x1 && y0 == y1) {
+            break;
+        }
+
+        e2 = 2 * err;
+        if (e2 >= dy) {
+            err += dy;
+            x0 += sx;
+        }
+        if (e2 <= dx) {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+static void gui_draw_rect_clipped(fb_t *fb, int32_t x, int32_t y, int32_t w,
+                                  int32_t h, int32_t cx0, int32_t cy0,
+                                  int32_t cx1, int32_t cy1,
+                                  uint32_t color) {
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+
+    gui_fillrect_clipped(fb, x, y, w, 1, cx0, cy0, cx1, cy1, color);
+    if (h > 1) {
+        gui_fillrect_clipped(fb, x, y + h - 1, w, 1,
+                             cx0, cy0, cx1, cy1, color);
+    }
+    if (h > 2) {
+        gui_fillrect_clipped(fb, x, y + 1, 1, h - 2,
+                             cx0, cy0, cx1, cy1, color);
+        if (w > 1) {
+            gui_fillrect_clipped(fb, x + w - 1, y + 1, 1, h - 2,
+                                 cx0, cy0, cx1, cy1, color);
+        }
+    }
+}
+
+static void gui_blit_clipped(fb_t *fb, int32_t dst_x, int32_t dst_y,
+                             const uint32_t *src, uint32_t src_w,
+                             uint32_t src_h, int32_t cx0, int32_t cy0,
+                             int32_t cx1, int32_t cy1) {
+    int32_t x0 = dst_x;
+    int32_t y0 = dst_y;
+    int32_t x1 = dst_x + (int32_t)src_w;
+    int32_t y1 = dst_y + (int32_t)src_h;
+    uint32_t src_off_x;
+    uint32_t src_off_y;
+
+    if (fb == 0 || src == 0 || src_w == 0U || src_h == 0U) {
+        return;
+    }
+    if (x0 < cx0) {
+        x0 = cx0;
+    }
+    if (y0 < cy0) {
+        y0 = cy0;
+    }
+    if (x1 > cx1) {
+        x1 = cx1;
+    }
+    if (y1 > cy1) {
+        y1 = cy1;
+    }
+    if (x1 <= x0 || y1 <= y0) {
+        return;
+    }
+    src_off_x = (uint32_t)(x0 - dst_x);
+    src_off_y = (uint32_t)(y0 - dst_y);
+    for (int32_t row = y0; row < y1; row++) {
+        uint32_t dst_row = (uint32_t)row * fb->stride_pixels + (uint32_t)x0;
+        uint32_t src_row = (src_off_y + (uint32_t)(row - y0)) * src_w +
+                           src_off_x;
+        for (int32_t col = x0; col < x1; col++) {
+            fb->pixels[dst_row + (uint32_t)(col - x0)] =
+                src[src_row + (uint32_t)(col - x0)];
+        }
+    }
+}
+
+static void gui_draw_window_title(fb_t *fb, const gui_desktop_t *desktop,
+                                  uint32_t index,
+                                  const gui_window_t *window,
+                                  uint32_t border, int32_t cx0, int32_t cy0,
+                                  int32_t cx1, int32_t cy1) {
+    uint32_t bar_color;
+    uint32_t text_y;
+    uint32_t mb_x = 0, mb_y = 0, mb_w = 0, mb_h = 0;
+    uint32_t xb_x = 0, xb_y = 0, xb_w = 0, xb_h = 0;
+    uint32_t cb_x = 0, cb_y = 0, cb_w = 0, cb_h = 0;
+    uint32_t min_bg;
+    uint32_t max_bg;
+    uint32_t cls_bg;
+
+    if (window->title_h == 0U || window->title[0] == '\0') {
+        return;
+    }
+
+    bar_color = gui_blend_color(border, 0xff000000U, 2U, 3U);
+    text_y = window->y +
+             (window->title_h > FONT_GLYPH_HEIGHT
+                  ? (window->title_h - FONT_GLYPH_HEIGHT) / 2U
+                  : 0U);
+
+    gui_fillrect_clipped(fb, (int32_t)window->x, (int32_t)window->y,
+                         (int32_t)window->w, (int32_t)window->title_h,
+                         cx0, cy0, cx1, cy1, bar_color);
+    if (window->title_h > 0U) {
+        gui_fillrect_clipped(fb, (int32_t)window->x,
+                             (int32_t)(window->y + window->title_h - 1U),
+                             (int32_t)window->w, 1,
+                             cx0, cy0, cx1, cy1, border);
+    }
+    if (cx0 < (int32_t)(window->x + window->w) &&
+        cx1 > (int32_t)(window->x + 2U) &&
+        cy0 < (int32_t)(text_y + FONT_GLYPH_HEIGHT) &&
+        cy1 > (int32_t)text_y) {
+        font_draw_text_rect_clipped(fb, window->x + 2U, text_y,
+                                    window->title_h, cx0, cy0, cx1, cy1,
+                                    window->title, 0xfff0f4f8U);
+    }
+
+    min_bg = desktop != 0 && desktop->focused_window_id == index
+                 ? 0xffa0a8b8U
+                 : 0xff586070U;
+    max_bg = min_bg;
+    cls_bg = desktop != 0 && desktop->focused_window_id == index
+                 ? 0xffe04a4aU
+                 : 0xff8a3030U;
+
+    if (gui_minimize_button_rect(window, &mb_x, &mb_y, &mb_w, &mb_h)) {
+        gui_fillrect_clipped(fb, (int32_t)mb_x, (int32_t)mb_y,
+                             (int32_t)mb_w, (int32_t)mb_h,
+                             cx0, cy0, cx1, cy1, min_bg);
+        gui_fillrect_clipped(fb, (int32_t)(mb_x + 2U),
+                             (int32_t)(mb_y + mb_h - 3U),
+                             (int32_t)(mb_w - 4U), 1,
+                             cx0, cy0, cx1, cy1, 0xfff0f4f8U);
+    }
+    if (gui_maximize_button_rect(window, &xb_x, &xb_y, &xb_w, &xb_h)) {
+        gui_fillrect_clipped(fb, (int32_t)xb_x, (int32_t)xb_y,
+                             (int32_t)xb_w, (int32_t)xb_h,
+                             cx0, cy0, cx1, cy1, max_bg);
+        gui_draw_rect_clipped(fb, (int32_t)(xb_x + 2U),
+                              (int32_t)(xb_y + 2U),
+                              (int32_t)(xb_w - 4U),
+                              (int32_t)(xb_h - 4U),
+                              cx0, cy0, cx1, cy1, 0xfff0f4f8U);
+    }
+    if (gui_close_box_rect(window, &cb_x, &cb_y, &cb_w, &cb_h)) {
+        gui_fillrect_clipped(fb, (int32_t)cb_x, (int32_t)cb_y,
+                             (int32_t)cb_w, (int32_t)cb_h,
+                             cx0, cy0, cx1, cy1, cls_bg);
+        gui_draw_line_clipped(fb, (int32_t)(cb_x + 2U),
+                              (int32_t)(cb_y + 2U),
+                              (int32_t)(cb_x + cb_w - 3U),
+                              (int32_t)(cb_y + cb_h - 3U),
+                              cx0, cy0, cx1, cy1, 0xfff8f8f8U);
+        gui_draw_line_clipped(fb, (int32_t)(cb_x + cb_w - 3U),
+                              (int32_t)(cb_y + 2U),
+                              (int32_t)(cb_x + 2U),
+                              (int32_t)(cb_y + cb_h - 3U),
+                              cx0, cy0, cx1, cy1, 0xfff8f8f8U);
+    }
+}
+
 int gui_init(gui_desktop_t *desktop, fb_t *fb, uint32_t background_color) {
     if (desktop == 0 || fb == 0 || fb->pixels == 0) {
         return -1;
@@ -327,61 +556,80 @@ static void gui_draw_window(fb_t *fb, const gui_desktop_t *desktop,
         }
     }
 
-    if (window->title_h > 0U && window->title[0] != '\0') {
-        uint32_t bar_color = gui_blend_color(border, 0xff000000U, 2U, 3U);
-        uint32_t text_y = window->y +
-                          (window->title_h > FONT_GLYPH_HEIGHT
-                               ? (window->title_h - FONT_GLYPH_HEIGHT) / 2U
-                               : 0U);
-        uint32_t cb_x = 0, cb_y = 0, cb_w = 0, cb_h = 0;
+    gui_draw_window_title(fb, desktop, index, window, border,
+                          0, 0, (int32_t)fb->width, (int32_t)fb->height);
+}
 
-        fb_fillrect(fb, window->x, window->y, window->w, window->title_h,
-                    bar_color);
-        if (window->h > window->title_h + 1U) {
-            fb_fillrect(fb, window->x, window->y + window->title_h,
-                        window->w, 1U, border);
+static void gui_draw_window_clipped(fb_t *fb, const gui_desktop_t *desktop,
+                                    uint32_t index,
+                                    const gui_window_t *window,
+                                    int32_t cx0, int32_t cy0,
+                                    int32_t cx1, int32_t cy1) {
+    uint32_t border;
+
+    if (fb == 0 || window == 0 || window->used == 0 ||
+        window->minimized != 0U) {
+        return;
+    }
+    if (!gui_rects_overlap((int32_t)window->x, (int32_t)window->y,
+                           (int32_t)window->w, (int32_t)window->h,
+                           cx0, cy0, cx1 - cx0, cy1 - cy0)) {
+        return;
+    }
+
+    border = window->border_color;
+    if (desktop != 0 && desktop->focused_window_id == index &&
+        (window->flags & GUI_WINDOW_NO_FOCUS) == 0U) {
+        border = 0xffe0e8f0U;
+    }
+
+    if (window->owner_drawn != 0 && window->backing != 0) {
+        uint32_t content_h = window->h > window->title_h
+                                 ? window->h - window->title_h
+                                 : 0U;
+        gui_blit_clipped(fb, (int32_t)window->x,
+                         (int32_t)(window->y + window->title_h),
+                         window->backing, window->w, content_h,
+                         cx0, cy0, cx1, cy1);
+    } else {
+        gui_fillrect_clipped(fb, (int32_t)window->x, (int32_t)window->y,
+                             (int32_t)window->w, (int32_t)window->h,
+                             cx0, cy0, cx1, cy1, border);
+        if (window->w > 2U && window->h > 2U) {
+            gui_fillrect_clipped(fb, (int32_t)(window->x + 1U),
+                                 (int32_t)(window->y + 1U),
+                                 (int32_t)(window->w - 2U),
+                                 (int32_t)(window->h - 2U),
+                                 cx0, cy0, cx1, cy1, window->bg_color);
         }
-        font_draw_text_clipped(fb, window->x + 2U, text_y, window->title_h,
-                               window->title, 0xfff0f4f8U);
-        /* Min / max / close siblings along the right edge. They are
-         * only drawn when the title bar is tall enough to fit three
-         * buttons side by side; smaller title bars fall back to the
-         * close-only layout. */
-        uint32_t mb_x = 0, mb_y = 0, mb_w = 0, mb_h = 0;
-        uint32_t xb_x = 0, xb_y = 0, xb_w = 0, xb_h = 0;
-        uint32_t min_bg = desktop != 0 && desktop->focused_window_id == index
-                              ? 0xffa0a8b8U
-                              : 0xff586070U;
-        uint32_t max_bg = desktop != 0 && desktop->focused_window_id == index
-                              ? 0xffa0a8b8U
-                              : 0xff586070U;
-        uint32_t cls_bg = desktop != 0 && desktop->focused_window_id == index
-                              ? 0xffe04a4aU
-                              : 0xff8a3030U;
-        if (gui_minimize_button_rect(window, &mb_x, &mb_y, &mb_w, &mb_h)) {
-            fb_fillrect(fb, mb_x, mb_y, mb_w, mb_h, min_bg);
-            /* A single horizontal bar at the bottom of the box reads
-             * as a minimise glyph at this resolution. */
-            fb_fillrect(fb, (int32_t)(mb_x + 2U),
-                        (int32_t)(mb_y + mb_h - 3U),
-                        (int32_t)(mb_w - 4U), 1U, 0xfff0f4f8U);
+    }
+
+    gui_fillrect_clipped(fb, (int32_t)window->x, (int32_t)window->y,
+                         (int32_t)window->w, 1, cx0, cy0, cx1, cy1, border);
+    if (window->h > 1U) {
+        gui_fillrect_clipped(fb, (int32_t)window->x,
+                             (int32_t)(window->y + window->h - 1U),
+                             (int32_t)window->w, 1,
+                             cx0, cy0, cx1, cy1, border);
+    }
+    if (window->h > 2U) {
+        gui_fillrect_clipped(fb, (int32_t)window->x,
+                             (int32_t)(window->y + 1U), 1,
+                             (int32_t)(window->h - 2U),
+                             cx0, cy0, cx1, cy1, border);
+        if (window->w > 1U) {
+            gui_fillrect_clipped(fb, (int32_t)(window->x + window->w - 1U),
+                                 (int32_t)(window->y + 1U), 1,
+                                 (int32_t)(window->h - 2U),
+                                 cx0, cy0, cx1, cy1, border);
         }
-        if (gui_maximize_button_rect(window, &xb_x, &xb_y, &xb_w, &xb_h)) {
-            fb_fillrect(fb, xb_x, xb_y, xb_w, xb_h, max_bg);
-            /* A hollow square outline reads as a maximise glyph. */
-            fb_draw_rect(fb, (int32_t)(xb_x + 2U), (int32_t)(xb_y + 2U),
-                         (int32_t)(xb_w - 4U), (int32_t)(xb_h - 4U),
-                         0xfff0f4f8U);
-        }
-        if (gui_close_box_rect(window, &cb_x, &cb_y, &cb_w, &cb_h)) {
-            fb_fillrect(fb, cb_x, cb_y, cb_w, cb_h, cls_bg);
-            fb_draw_line(fb, (int32_t)(cb_x + 2U), (int32_t)(cb_y + 2U),
-                         (int32_t)(cb_x + cb_w - 3U),
-                         (int32_t)(cb_y + cb_h - 3U), 0xfff8f8f8U);
-            fb_draw_line(fb, (int32_t)(cb_x + cb_w - 3U),
-                         (int32_t)(cb_y + 2U), (int32_t)(cb_x + 2U),
-                         (int32_t)(cb_y + cb_h - 3U), 0xfff8f8f8U);
-        }
+    }
+
+    if (window->title_h > 0U &&
+        cy0 < (int32_t)(window->y + window->title_h) &&
+        cy1 > (int32_t)window->y) {
+        gui_draw_window_title(fb, desktop, index, window, border,
+                              cx0, cy0, cx1, cy1);
     }
 }
 
@@ -539,7 +787,8 @@ void gui_draw(gui_desktop_t *desktop) {
                 (int32_t)win->x < x1 &&
                 (int32_t)(win->y + win->h) > y0 &&
                 (int32_t)win->y < y1) {
-                gui_draw_window(desktop->fb, desktop, wi, win);
+                gui_draw_window_clipped(desktop->fb, desktop, wi, win,
+                                        x0, y0, x1, y1);
             }
             last_z = win->z;
         }
@@ -634,6 +883,7 @@ void gui_damage_add(gui_desktop_t *desktop, int32_t x, int32_t y,
     if (x == 0 && y == 0 && w == fb_w && h == fb_h) {
         desktop->damage_full = 1;
         desktop->damage_count = 0;
+        g_gui_dirty = 1;
         return;
     }
     /* Merge pass: scan existing rects, absorbing any that overlap or touch
@@ -668,6 +918,7 @@ void gui_damage_add(gui_desktop_t *desktop, int32_t x, int32_t y,
     if (desktop->damage_count >= GUI_DAMAGE_MAX) {
         desktop->damage_full = 1;
         desktop->damage_count = 0;
+        g_gui_dirty = 1;
         return;
     }
     desktop->damage_rects[desktop->damage_count].x = x;

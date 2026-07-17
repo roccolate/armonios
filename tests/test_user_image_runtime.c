@@ -357,25 +357,12 @@ void test_user_image_runtime_entry_offset_matches_image_base_plus_offset(void) {
 }
 /* ------------------------------------------------------------------
  * Section 5: each shipping app's .bin must have an image_size that
- * covers the entire .user_image section. The .bin is the production
- * linker's flat dump of `.app_<name>` (which KEEPs
- * .app_<name>_blob). That blob carries the .elf's `.user_image`
- * plus `.eh_frame`. The kernel loader reads exactly `image_size`
- * bytes from this blob, so the meaningful contract is that
- * image_size matches the .user_image section size. The .bin size
- * is larger by the .eh_frame tail; we cannot rely on the bin
- * size alone to detect a regression because the difference
- * between "image_end in .user.image.end" (correct) and
- * "image_end in .user.image.text" (BUG 2) is small enough to be
- * hidden by .eh_frame variance.
- *
- * Instead, we hardcode the expected image_size per app. The value
- * is `image_end - image_header` from the .elf and must match
- * exactly. A future commit that drops _end.S back into
- * .user.image.text reduces the value (BUG 2). A future commit
- * that grows .user_image legitimately bumps the value and forces
- * the test to be updated — which is the right time to think about
- * whether the change is safe.
+ * covers the entire flat blob. The production build emits these files
+ * with `objcopy -O binary` from programs/apps/image.ld, whose loadable
+ * output is exactly `.user_image`. If an app's *_image_end symbol moves
+ * before trailing rodata, the .bin still contains that rodata but the
+ * KLI1 header declares a smaller image_size. Comparing the header to the
+ * embedded blob length catches that bug without hardcoding per-app sizes.
  * ------------------------------------------------------------------ */
 
 /* objcopy on a path like "../build/programs/apps/shell.bin" emits
@@ -392,21 +379,12 @@ DECLARE_APP_BLOB(monitor)
 DECLARE_APP_BLOB(clock)
 DECLARE_APP_BLOB(panel)
 
-/* Expected image_size per app (image_end - image_header). Bumped
- * when the corresponding .c file adds code or rodata; reduced
- * when image_end lands in the wrong section (the bug shape). */
-#define EXPECTED_SHELL_IMAGE_SIZE   5875ULL
-#define EXPECTED_EDITOR_IMAGE_SIZE  2696ULL
-#define EXPECTED_FILES_IMAGE_SIZE   3380ULL
-#define EXPECTED_MONITOR_IMAGE_SIZE 1496ULL
-#define EXPECTED_CLOCK_IMAGE_SIZE   1110ULL
-#define EXPECTED_PANEL_IMAGE_SIZE   5789ULL
-
 static void assert_app_image_size(const char *app_name,
                                   const char *start,
-                                  uint64_t expected_image_size) {
+                                  const char *end) {
     const user_flat_image_header_t *header =
         (const user_flat_image_header_t *)(const void *)start;
+    uint64_t blob_size = (uint64_t)((uintptr_t)end - (uintptr_t)start);
 
     TEST_ASSERT_TRUE(header->magic == USER_IMAGE_MAGIC);
 
@@ -420,52 +398,44 @@ static void assert_app_image_size(const char *app_name,
     TEST_ASSERT_TRUE(header->entry_offsets[0] >= header->header_size);
     TEST_ASSERT_TRUE(header->entry_offsets[0] < header->image_size);
 
-    /* The critical assertion: image_size must equal the value
-     * image_end - image_header for this app. If the .end symbol
-     * is back in .user.image.text, image_size shrinks and this
-     * fires with the app name. */
-    if (header->image_size != expected_image_size) {
-        TEST_ASSERT_EQUAL_UINT64(expected_image_size, header->image_size);
-        /* The line above will fail with a useful message naming
-         * `expected_image_size` and `header->image_size`. The
-         * app_name local is for human readers; the local above
-         * is what gets printed. */
-        (void)app_name;
+    if (header->image_size != blob_size) {
+        TEST_ASSERT_EQUAL_UINT64(blob_size, header->image_size);
     }
+    (void)app_name;
 }
 
 void test_user_image_runtime_shipping_shell_image_size(void) {
     assert_app_image_size("shell",
         _binary____build_programs_apps_shell_bin_start,
-        EXPECTED_SHELL_IMAGE_SIZE);
+        _binary____build_programs_apps_shell_bin_end);
 }
 
 void test_user_image_runtime_shipping_editor_image_size(void) {
     assert_app_image_size("editor",
         _binary____build_programs_apps_editor_bin_start,
-        EXPECTED_EDITOR_IMAGE_SIZE);
+        _binary____build_programs_apps_editor_bin_end);
 }
 
 void test_user_image_runtime_shipping_files_image_size(void) {
     assert_app_image_size("files",
         _binary____build_programs_apps_files_bin_start,
-        EXPECTED_FILES_IMAGE_SIZE);
+        _binary____build_programs_apps_files_bin_end);
 }
 
 void test_user_image_runtime_shipping_monitor_image_size(void) {
     assert_app_image_size("monitor",
         _binary____build_programs_apps_monitor_bin_start,
-        EXPECTED_MONITOR_IMAGE_SIZE);
+        _binary____build_programs_apps_monitor_bin_end);
 }
 
 void test_user_image_runtime_shipping_clock_image_size(void) {
     assert_app_image_size("clock",
         _binary____build_programs_apps_clock_bin_start,
-        EXPECTED_CLOCK_IMAGE_SIZE);
+        _binary____build_programs_apps_clock_bin_end);
 }
 
 void test_user_image_runtime_shipping_panel_image_size(void) {
     assert_app_image_size("panel",
         _binary____build_programs_apps_panel_bin_start,
-        EXPECTED_PANEL_IMAGE_SIZE);
+        _binary____build_programs_apps_panel_bin_end);
 }

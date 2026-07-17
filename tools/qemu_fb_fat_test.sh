@@ -52,7 +52,7 @@ fi
 
 grep -Fq "FAT32: mounted" "$LOG" || fail "FAT32 was not mounted in the visible-desktop target"
 grep -Fq "FAT32 root: mounted" "$LOG" || fail "FAT32 root was not exposed under /fat"
-grep -Fq "VIRTIO gpu: windows" "$LOG" || fail "virtio-gpu window surface did not initialise"
+grep -Fq "display: windows" "$LOG" || fail "display window surface did not initialise"
 grep -Fq "panel: ready" "$LOG" || fail "panel never reported ready"
 
 printf 'PASS: visible-desktop wiring (FAT + GPU + panel): %s\n' "$LOG"

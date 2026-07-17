@@ -2,11 +2,10 @@
 
 ArmoniOS currently has one verified development platform: QEMU `virt`.
 
-The repository also contains experimental Raspberry Pi 4 files. They are scaffolding for future bring-up, not a working or build-verified port. Hardware claims must follow `DOCUMENTATION_POLICY.md`.
+The repository also contains experimental Raspberry Pi 4 files. They are build-verified scaffolding for future bring-up, not a working hardware port. Hardware claims must follow `DOCUMENTATION_POLICY.md`.
 
 Active board risks:
 
-- `RISK-006` — incomplete Raspberry Pi board contract;
 - `RISK-007` — experimental and contradictory eMMC implementation.
 
 ## Portability goal
@@ -44,6 +43,7 @@ Generic code includes `drivers/board.h`. The present interface requires each sel
 
 ```c
 const char *board_name(void);
+uint32_t board_capabilities(void);
 void board_early_init(void);
 int board_map_mmio(uint64_t *pgd);
 
@@ -66,17 +66,17 @@ int board_storage_read(uint32_t lba, uint32_t count, void *buffer);
 int board_storage_write(uint32_t lba, uint32_t count, const void *buffer);
 int board_storage_init(void);
 
-uint32_t board_virtio_input_irq(void);
-int board_virtio_input_init(void);
-int board_virtio_input_poll(void);
+int board_display_init(board_display_draw_fn_t draw, void *context);
+int board_display_redraw(board_display_draw_fn_t draw, void *context);
+
+uint32_t board_input_irq(void);
+int board_input_init(void);
+int board_input_poll(void);
 ```
 
-This contract is transitional and has two problems:
+This contract is transitional. Generic input/display calls are capability-shaped, while network still reaches the QEMU virtio transport through the current direct stack.
 
-1. generic names include virtio-specific capabilities that physical boards may not have;
-2. generic kernel code calls some optional paths unconditionally.
-
-Until the interface is redesigned, every board build must still define all required symbols. Unsupported operations must return explicit safe failures rather than remaining undefined.
+Every board build must define all required symbols. Unsupported operations must return explicit safe failures rather than remaining undefined.
 
 ## Current board status
 
@@ -87,7 +87,7 @@ Status:
 - default build target;
 - locally build-verified;
 - storage path QEMU-verified through `qemu-fs-test`;
-- visible desktop partially manually verified;
+- visible desktop wiring QEMU-verified through `tools/qemu_fb_fat_test.sh`;
 - reference implementation for the current board contract.
 
 QEMU-specific responsibilities include:
@@ -96,7 +96,7 @@ QEMU-specific responsibilities include:
 - GICv2;
 - virtio-mmio range;
 - PCI ECAM/MMIO mapping;
-- virtio block, GPU, input, and network discovery;
+- virtio block, GPU, input, and network discovery behind the QEMU board or QEMU-only stack;
 - xHCI discovery through PCI BAR assignment.
 
 ### Raspberry Pi 4
@@ -104,8 +104,7 @@ QEMU-specific responsibilities include:
 Status:
 
 - experimental source files exist;
-- not build-verified;
-- not link-verified;
+- build-verified and link-verified by `tests/run_board_build_test.sh`;
 - not serial-verified;
 - not hardware-verified;
 - not storage-verified;
@@ -113,15 +112,15 @@ Status:
 
 Known facts from static inspection:
 
-- the backend does not currently implement every function required by `drivers/board.h`;
-- the generic kernel calls virtio-input board functions that the backend does not provide;
+- the backend implements every function required by `drivers/board.h`;
+- unsupported display/input operations return explicit safe failures;
 - the eMMC code must not be treated as a functional driver;
 - there is no documented EL2-to-EL1 bring-up path for physical firmware entry;
 - there is no secondary-core parking milestone;
 - there is no validated framebuffer acquisition path;
 - BCM2711 PCIe host initialization is not implemented for VL805 xHCI discovery.
 
-Therefore `make BOARD=rpi4` is an experimental target name, not evidence of support.
+Therefore `make BOARD=rpi4` is build evidence only, not evidence of hardware support.
 
 ## Required board capability direction
 
@@ -141,7 +140,7 @@ typedef struct {
 } board_ops_t;
 ```
 
-The exact design is not frozen, but generic code should be able to ask whether a capability exists rather than assuming virtio on every board.
+The exact design is not fully frozen. Input and display already use `board_input_*` and `board_display_*`; future work should move network and any remaining transport-specific assumptions behind the same capability style.
 
 ## Adding a board
 
@@ -279,4 +278,4 @@ Use these exact scopes:
 - **desktop verified** — framebuffer, input, processes, and applications complete a named workflow;
 - **supported** — documented setup is repeatable and mandatory known risks are closed or accepted.
 
-ArmoniOS currently claims only QEMU development support. Raspberry Pi 4 is at the source-present experimental stage.
+ArmoniOS currently claims only QEMU development support. Raspberry Pi 4 is at the build-verified experimental stage.

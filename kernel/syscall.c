@@ -1,10 +1,9 @@
 /*
- * EL0 syscall dispatcher and syscall bodies.
+ * EL0 syscall dispatcher.
  *
- * This file owns ABI argument validation and dispatch from x8 syscall numbers
- * to kernel subsystems. Shared user-pointer and window-ownership checks live
- * in syscall_helpers.c so individual syscall bodies stay small and preserve
- * consistent error returns.
+ * Syscall numbers and argument registers are ABI. Domain-specific syscall
+ * bodies live in syscall_*.c; this file stays at the trap boundary: pump
+ * asynchronous work, save the current context, dispatch, and write back x0.
  */
 
 #include "kernel/syscall.h"
@@ -13,1006 +12,137 @@
 
 #include "drivers/board.h"
 #include "input/input.h"
-#include "kernel/aarch64_state.h"
 #include "kernel/console.h"
-#include "kernel/exceptions.h"
 #include "kernel/gui.h"
-#include "kernel/ipc.h"
-#include "kernel/mm/pmm.h"
 #include "kernel/net/dhcp.h"
-#include "kernel/print.h"
 #include "kernel/process.h"
 #include "kernel/sched/sched.h"
 #include "kernel/syscall_helpers.h"
+#include "kernel/syscall_internal.h"
 #include "kernel/syscall_numbers.h"
-#include "kernel/panel_boot.h"
-#include "kernel/panel_boot_argv.h"
-#include "kernel/timer/timer.h"
-#include "kernel/user_exit.h"
-#include "kernel/user_vm.h"
-#include "kernel/vfs.h"
 #include "uart/pl011.h"
 #include "usb/hid_driver.h"
 
-#define FD_STDIN  0ULL
-#define FD_STDOUT 1ULL
-#define FD_STDERR 2ULL
-#define FD_FILE_BASE 3ULL
-
-typedef struct {
-    uint32_t pid;
-    uint32_t state;
-    char name[16];
-} syscall_proc_entry_t;
-
-static int64_t sys_write(process_t *process, uint64_t fd, uint64_t buf,
-                         uint64_t len) {
-    const char *text = (const char *)(uintptr_t)buf;
-    uint64_t bytes_written = 0;
-
-    int64_t status = sys_user_buf_in(process, buf, len);
-    if (status != 0) {
-        return status;
-    }
-
-    if (fd >= (uint64_t)FD_FILE_BASE) {
-        if (vfs_write_fd((int64_t)fd - FD_FILE_BASE,
-                         (const uint8_t *)(uintptr_t)buf, len,
-                         &bytes_written) != 0) {
-            return ERR_BADF;
-        }
-        return (int64_t)bytes_written;
-    }
-
-    if (fd != FD_STDOUT && fd != FD_STDERR) {
-        return ERR_BADF;
-    }
-
-    for (uint64_t i = 0; i < len; i++) {
-        uart_putc(text[i]);
-    }
-
-    return (int64_t)len;
-}
-
-static int64_t sys_open(process_t *process, uint64_t path_ptr,
-                        uint64_t flags) {
-    char path[VFS_MAX_PATH];
-    int fd;
-
-    if ((flags & ~VFS_O_ALLOWED) != 0 ||
-        (flags & VFS_O_ACCMODE) == VFS_O_ACCMODE ||
-        sys_user_copy_cstr(process, path_ptr, path, sizeof(path)) != 0) {
-        return ERR_INVAL;
-    }
-
-    fd = vfs_open_flags(path, (uint32_t)flags);
-    if (fd < 0) {
-        return ERR_NOENT;
-    }
-
-    return (int64_t)fd + FD_FILE_BASE;
-}
-
-static int64_t sys_spawn(process_t *process, uint64_t path_ptr,
-                         uint64_t entry_index) {
-    char path[VFS_MAX_PATH];
-    int pid;
-
-    if (entry_index > UINT32_MAX ||
-        sys_user_copy_cstr(process, path_ptr, path, sizeof(path)) != 0) {
-        return ERR_INVAL;
-    }
-
-    pid = app_spawn_vfs(path, (uint32_t)entry_index, 0, 0);
-    if (pid < 0) {
-        return ERR_NOENT;
-    }
-
-    return pid;
-}
-
-static int64_t sys_spawn_argv(process_t *process, uint64_t path_ptr,
-                              uint64_t entry_index,
-                              uint64_t argv_ptr, uint64_t argc) {
-    char path[VFS_MAX_PATH];
-    int pid;
-
-    if (entry_index > UINT32_MAX || argc > PANEL_BOOT_ARGV_MAX_STRINGS ||
-        sys_user_copy_cstr(process, path_ptr, path, sizeof(path)) != 0) {
-        return ERR_INVAL;
-    }
-
-    /*
-     * argv_ptr must point at `argc` uint64_t entries inside the
-     * caller's registered user regions when argc > 0. The strings
-     * they reference are validated by app_spawn_vfs (it walks
-     * each one until '\0'). argc == 0 with argv_ptr == 0 is the
-     * "no argv" path and is always accepted; any other combination
-     * of argc and argv_ptr is rejected.
-     */
-    if (argc == 0) {
-        if (argv_ptr != 0) {
-            return ERR_INVAL;
-        }
-    } else {
-        if (argv_ptr == 0 ||
-            sys_user_buf_in(process, argv_ptr,
-                            argc * sizeof(uint64_t)) != 0) {
-            return ERR_INVAL;
-        }
-    }
-
-    pid = app_spawn_vfs(path, (uint32_t)entry_index,
-                            (const uint64_t *)(uintptr_t)argv_ptr,
-                            (uint32_t)argc);
-    if (pid < 0) {
-        return ERR_NOENT;
-    }
-
-    return pid;
-}
-
-static int64_t sys_wait(uint64_t pid) {
-    uint64_t exit_code = 0;
-    process_t *process;
-
-    if (pid == 0 || pid > UINT32_MAX) {
-        return ERR_INVAL;
-    }
-
-    process = process_find((uint32_t)pid);
-    if (process == 0) {
-        return ERR_NOENT;
-    }
-
-    if (process->state != PROCESS_ZOMBIE) {
-        return ERR_AGAIN;
-    }
-
-    if (process_wait_zombie((uint32_t)pid, &exit_code) != 0) {
-        return ERR_INVAL;
-    }
-
-    return (int64_t)exit_code;
-}
-
-static int64_t sys_kill(uint64_t pid) {
-    if (pid == 0 || pid > UINT32_MAX) {
-        return ERR_INVAL;
-    }
-
-    if (process_find((uint32_t)pid) == 0) {
-        return ERR_NOENT;
-    }
-
-    if (process_kill((uint32_t)pid, KERNEL_USER_KILL_EXIT_CODE) != 0) {
-        return ERR_INVAL;
-    }
-
-    return 0;
-}
-
-static int64_t sys_close(uint64_t fd) {
-    if (fd < (uint64_t)FD_FILE_BASE) {
-        return ERR_BADF;
-    }
-
-    if (vfs_close((int64_t)fd - FD_FILE_BASE) != 0) {
-        return ERR_BADF;
-    }
-
-    return 0;
-}
-
-static int64_t sys_seek(uint64_t fd, uint64_t offset, uint64_t whence) {
-    if (fd < (uint64_t)FD_FILE_BASE || whence != 0) {
-        return ERR_INVAL;
-    }
-
-    if (vfs_seek((int64_t)fd - FD_FILE_BASE, offset) != 0) {
-        return ERR_BADF;
-    }
-
-    return (int64_t)offset;
-}
-
-static int64_t sys_read(process_t *process, uint64_t fd, uint64_t buf,
-                        uint64_t len) {
-    uint64_t bytes_read = 0;
-    int64_t status;
-
-    if (fd == FD_STDIN) {
-        uint8_t *out = (uint8_t *)(uintptr_t)buf;
-        int c;
-
-        status = sys_user_buf_out(process, buf, len);
-        if (status != 0) {
-            return status;
-        }
-
-        if (len == 0) {
-            return 0;
-        }
-
-        c = input_queue_poll_char();
-        if (c < 0) {
-            return ERR_AGAIN;
-        }
-
-        out[0] = (uint8_t)c;
-        return 1;
-    }
-
-    if (fd < (uint64_t)FD_FILE_BASE) {
-        return ERR_BADF;
-    }
-
-    status = sys_user_buf_out(process, buf, len);
-    if (status != 0) {
-        return status;
-    }
-
-    if (vfs_read_fd((int64_t)fd - FD_FILE_BASE, (uint8_t *)(uintptr_t)buf,
-                    len, &bytes_read) != 0) {
-        return ERR_BADF;
-    }
-
-    return (int64_t)bytes_read;
-}
-
-static int64_t sys_stat(process_t *process, uint64_t path_ptr,
-                        uint64_t stat_ptr) {
-    char path[VFS_MAX_PATH];
-    vfs_stat_t stat;
-
-    if (sys_user_copy_cstr(process, path_ptr, path, sizeof(path)) != 0 ||
-        sys_user_buf_out(process, stat_ptr, sizeof(stat)) != 0) {
-        return ERR_INVAL;
-    }
-
-    if (vfs_stat(path, &stat) != 0) {
-        return ERR_NOENT;
-    }
-
-    *(vfs_stat_t *)(uintptr_t)stat_ptr = stat;
-    return 0;
-}
-
-static int64_t sys_readdir(process_t *process, uint64_t path_ptr,
-                           uint64_t buf, uint64_t len) {
-    char path[VFS_MAX_PATH];
-    uint64_t bytes_written = 0;
-
-    if (sys_user_copy_cstr(process, path_ptr, path, sizeof(path)) != 0 ||
-        sys_user_buf_out(process, buf, len) != 0) {
-        return ERR_INVAL;
-    }
-
-    if (vfs_list(path, (uint8_t *)(uintptr_t)buf, len, &bytes_written) != 0) {
-        return ERR_NOENT;
-    }
-
-    return (int64_t)bytes_written;
-}
-
-static int64_t sys_unlink(process_t *process, uint64_t path_ptr) {
-    char path[VFS_MAX_PATH];
-
-    if (sys_user_copy_cstr(process, path_ptr, path, sizeof(path)) != 0) {
-        return ERR_INVAL;
-    }
-    if (vfs_unlink(path) != 0) {
-        return ERR_NOENT;
-    }
-    return 0;
-}
-
-static int64_t sys_rename(process_t *process, uint64_t old_ptr,
-                          uint64_t new_ptr) {
-    char old_path[VFS_MAX_PATH];
-    char new_path[VFS_MAX_PATH];
-
-    if (sys_user_copy_cstr(process, old_ptr, old_path, sizeof(old_path)) != 0 ||
-        sys_user_copy_cstr(process, new_ptr, new_path, sizeof(new_path)) != 0) {
-        return ERR_INVAL;
-    }
-    if (vfs_rename(old_path, new_path) != 0) {
-        return ERR_NOENT;
-    }
-    return 0;
-}
-
-static int64_t sys_meminfo(process_t *process, uint64_t info_ptr) {
-    uint64_t *info = (uint64_t *)(uintptr_t)info_ptr;
-    int64_t status;
-
-    status = sys_user_buf_out(process, info_ptr, 2U * sizeof(uint64_t));
-    if (status != 0) {
-        return status;
-    }
-
-    info[0] = pmm_total_count();
-    info[1] = pmm_free_count();
-    return 0;
-}
-
-static int64_t sys_timeinfo(process_t *process, uint64_t info_ptr) {
-    uint64_t *info = (uint64_t *)(uintptr_t)info_ptr;
-    int64_t status;
-
-    status = sys_user_buf_out(process, info_ptr, 3U * sizeof(uint64_t));
-    if (status != 0) {
-        return status;
-    }
-
-    info[0] = timer_ticks();
-    info[1] = sched_ticks();
-    info[2] = sched_quantums();
-    return 0;
-}
-
-static int64_t sys_proclist(process_t *process, uint64_t entries_ptr,
-                            uint64_t max_entries) {
-    syscall_proc_entry_t *entries =
-        (syscall_proc_entry_t *)(uintptr_t)entries_ptr;
-    uint64_t written = 0;
-    int64_t status;
-
-    if (max_entries == 0) {
-        return 0;
-    }
-
-    if (max_entries > PROCESS_MAX_PROCESSES) {
-        return ERR_INVAL;
-    }
-    status = sys_user_buf_out(process, entries_ptr,
-                              max_entries * sizeof(syscall_proc_entry_t));
-    if (status != 0) {
-        return status;
-    }
-
-    for (uint32_t i = 0; i < PROCESS_MAX_PROCESSES && written < max_entries; i++) {
-        const process_t *slot = process_at(i);
-        syscall_proc_entry_t *entry;
-        const char *name;
-        uint32_t j;
-
-        if (slot == 0) {
-            continue;
-        }
-
-        entry = &entries[written];
-        entry->pid = slot->pid;
-        entry->state = (uint32_t)slot->state;
-        name = slot->name != 0 ? slot->name : "";
-
-        for (j = 0; j + 1U < sizeof(entry->name) && name[j] != '\0'; j++) {
-            entry->name[j] = name[j];
-        }
-        entry->name[j] = '\0';
-        for (j++; j < sizeof(entry->name); j++) {
-            entry->name[j] = '\0';
-        }
-
-        written++;
-    }
-
-    return (int64_t)written;
-}
-
-static int64_t sys_munmap(process_t *process, uint64_t addr, uint64_t size) {
-    return user_vm_unmap_anonymous(process, addr, size);
-}
-
-static int64_t sys_mmap(process_t *process, uint64_t hint, uint64_t size,
-                        uint64_t flags) {
-    return user_vm_map_anonymous(process, hint, size, flags);
-}
-
-static int64_t sys_ipc_send(process_t *process, uint64_t target_pid,
-                            uint64_t buf, uint64_t len) {
-    int64_t status;
-
-    if (process == 0 || target_pid == 0 || len == 0 ||
-        target_pid > UINT32_MAX || len > IPC_MAX_MESSAGE_SIZE) {
-        return ERR_INVAL;
-    }
-    status = sys_user_buf_in(process, buf, len);
-    if (status != 0) {
-        return status;
-    }
-
-    if (ipc_send(process->pid, (uint32_t)target_pid,
-                 (const uint8_t *)(uintptr_t)buf, (uint32_t)len) != 0) {
-        return ERR_AGAIN;
-    }
-
-    return (int64_t)len;
-}
-
-static int64_t sys_ipc_recv(process_t *process, uint64_t buf,
-                            uint64_t capacity) {
-    ipc_message_t message;
-    uint8_t *out = (uint8_t *)(uintptr_t)buf;
-    int64_t status;
-
-    if (process == 0 || capacity != IPC_MAX_MESSAGE_SIZE) {
-        return ERR_INVAL;
-    }
-    status = sys_user_buf_out(process, buf, capacity);
-    if (status != 0) {
-        return status;
-    }
-
-    if (ipc_recv(process->pid, &message) != 0) {
-        return ERR_AGAIN;
-    }
-
-    if (message.size > capacity) {
-        return ERR_INVAL;
-    }
-
-    for (uint32_t i = 0; i < message.size; i++) {
-        out[i] = message.data[i];
-    }
-
-    return (int64_t)message.size;
-}
-
-static int sys_yield_process(exception_frame_t *frame) {
-    process_t *current = process_current();
-
-    if (current == 0) {
-        return 0;
-    }
-    /*
-     * The frame may be replaced with the next process' saved context when the
-     * dispatch succeeds. Store the yielding process' return value in its saved
-     * register set before switching away.
-     */
-    current->regs[0] = 0;
-    return process_dispatch_next(current, frame, PROCESS_DISPATCH_PREEMPT);
-}
-
-static int64_t sys_window_create(process_t *process, uint64_t x, uint64_t y,
-                                 uint64_t w, uint64_t h, uint64_t bg,
-                                 uint64_t border, uint64_t title_ptr) {
-    gui_desktop_t *desktop;
-    char title[GUI_TITLE_LEN];
-    uint32_t window_id = GUI_NO_WINDOW;
-
-    if (process == 0 || x > UINT32_MAX || y > UINT32_MAX ||
-        w > UINT32_MAX || h > UINT32_MAX || w < 8 || h < 8 ||
-        bg > UINT32_MAX || border > UINT32_MAX) {
-        return ERR_INVAL;
-    }
-
-    for (uint32_t i = 0; i < GUI_TITLE_LEN; i++) {
-        title[i] = '\0';
-    }
-    if (title_ptr != 0) {
-        if (sys_user_copy_cstr(process, title_ptr, title, GUI_TITLE_LEN) != 0) {
-            return ERR_INVAL;
-        }
-    }
-
-    desktop = gui_desktop();
-    if (desktop == 0) {
-        return ERR_AGAIN;
-    }
-
-    if (gui_create_window_for_pid(desktop, process->pid,
-                                  (uint32_t)x, (uint32_t)y, (uint32_t)w,
-                                  (uint32_t)h, (uint32_t)bg,
-                                  (uint32_t)border, title,
-                                  &window_id) != 0) {
-        return ERR_AGAIN;
-    }
-    /* New window must show on the next compositor pass. */
-    gui_request_redraw();
-    return (int64_t)window_id;
-}
-
-static int64_t sys_window_destroy(process_t *process, uint64_t window_id) {
-    gui_desktop_t *desktop;
-    gui_window_t *window;
-    int64_t status;
-
-    status = sys_owner_window(process, window_id, &desktop, &window);
-    if (status != 0) {
-        return status;
-    }
-    if (gui_destroy_window(desktop, (uint32_t)window_id) != 0) {
-        return ERR_BADF;
-    }
-    /* Old window rectangle must be repainted by the compositor. */
-    gui_request_redraw();
-    return 0;
-}
-
-static int64_t sys_window_draw_text(process_t *process, uint64_t window_id,
-                                    uint64_t x, uint64_t y, uint64_t color,
-                                    uint64_t str_ptr) {
-    gui_desktop_t *desktop;
-    gui_window_t *window;
-    char text[128];
-    int64_t status;
-
-    if (process == 0 || window_id >= GUI_MAX_WINDOWS ||
-        x > INT32_MAX || y > INT32_MAX || color > UINT32_MAX) {
-        return ERR_INVAL;
-    }
-    status = sys_owner_window_badf(process, window_id, &desktop, &window);
-    if (status != 0) {
-        return status;
-    }
-    if (sys_user_copy_cstr(process, str_ptr, text, sizeof(text)) != 0) {
-        return ERR_INVAL;
-    }
-    if (gui_window_draw_text(desktop, (uint32_t)window_id,
-                             (int32_t)x, (int32_t)y, text,
-                             (uint32_t)color) != 0) {
-        return ERR_BADF;
-    }
-    return 0;
-}
-
-static int64_t sys_window_draw_rect(process_t *process, uint64_t window_id,
-                                    uint64_t x, uint64_t y, uint64_t w,
-                                    uint64_t h, uint64_t color) {
-    gui_desktop_t *desktop;
-    gui_window_t *window;
-    int64_t status;
-
-    if (process == 0 || window_id >= GUI_MAX_WINDOWS ||
-        x > INT32_MAX || y > INT32_MAX ||
-        w > UINT32_MAX || h > UINT32_MAX || color > UINT32_MAX) {
-        return ERR_INVAL;
-    }
-    status = sys_owner_window_badf(process, window_id, &desktop, &window);
-    if (status != 0) {
-        return status;
-    }
-    if (gui_window_draw_rect(desktop, (uint32_t)window_id,
-                             (int32_t)x, (int32_t)y, (uint32_t)w,
-                             (uint32_t)h, (uint32_t)color) != 0) {
-        return ERR_BADF;
-    }
-    return 0;
-}
-
-static int64_t sys_window_set_title(process_t *process, uint64_t window_id,
-                                    uint64_t title_ptr, uint64_t title_h) {
-    gui_desktop_t *desktop;
-    gui_window_t *window;
-    char title[GUI_TITLE_LEN];
-    int64_t status;
-
-    if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
-        return ERR_INVAL;
-    }
-    status = sys_owner_window_badf(process, window_id, &desktop, &window);
-    if (status != 0) {
-        return status;
-    }
-    if (sys_user_copy_cstr(process, title_ptr, title, GUI_TITLE_LEN) != 0) {
-        return ERR_INVAL;
-    }
-    if (gui_window_set_title_internal(desktop, (uint32_t)window_id, title) != 0) {
-        return ERR_BADF;
-    }
-    /* Title text change must show on the next compositor pass. */
-    gui_request_redraw();
-    /* title_h is an optional fourth argument. Older apps leave x2 unset,
-     * so we keep the default of 0 (no kernel title bar) for ABI
-     * compatibility. The kernel validates title_h against the window
-     * height before applying. */
-    if (title_h > 0 &&
-        gui_window_set_title_bar_internal(desktop, (uint32_t)window_id,
-                                 (uint32_t)title_h) != 0) {
-        return ERR_INVAL;
-    }
-    return 0;
-}
-
-static int64_t sys_window_redraw(process_t *process, uint64_t window_id) {
-    gui_window_t *window;
-    int64_t status;
-
-    status = sys_owner_window_badf(process, window_id, 0, &window);
-    if (status != 0) {
-        return status;
-    }
-    /* Mark the desktop dirty so the kernel redraws on next tick. */
-    gui_request_redraw();
-    return 0;
-}
-
-static int64_t sys_window_focus(process_t *process, uint64_t window_id) {
-    gui_desktop_t *desktop = gui_desktop();
-    gui_window_t *window;
-
-    if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
-        return ERR_INVAL;
-    }
-    if (desktop == 0) {
-        return ERR_AGAIN;
-    }
-    window = &desktop->windows[window_id];
-    if (window->used == 0) {
-        return ERR_NOENT;
-    }
-    /* Unlike the owner-only draw/destroy syscalls, sys_window_focus is
-     * deliberately callable by any process. The desktop taskbar (a
-     * different pid from the app owners) needs to raise windows it did
-     * not create when the user clicks a running-app entry. */
-    if (gui_focus_window(desktop, (uint32_t)window_id) != 0) {
-        return ERR_INVAL;
-    }
-    gui_request_redraw();
-    return 0;
-}
-
-static int64_t sys_window_for_pid(process_t *process, uint64_t owner_pid,
-                                  uint64_t index) {
-    gui_desktop_t *desktop = gui_desktop();
-    uint32_t window_id;
-
-    if (process == 0 || owner_pid > UINT32_MAX || index >= GUI_MAX_WINDOWS) {
-        return ERR_INVAL;
-    }
-    if (desktop == 0) {
-        return ERR_AGAIN;
-    }
-    window_id = gui_window_for_pid(desktop, (uint32_t)owner_pid,
-                                   (uint32_t)index);
-    if (window_id == GUI_NO_WINDOW) {
-        return ERR_NOENT;
-    }
-    return (int64_t)window_id;
-}
-
-static int64_t sys_cursor_set_shape(process_t *process, uint64_t shape) {
-    gui_desktop_t *desktop = gui_desktop();
-
-    if (process == 0 || shape > UINT32_MAX) {
-        return ERR_INVAL;
-    }
-    if (desktop == 0) {
-        return ERR_AGAIN;
-    }
-    if (gui_set_cursor_shape(desktop, (uint32_t)shape) != 0) {
-        return ERR_INVAL;
-    }
-    gui_request_redraw();
-    return 0;
-}
-
-static int64_t sys_cursor_register_region(process_t *process, uint64_t win,
-                                          uint64_t slot, uint64_t x,
-                                          uint64_t y, uint64_t w, uint64_t h,
-                                          uint64_t shape) {
-    gui_desktop_t *desktop = gui_desktop();
-    const gui_window_t *window;
-
-    if (process == 0 || win > UINT32_MAX || slot > UINT32_MAX ||
-        x > INT32_MAX || y > INT32_MAX || w > INT32_MAX ||
-        h > INT32_MAX || shape > UINT32_MAX) {
-        return ERR_INVAL;
-    }
-    if (desktop == 0) {
-        return ERR_AGAIN;
-    }
-    /* Only the owning process may register cursor regions on its
-     * windows. Without this guard any pid could swap the cursor to
-     * a hand shape over a victim's content, which would silently
-     * break clickable widgets the user expects to be safe. */
-    window = gui_window_lookup(desktop, (uint32_t)win);
-    if (window == 0 || window->used == 0U) {
-        return ERR_NOENT;
-    }
-    if (window->owner_pid != GUI_NO_OWNER &&
-        window->owner_pid != (uint32_t)process->pid) {
-        return ERR_PERM;
-    }
-    if (gui_register_cursor_region(desktop, (uint32_t)win,
-                                   (uint32_t)slot, (int32_t)x, (int32_t)y,
-                                   (uint32_t)w, (uint32_t)h,
-                                   (uint32_t)shape) != 0) {
-        return ERR_INVAL;
-    }
-    gui_request_redraw();
-    return 0;
-}
-
-/*
- * sys_window_flush: push a content-local damage rectangle for the given
- * window. The compositor converts it to framebuffer coordinates and
- * merges it with other pending damage, so a flurry of small draws
- * coalesces into one partial redraw. Used by apps that draw into their
- * own backing buffer through a path the kernel does not see (for
- * example, blitting an image they built locally) and need to tell the
- * compositor which pixels changed.
- */
-static int64_t sys_window_flush(process_t *process, uint64_t window_id,
-                                uint64_t x, uint64_t y, uint64_t w,
-                                uint64_t h) {
-    gui_desktop_t *desktop;
-    gui_window_t *window;
-    int64_t status;
-
-    if (process == 0 || window_id >= GUI_MAX_WINDOWS ||
-        x > INT32_MAX || y > INT32_MAX ||
-        w > INT32_MAX || h > INT32_MAX) {
-        return ERR_INVAL;
-    }
-    status = sys_owner_window_badf(process, window_id, &desktop, &window);
-    if (status != 0) {
-        return status;
-    }
-    if (w == 0 || h == 0) {
-        return 0;
-    }
-    /* Convert content-local coords to framebuffer coords: the content
-     * area sits below the kernel-drawn title bar. */
-    gui_damage_add(desktop,
-                   (int32_t)window->x + (int32_t)x,
-                   (int32_t)window->y + (int32_t)window->title_h + (int32_t)y,
-                   (int32_t)w, (int32_t)h);
-    return 0;
-}
-
-/*
- * sys_window_get_bounds: write the window's current (x, y, w, h) into
- * the user buffer as four uint32_t values. out_ptr must point at a
- * 16-byte region registered with the caller. Only the owning process
- * may read another process's window bounds.
- */
-static int64_t sys_window_get_bounds(process_t *process, uint64_t window_id,
-                                     uint64_t out_ptr) {
-    gui_desktop_t *desktop;
-    gui_window_t *window;
-    uint32_t *out = (uint32_t *)(uintptr_t)out_ptr;
-    int64_t status;
-
-    status = sys_user_buf_out(process, out_ptr, sizeof(uint32_t) * 4U);
-    if (status != 0) {
-        return status;
-    }
-    status = sys_owner_window(process, window_id, &desktop, &window);
-    if (status != 0) {
-        return status;
-    }
-    out[0] = window->x;
-    out[1] = window->y;
-    out[2] = window->w;
-    out[3] = window->h;
-    return 0;
-}
-
-/*
- * sys_window_set_bounds: move and/or resize the window in one step.
- * If (w, h) changes relative to the current window, the kernel
- * reallocates the per-window backing buffer (cleared to bg_color)
- * and pushes GUI_EVENT_RESIZE onto the owner's event queue so the
- * owner can rebuild its layout before the next redraw.
- *
- * Only the owning process may move or resize its window. Bounds are
- * validated against the desktop framebuffer; out-of-bounds moves
- * fail with ERR_INVAL without touching the window.
- */
-static int64_t sys_window_set_bounds(process_t *process, uint64_t window_id,
-                                     uint64_t x, uint64_t y, uint64_t w,
-                                     uint64_t h) {
-    gui_desktop_t *desktop;
-    gui_window_t *window;
-    int64_t status;
-
-    if (process == 0 || window_id >= GUI_MAX_WINDOWS ||
-        x > INT32_MAX || y > INT32_MAX ||
-        w > UINT32_MAX || h > UINT32_MAX) {
-        return ERR_INVAL;
-    }
-    status = sys_owner_window(process, window_id, &desktop, &window);
-    if (status != 0) {
-        return status;
-    }
-    if (gui_resize_window(desktop, (uint32_t)window_id, (uint32_t)x,
-                          (uint32_t)y, (uint32_t)w, (uint32_t)h) != 0) {
-        return ERR_INVAL;
-    }
-    return 0;
-}
-
-/*
- * sys_window_minimize: hide the window through the same path the
- * kernel-drawn minimise button uses. Owners typically trigger this
- * from their own UI; the kernel still fires GUI_EVENT_MINIMIZE on
- * the owner's queue so app state can pause. Only the owner may
- * minimise its own window.
- */
-static int64_t sys_window_minimize(process_t *process, uint64_t window_id) {
-    gui_desktop_t *desktop;
-    gui_window_t *window;
-    int64_t status;
-
-    status = sys_owner_window(process, window_id, &desktop, &window);
-    if (status != 0) {
-        return status;
-    }
-    if (gui_window_minimize(desktop, (uint32_t)window_id) != 0) {
-        return ERR_INVAL;
-    }
-    return 0;
-}
-
-/*
- * sys_window_restore: inverse of sys_window_minimize. The window raises to the
- * top of the z-stack and the kernel fires GUI_EVENT_MAXIMIZE on the owner
- * queue so apps that resize on maximise can rebuild their layout.
- *
- * Unlike minimize, restore is intentionally not owner-only: the panel/taskbar
- * must be able to make another process's minimized window visible again after
- * the user clicks its running-app slot. This matches sys_window_focus: it
- * changes desktop presentation, not the owner's backing content.
- */
-static int64_t sys_window_restore(process_t *process, uint64_t window_id) {
-    gui_desktop_t *desktop = gui_desktop();
-    gui_window_t *window;
-
-    if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
-        return ERR_INVAL;
-    }
-    if (desktop == 0) {
-        return ERR_AGAIN;
-    }
-    window = &desktop->windows[window_id];
-    if (window->used == 0) {
-        return ERR_NOENT;
-    }
-    if (gui_window_restore(desktop, (uint32_t)window_id) != 0) {
-        return ERR_INVAL;
-    }
-    return 0;
-}
-
-/*
- * sys_window_state: write a small bitmap of window flags into the caller's
- * 32-bit buffer. Lets apps and the panel check whether a window is currently
- * minimised without polling the owner event queue.
- *
- * This is also not owner-only. The taskbar needs read-only presentation state
- * for windows it does not own so it can draw minimized slots and choose
- * restore vs focus on click.
- *
- * Bit layout (matches GUI_WINDOW_STATE_* in kernel/gui.h):
- *   bit 0 = GUI_WINDOW_STATE_MINIMIZED
- *   bit 1 = GUI_WINDOW_STATE_FOCUSED
- */
-static int64_t sys_window_state(process_t *process, uint64_t window_id,
-                                uint64_t out_ptr) {
-    gui_desktop_t *desktop = gui_desktop();
-    gui_window_t *window;
-    uint32_t *out = (uint32_t *)(uintptr_t)out_ptr;
-    uint32_t state = 0;
-    int64_t status;
-
-    status = sys_user_buf_out(process, out_ptr, sizeof(uint32_t));
-    if (status != 0) {
-        return status;
-    }
-    if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
-        return ERR_INVAL;
-    }
-    if (desktop == 0) {
-        return ERR_AGAIN;
-    }
-    window = &desktop->windows[window_id];
-    if (window->used == 0) {
-        return ERR_NOENT;
-    }
-    if (window->minimized != 0U) {
-        state |= 0x1U;
-    }
-    if (desktop->focused_window_id == (uint32_t)window_id &&
-        (window->flags & GUI_WINDOW_NO_FOCUS) == 0U) {
-        state |= 0x2U;
-    }
-    *out = state;
-    return 0;
-}
-
-static int64_t sys_window_event(process_t *process, uint64_t window_id,
-                               uint64_t buf_ptr,
-                               uint64_t buf_count) {
-    gui_window_t *window;
-    uint32_t *out = (uint32_t *)(uintptr_t)buf_ptr;
-    int64_t status;
-
-    if (process == 0 || window_id >= GUI_MAX_WINDOWS ||
-        buf_count == 0 || buf_count > 64) {
-        return ERR_INVAL;
-    }
-    status = sys_user_buf_out(process, buf_ptr,
-                              buf_count * 3U * sizeof(uint32_t));
-    if (status != 0) {
-        return status;
-    }
-    status = sys_owner_window_badf(process, window_id, 0, &window);
-    if (status != 0) {
-        return status;
-    }
-
-    if (window->event_count == 0) {
-        return ERR_AGAIN;
-    }
-
-    uint64_t n = 0;
-    while (n < buf_count && window->event_count > 0) {
-        gui_event_t ev;
-        if (gui_window_pop_event(window, &ev) != 0) {
-            break;
-        }
-        out[n * 3U + 0U] = ev.type;
-        out[n * 3U + 1U] = (uint32_t)ev.data1;
-        out[n * 3U + 2U] = (uint32_t)ev.data2;
-        n++;
-    }
-    return (int64_t)n;
-}
-
-static void sys_exit(exception_frame_t *frame, uint64_t code) {
-    process_t *current = process_current();
-
-    process_mark_exited(current, code);
-
-    uart_puts("USER exit: ");
-    print_hex64(code);
-    uart_puts("\n");
-
-    if (process_dispatch_next(current, frame, PROCESS_DISPATCH_EXIT) != 0) {
-        return;
-    }
-
-    frame->x[0] = code;
-    frame->elr = el0_return_address();
-    frame->spsr = AARCH64_SPSR_EL1H_DAIF_MASKED;
-}
-
-void syscall_dispatch(exception_frame_t *frame) {
-    process_t *current = process_current();
-
-    // Drain any pending input before handling this SVC, except when the
-    // caller is actively reading stdin. That lets legacy/debug serial reads
-    // keep their bytes while still giving the kernel k> console and focused
-    // GUI windows a chance to process input while an EL0 process holds the CPU.
-    // uart_pump_input drains the UART data register directly so piped
-    // QEMU input is captured even when the PL011 RX interrupt is
-    // masked or pending.
+static void syscall_pump_input(uint64_t syscall_number) {
     uart_pump_input();
     input_uart_poll();
-    board_virtio_input_poll();
+    board_input_poll();
     usb_hid_poll_all();
-    if (frame->x[8] != SYS_READ) {
+
+    if (syscall_number != SYS_READ) {
         input_event_t drain_event;
+
         while (input_queue_poll(&drain_event) == 0) {
             if (drain_event.type == INPUT_EVENT_KEY_PRESS) {
                 char c = (char)drain_event.data.key.key;
                 gui_desktop_t *desktop = gui_desktop();
+
                 if (desktop == 0 ||
                     desktop->focused_window_id == GUI_NO_WINDOW) {
                     console_poll_char(c);
                 }
                 (void)gui_handle_input(&drain_event);
             } else {
-                // Mouse move and button events get dispatched straight to
-                // the GUI so the panel can react to 'mouse x y' and
-                // 'click x y' commands issued from the serial console.
                 (void)gui_handle_input(&drain_event);
             }
         }
     }
+}
+
+static uint64_t syscall_call(process_t *current, const uint64_t x[31]) {
+    switch (x[8]) {
+    case SYS_GETPID:
+        return current == 0 ? (uint64_t)ERR_INVAL : current->pid;
+    case SYS_SPAWN:
+        return (uint64_t)sys_spawn(current, x[0], x[1]);
+    case SYS_SPAWN_ARGV:
+        return (uint64_t)sys_spawn_argv(current, x[0], x[1], x[2], x[3]);
+    case SYS_WAIT:
+        return (uint64_t)sys_wait(x[0]);
+    case SYS_KILL:
+        return (uint64_t)sys_kill(x[0]);
+    case SYS_OPEN:
+        return (uint64_t)sys_open(current, x[0], x[1]);
+    case SYS_CLOSE:
+        return (uint64_t)sys_close(x[0]);
+    case SYS_READ:
+        return (uint64_t)sys_read(current, x[0], x[1], x[2]);
+    case SYS_MMAP:
+        return (uint64_t)sys_mmap(current, x[0], x[1], x[2]);
+    case SYS_MUNMAP:
+        return (uint64_t)sys_munmap(current, x[0], x[1]);
+    case SYS_WRITE:
+        return (uint64_t)sys_write(current, x[0], x[1], x[2]);
+    case SYS_SEEK:
+        return (uint64_t)sys_seek(x[0], x[1], x[2]);
+    case SYS_STAT:
+        return (uint64_t)sys_stat(current, x[0], x[1]);
+    case SYS_READDIR:
+        return (uint64_t)sys_readdir(current, x[0], x[1], x[2]);
+    case SYS_UNLINK:
+        return (uint64_t)sys_unlink(current, x[0]);
+    case SYS_RENAME:
+        return (uint64_t)sys_rename(current, x[0], x[1]);
+    case SYS_IPC_SEND:
+        return (uint64_t)sys_ipc_send(current, x[0], x[1], x[2]);
+    case SYS_IPC_RECV:
+        return (uint64_t)sys_ipc_recv(current, x[0], x[1]);
+    case SYS_WINDOW_CREATE:
+        return (uint64_t)sys_window_create(current, x[0], x[1], x[2], x[3],
+                                           x[4], x[5], x[6]);
+    case SYS_WINDOW_DESTROY:
+        return (uint64_t)sys_window_destroy(current, x[0]);
+    case SYS_WINDOW_DRAW_TEXT:
+        return (uint64_t)sys_window_draw_text(current, x[0], x[1], x[2],
+                                              x[3], x[4]);
+    case SYS_WINDOW_DRAW_RECT:
+        return (uint64_t)sys_window_draw_rect(current, x[0], x[1], x[2],
+                                              x[3], x[4], x[5]);
+    case SYS_WINDOW_EVENT:
+        return (uint64_t)sys_window_event(current, x[0], x[1], x[2]);
+    case SYS_WINDOW_SET_TITLE:
+        return (uint64_t)sys_window_set_title(current, x[0], x[1], x[2]);
+    case SYS_WINDOW_REDRAW:
+        return (uint64_t)sys_window_redraw(current, x[0]);
+    case SYS_WINDOW_FOCUS:
+        return (uint64_t)sys_window_focus(current, x[0]);
+    case SYS_WINDOW_FOR_PID:
+        return (uint64_t)sys_window_for_pid(current, x[0], x[1]);
+    case SYS_CURSOR_SET_SHAPE:
+        return (uint64_t)sys_cursor_set_shape(current, x[0]);
+    case SYS_WINDOW_FLUSH:
+        return (uint64_t)sys_window_flush(current, x[0], x[1], x[2],
+                                          x[3], x[4]);
+    case SYS_WINDOW_GET_BOUNDS:
+        return (uint64_t)sys_window_get_bounds(current, x[0], x[1]);
+    case SYS_WINDOW_SET_BOUNDS:
+        return (uint64_t)sys_window_set_bounds(current, x[0], x[1], x[2],
+                                               x[3], x[4]);
+    case SYS_WINDOW_MINIMIZE:
+        return (uint64_t)sys_window_minimize(current, x[0]);
+    case SYS_WINDOW_RESTORE:
+        return (uint64_t)sys_window_restore(current, x[0]);
+    case SYS_WINDOW_STATE:
+        return (uint64_t)sys_window_state(current, x[0], x[1]);
+    case SYS_CURSOR_REGISTER_REGION:
+        return (uint64_t)sys_cursor_register_region(current, x[0], x[1],
+                                                    x[2], x[3], x[4],
+                                                    x[5], x[6]);
+    case SYS_TIMEINFO:
+        return (uint64_t)sys_timeinfo(current, x[0]);
+    case SYS_MEMINFO:
+        return (uint64_t)sys_meminfo(current, x[0]);
+    case SYS_PROCLIST:
+        return (uint64_t)sys_proclist(current, x[0], x[1]);
+    default:
+        return (uint64_t)ERR_INVAL;
+    }
+}
+
+void syscall_dispatch(exception_frame_t *frame) {
+    process_t *current = process_current();
+
+    syscall_pump_input(frame->x[8]);
     net_poll();
 
     if (current != 0) {
@@ -1020,169 +150,15 @@ void syscall_dispatch(exception_frame_t *frame) {
                              frame->sp_el0);
     }
 
-    switch (frame->x[8]) {
-    case SYS_EXIT:
+    if (frame->x[8] == SYS_EXIT) {
         sys_exit(frame, frame->x[0]);
-        break;
-    case SYS_YIELD:
+    } else if (frame->x[8] == SYS_YIELD) {
         if (!sys_yield_process(frame)) {
             sched_yield();
             frame->x[0] = 0;
         }
-        break;
-    case SYS_GETPID:
-        if (current == 0) {
-            frame->x[0] = (uint64_t)ERR_INVAL;
-        } else {
-            frame->x[0] = current->pid;
-        }
-        break;
-    case SYS_SPAWN:
-        frame->x[0] = (uint64_t)sys_spawn(current, frame->x[0], frame->x[1]);
-        break;
-    case SYS_SPAWN_ARGV:
-        frame->x[0] = (uint64_t)sys_spawn_argv(current, frame->x[0],
-                                               frame->x[1], frame->x[2],
-                                               frame->x[3]);
-        break;
-    case SYS_WAIT:
-        frame->x[0] = (uint64_t)sys_wait(frame->x[0]);
-        break;
-    case SYS_KILL:
-        frame->x[0] = (uint64_t)sys_kill(frame->x[0]);
-        break;
-    case SYS_OPEN:
-        frame->x[0] = (uint64_t)sys_open(current, frame->x[0], frame->x[1]);
-        break;
-    case SYS_CLOSE:
-        frame->x[0] = (uint64_t)sys_close(frame->x[0]);
-        break;
-    case SYS_READ:
-        frame->x[0] = (uint64_t)sys_read(current, frame->x[0], frame->x[1],
-                                         frame->x[2]);
-        break;
-    case SYS_MMAP:
-        frame->x[0] = (uint64_t)sys_mmap(current, frame->x[0], frame->x[1],
-                                         frame->x[2]);
-        break;
-    case SYS_MUNMAP:
-        frame->x[0] = (uint64_t)sys_munmap(current, frame->x[0], frame->x[1]);
-        break;
-    case SYS_WRITE:
-        frame->x[0] = (uint64_t)sys_write(current, frame->x[0], frame->x[1],
-                                          frame->x[2]);
-        break;
-    case SYS_SEEK:
-        frame->x[0] = (uint64_t)sys_seek(frame->x[0], frame->x[1], frame->x[2]);
-        break;
-    case SYS_STAT:
-        frame->x[0] = (uint64_t)sys_stat(current, frame->x[0], frame->x[1]);
-        break;
-    case SYS_READDIR:
-        frame->x[0] = (uint64_t)sys_readdir(current, frame->x[0],
-                                            frame->x[1], frame->x[2]);
-        break;
-    case SYS_UNLINK:
-        frame->x[0] = (uint64_t)sys_unlink(current, frame->x[0]);
-        break;
-    case SYS_RENAME:
-        frame->x[0] = (uint64_t)sys_rename(current, frame->x[0],
-                                           frame->x[1]);
-        break;
-    case SYS_IPC_SEND:
-        frame->x[0] = (uint64_t)sys_ipc_send(current, frame->x[0],
-                                             frame->x[1], frame->x[2]);
-        break;
-    case SYS_IPC_RECV:
-        frame->x[0] = (uint64_t)sys_ipc_recv(current, frame->x[0],
-                                             frame->x[1]);
-        break;
-    case SYS_WINDOW_CREATE:
-        frame->x[0] = (uint64_t)sys_window_create(current, frame->x[0],
-                                                  frame->x[1], frame->x[2],
-                                                  frame->x[3], frame->x[4],
-                                                  frame->x[5], frame->x[6]);
-        break;
-    case SYS_WINDOW_DESTROY:
-        frame->x[0] = (uint64_t)sys_window_destroy(current, frame->x[0]);
-        break;
-    case SYS_WINDOW_DRAW_TEXT:
-        frame->x[0] = (uint64_t)sys_window_draw_text(current, frame->x[0],
-                                                     frame->x[1], frame->x[2],
-                                                     frame->x[3],
-                                                     frame->x[4]);
-        break;
-    case SYS_WINDOW_DRAW_RECT:
-        frame->x[0] = (uint64_t)sys_window_draw_rect(current, frame->x[0],
-                                                     frame->x[1], frame->x[2],
-                                                     frame->x[3], frame->x[4],
-                                                     frame->x[5]);
-        break;
-    case SYS_WINDOW_EVENT:
-        frame->x[0] = (uint64_t)sys_window_event(current, frame->x[0],
-                                                 frame->x[1], frame->x[2]);
-        break;
-    case SYS_WINDOW_SET_TITLE:
-        frame->x[0] = (uint64_t)sys_window_set_title(current, frame->x[0],
-                                                     frame->x[1],
-                                                     frame->x[2]);
-        break;
-    case SYS_WINDOW_REDRAW:
-        frame->x[0] = (uint64_t)sys_window_redraw(current, frame->x[0]);
-        break;
-    case SYS_WINDOW_FOCUS:
-        frame->x[0] = (uint64_t)sys_window_focus(current, frame->x[0]);
-        break;
-    case SYS_WINDOW_FOR_PID:
-        frame->x[0] = (uint64_t)sys_window_for_pid(current, frame->x[0],
-                                                   frame->x[1]);
-        break;
-    case SYS_CURSOR_SET_SHAPE:
-        frame->x[0] = (uint64_t)sys_cursor_set_shape(current, frame->x[0]);
-        break;
-    case SYS_WINDOW_FLUSH:
-        frame->x[0] = (uint64_t)sys_window_flush(current, frame->x[0],
-                                                  frame->x[1], frame->x[2],
-                                                  frame->x[3], frame->x[4]);
-        break;
-    case SYS_WINDOW_GET_BOUNDS:
-        frame->x[0] = (uint64_t)sys_window_get_bounds(current, frame->x[0],
-                                                      frame->x[1]);
-        break;
-    case SYS_WINDOW_SET_BOUNDS:
-        frame->x[0] = (uint64_t)sys_window_set_bounds(current, frame->x[0],
-                                                      frame->x[1],
-                                                      frame->x[2], frame->x[3],
-                                                      frame->x[4]);
-        break;
-    case SYS_WINDOW_MINIMIZE:
-        frame->x[0] = (uint64_t)sys_window_minimize(current, frame->x[0]);
-        break;
-    case SYS_WINDOW_RESTORE:
-        frame->x[0] = (uint64_t)sys_window_restore(current, frame->x[0]);
-        break;
-    case SYS_WINDOW_STATE:
-        frame->x[0] = (uint64_t)sys_window_state(current, frame->x[0],
-                                                  frame->x[1]);
-        break;
-    case SYS_CURSOR_REGISTER_REGION:
-        frame->x[0] = (uint64_t)sys_cursor_register_region(
-            current, frame->x[0], frame->x[1], frame->x[2], frame->x[3],
-            frame->x[4], frame->x[5], frame->x[6]);
-        break;
-    case SYS_TIMEINFO:
-        frame->x[0] = (uint64_t)sys_timeinfo(current, frame->x[0]);
-        break;
-    case SYS_MEMINFO:
-        frame->x[0] = (uint64_t)sys_meminfo(current, frame->x[0]);
-        break;
-    case SYS_PROCLIST:
-        frame->x[0] = (uint64_t)sys_proclist(current, frame->x[0],
-                                             frame->x[1]);
-        break;
-    default:
-        frame->x[0] = (uint64_t)ERR_INVAL;
-        break;
+    } else {
+        frame->x[0] = syscall_call(current, frame->x);
     }
 
     process_t *after = process_current();

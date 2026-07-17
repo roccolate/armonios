@@ -21,7 +21,7 @@ The exact RAM range comes from the DTB. Board physical addresses must remain in 
 
 The experimental RPi4 linker script uses `0x80000` as its kernel link address.
 
-This address is a planning assumption only. There is no recorded clean RPi4 build, physical boot, or validated firmware configuration. The RPi4 memory map must not be treated as supported until the hardware criteria in `DOCUMENTATION_POLICY.md` are satisfied.
+This address is build-verified by `tests/run_board_build_test.sh`, but it is still a planning assumption for hardware. There is no physical boot or validated firmware configuration. The RPi4 memory map must not be treated as supported until the hardware criteria in `DOCUMENTATION_POLICY.md` are satisfied.
 
 ## QEMU MMIO
 
@@ -41,14 +41,13 @@ The kernel currently uses an identity-mapped lower-half design.
 
 For the bootstrap table and every process table:
 
-- the detected RAM range is identity-mapped;
-- that RAM mapping is EL1 read/write/execute;
+- the detected RAM range is identity-mapped with kernel W^X permissions;
 - board MMIO is identity-mapped as device memory and execute-never;
 - TTBR1 is disabled;
 - TTBR0 contains both user mappings and the kernel identity map;
 - a process switch changes TTBR0 and performs a global EL1 TLB invalidation.
 
-EL0 cannot use the kernel mappings merely because they exist in TTBR0: kernel RAM entries are not marked user-accessible. Kernel W^X is now enforced (RISK-008, text RX, data+bss+stack RW+NX, MMIO device+NX, remaining RAM RW+NX) but the design still duplicates kernel mappings for every process and does not use ASIDs (future v1.1 work).
+EL0 cannot use the kernel mappings merely because they exist in TTBR0: kernel RAM entries are not marked user-accessible. Kernel W^X is enforced (RISK-008, text RX, rodata R/NX, data+bss+stack RW/NX, MMIO device+NX, remaining RAM RW/NX) but the design still duplicates kernel mappings for every process and does not use ASIDs (future v1.1 work).
 
 Target direction:
 
@@ -87,17 +86,18 @@ Each process owns up to eight registered user ranges. A range records:
 - physical backing address when known;
 - ownership flags used for cleanup.
 
-The current region flags do **not** record effective read/write/execute permissions for syscall validation.
+The region flags record ownership, not effective permissions. Syscall validation therefore uses the region table for ownership/range and the process page table for read/write permission.
 
 Consequences:
 
 - pointers are checked against the current process only;
 - crossing a region boundary is rejected;
 - a zero-length query is accepted for a non-null process;
-- image, stack, and anonymous ranges can all satisfy the same membership test;
-- kernel-to-user syscalls do not currently prove that a destination is writable.
+- image, stack, and anonymous ranges can all satisfy the ownership/range test;
+- kernel-to-user syscalls prove that destination pages are writable by checking EL0 leaf PTEs;
+- copies are not fault-contained if an unexpected translation fault occurs after validation.
 
-Do not describe `sys_user_buf_out()` as validating a writable buffer until `RISK-001` is closed.
+`RISK-001` is closed for permission-aware validation; fault-contained copy remains future hardening.
 
 ## User mappings
 
@@ -146,4 +146,4 @@ Process cleanup currently releases:
 - the process page-table hierarchy;
 - process-owned GUI windows through the centralized exit path.
 
-File descriptors are not part of process-owned cleanup because the VFS descriptor table is global. This is tracked by `RISK-002`.
+Process cleanup also closes every VFS descriptor owned by the process through `vfs_close_all_for_pid()`. `RISK-002` is closed for descriptor ownership and cleanup.

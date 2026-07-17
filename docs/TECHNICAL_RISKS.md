@@ -16,7 +16,7 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 |---|---:|---|---|---|
 | RISK-003 | P1 | QEMU desktop target | WIRING FIX VERIFIED; INTERACTION OPEN | `qemu-fb-visible` attaches FAT32 with GPU; deterministic wiring gate passes; the visible create/edit/save/rename/reopen/delete workflow still needs a named human tester on a real QEMU display. |
 | RISK-004 | P1 | Desktop focus | WIRING FIX VERIFIED; INTERACTION OPEN | New userland windows request focus; the focus syscall path is exercised end-to-end by `tools/qemu_focus_test.sh`; the visible files-to-editor flow still needs a named human tester on a real QEMU display. |
-| RISK-006 | P1 | Raspberry Pi 4 build | CLOSED 2026-07-16 (next commit) | `make BOARD=rpi4` now compiles, links, and stays under the kernel size gate via explicit safe-failure stubs in `drivers/boards/rpi4/board.c`. |
+| RISK-006 | P1 | Raspberry Pi 4 build | CLOSED 2026-07-16 (next commit); CONTRACT UPDATED 2026-07-17 | `make BOARD=rpi4` compiles, links, and stays under the kernel size gate. Display/input are generic board calls with explicit RPi4 safe failures. |
 | RISK-007 | P0 for hardware track | Raspberry Pi storage | OPEN | The current eMMC implementation is contradictory and not hardware-validated. |
 | RISK-008 | P1 | Memory protection | CLOSED | W^X enforced: kernel text RX, data+bss+stack RW+NX, MMIO device+NX, remaining RAM RW+NX. Rodata still merged with data (shares a page). |
 | RISK-009 | P1 | KLI1 application format | CLOSED 2026-07-16 (next commit) | Mutable `.data`/`.bss` is now explicitly forbidden by `programs/apps/image.ld` and verified by `tests/run_kli1_contract_test.sh`. |
@@ -31,7 +31,7 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 
 The documented visible FAT workflow used `make qemu-fb-visible`, but that target attached GPU and input devices without the generated virtio block image. The `files` application therefore reported FAT as unavailable.
 
-The target now depends on `$(VIRTIO_BLK_IMG)` and attaches it through `virtio-blk-device`. This removes the static wiring defect. A new automated gate, `tools/qemu_fb_fat_test.sh`, boots QEMU with both `virtio-gpu-device` and the generated virtio block attached, captures the serial log, and asserts `FAT32: mounted`, `FAT32 root: mounted`, `VIRTIO gpu: windows`, and `panel: ready` all appear in the same run. The gate is part of `tools/verify.sh` so the wiring cannot silently regress.
+The target now depends on `$(VIRTIO_BLK_IMG)` and attaches it through `virtio-blk-device`. This removes the static wiring defect. The automated gate `tools/qemu_fb_fat_test.sh` boots QEMU with both `virtio-gpu-device` and the generated virtio block attached, captures the serial log, and asserts `FAT32: mounted`, `FAT32 root: mounted`, `display: windows`, and `panel: ready` all appear in the same run. The gate is part of `tools/verify.sh` so the wiring cannot silently regress.
 
 The remaining gap is the interactive create/edit/save/rename/reopen/delete workflow through the visible GUI. Headless QEMU serial automation cannot prove that a named user sees the expected sequence on a real display, so that part remains pending a named tester on a real QEMU display.
 
@@ -74,14 +74,14 @@ bash tools/qemu_fb_fat_test.sh
 
 **Closing evidence on `9157aa2`:**
 
-- `bash tools/qemu_marker_test.sh fb` passes; `build/qemu-fb-test.log` contains `VIRTIO gpu: windows` and `panel: ready`.
+- `bash tools/qemu_marker_test.sh fb` passes; `build/qemu-fb-test.log` contains `display: windows` and `panel: ready`.
 - `bash tools/qemu_marker_test.sh usb` passes; `build/qemu-usb-test.log` contains `USB: controller initialized`, `USB: enumeration ok`, and `USB HID: 2 devices`.
 - `bash tools/qemu_marker_test.sh net` passes; `build/qemu-net-test.log` contains `network: initialized` and `[net] DHCP ack: IP=10.0.2.15 gw=IP=10.0.2.2`.
-- `bash tools/qemu_fb_fat_test.sh` passes; `build/qemu-fb-fat-test.log` contains `FAT32: mounted`, `FAT32 root: mounted`, `VIRTIO gpu: windows`, and `panel: ready` in the same boot, confirming the visible target wires FAT and GPU together.
+- `bash tools/qemu_fb_fat_test.sh` passes; `build/qemu-fb-fat-test.log` contains `FAT32: mounted`, `FAT32 root: mounted`, `display: windows`, and `panel: ready` in the same boot, confirming the visible target wires FAT and display together.
 
 **Exit criteria:** the four QEMU gates above all pass on real QEMU for an exact `main` commit, and their captured logs are recorded against that commit.
 
-## RISK-006 — Raspberry Pi board contract is incomplete
+## RISK-006 — Raspberry Pi board build contract
 
 **Severity:** P1
 **Affected release:** v1.5 hardware bring-up
@@ -89,7 +89,7 @@ bash tools/qemu_fb_fat_test.sh
 
 The generic board contract requires functions the current RPi4 backend does not provide. The repository must not claim `BOARD=rpi4` is build-verified until a clean compile and link is recorded.
 
-The kernel calls three virtio-input functions that the original RPi4 backend did not implement: `board_virtio_input_irq`, `board_virtio_input_init`, `board_virtio_input_poll`. They were added as explicit safe-failure stubs in `drivers/boards/rpi4/board.c`. `init_input()` already treats a non-zero `board_virtio_input_init()` return as "device absent" and continues with serial input, so the stubs preserve the existing behaviour for cases without a virtio-input device.
+The board contract now exposes generic `board_input_*` and `board_display_*` entry points plus capability flags. QEMU implements those paths through virtio internally. RPi4 returns explicit safe failures for unsupported display/input paths, so the generic kernel can link and continue with serial-only bring-up.
 
 **Closing evidence on the closing commit:**
 
@@ -229,7 +229,7 @@ No risk may be moved here without the evidence and exit criteria required by `DO
 **Affected release:** v1.0 QEMU desktop
 **Closing commit:** `9157aa2360fa346dd98e9c64ac2050f8af111ce9`
 
-**Summary of what was open:** the legacy `qemu-fb`, `qemu-usb`, and `qemu-net` Make targets were launch commands that relied on `timeout` alone. A VM that hung after partial initialisation was indistinguishable from a successful timed smoke run, and the per-subsystem markers (`VIRTIO gpu: windows`, `USB: enumeration ok`, `network: initialized`, etc.) were never asserted automatically.
+**Summary of what was open:** the legacy `qemu-fb`, `qemu-usb`, and `qemu-net` Make targets were launch commands that relied on `timeout` alone. A VM that hung after partial initialisation was indistinguishable from a successful timed smoke run, and the per-subsystem markers (`display: windows`, `USB: enumeration ok`, `network: initialized`, etc.) were never asserted automatically.
 
 **Closing evidence on `9157aa2`:**
 
@@ -238,10 +238,10 @@ No risk may be moved here without the evidence and exit criteria required by `DO
 - `tools/qemu_fb_fat_test.sh` is the visible-desktop wiring gate (see RISK-003).
 - All four QEMU gates are wired into `tools/verify.sh`, so the baseline fails fast if any subsystem regresses.
 - Captured logs on `9157aa2`:
-  - `build/qemu-fb-test.log` — `VIRTIO gpu: windows`, `panel: ready`.
+  - `build/qemu-fb-test.log` — `display: windows`, `panel: ready`.
   - `build/qemu-usb-test.log` — `USB: controller initialized`, `USB: enumeration ok`, `USB HID: 2 devices`.
   - `build/qemu-net-test.log` — `network: initialized`, `[net] DHCP ack: IP=10.0.2.15 gw=IP=10.0.2.2`.
-  - `build/qemu-fb-fat-test.log` — `FAT32: mounted`, `FAT32 root: mounted`, `VIRTIO gpu: windows`, `panel: ready`.
+  - `build/qemu-fb-fat-test.log` — `FAT32: mounted`, `FAT32 root: mounted`, `display: windows`, `panel: ready`.
 
 ### RISK-009 (CLOSED 2026-07-16, committed next baseline)
 
@@ -261,7 +261,7 @@ No risk may be moved here without the evidence and exit criteria required by `DO
 **Closing commit:** pending on the next commit
 **Documented at:** `drivers/boards/rpi4/board.c`, `tests/run_board_build_test.sh`
 
-**Summary of what was open:** `make BOARD=rpi4` failed to link because generic kernel code calls three virtio-input functions that the RPi4 backend never defined (`board_virtio_input_irq`, `board_virtio_input_init`, `board_virtio_input_poll`). The repository therefore could not claim `BOARD=rpi4` is build-verified.
+**Summary of what was open:** `make BOARD=rpi4` failed to link because generic kernel code called board functions that the RPi4 backend did not define. The repository therefore could not claim `BOARD=rpi4` is build-verified.
 
 **Closing evidence:** the three functions are now defined as explicit safe-failure stubs in `drivers/boards/rpi4/board.c` (`irq = 0`, `init = -1`, `poll = -1`). `tools/verify.sh` runs `tests/run_board_build_test.sh` which builds `BOARD=rpi4` cleanly into `build-rpi4/` and asserts the resulting kernel size gate (97312 bytes against a 100000-byte limit). `BOARD=qemu_virt` continues to build cleanly at 97344 bytes.
 

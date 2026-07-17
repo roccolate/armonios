@@ -1,5 +1,6 @@
 #include "boards/qemu_virt/board.h"
 
+#include "gpu/virtio_gpu.h"
 #include "input/virtio_input.h"
 #include "irq/gicv2.h"
 #include "kernel/mm/vmm.h"
@@ -8,6 +9,8 @@
 
 static virtio_blk_device_t g_blk_dev;
 static virtio_input_device_t g_input_dev;
+static uint64_t g_display_base;
+static uint8_t g_display_ready;
 
 int board_storage_read(uint32_t lba, uint32_t count, void *buffer) {
     uint8_t *bytes = (uint8_t *)buffer;
@@ -61,6 +64,11 @@ int board_storage_init(void) {
 
 const char *board_name(void) {
     return "qemu-virt";
+}
+
+uint32_t board_capabilities(void) {
+    return BOARD_CAP_STORAGE | BOARD_CAP_DISPLAY | BOARD_CAP_INPUT |
+           BOARD_CAP_NET | BOARD_CAP_PCI | BOARD_CAP_USB;
 }
 
 void board_early_init(void) {
@@ -128,9 +136,9 @@ int board_map_mmio(uint64_t *pgd) {
                                VMM_FLAG_READ | VMM_FLAG_WRITE | VMM_FLAG_DEVICE);
     }
     if (status != 0) {
-        uart_puts("ECAM map: failed\n");
+        uart_puts("ECAM: fail\n");
     } else {
-        uart_puts("ECAM map: ok\n");
+        uart_puts("ECAM: ok\n");
     }
 
     if (status == 0) {
@@ -143,11 +151,40 @@ int board_map_mmio(uint64_t *pgd) {
     return status;
 }
 
-uint32_t board_virtio_input_irq(void) {
+int board_display_init(board_display_draw_fn_t draw, void *context) {
+    uint64_t gpu_base;
+
+    g_display_base = 0;
+    g_display_ready = 0;
+    if (draw == 0) {
+        return -1;
+    }
+    if (virtio_gpu_probe_range(QEMU_VIRT_VIRTIO_MMIO_BASE,
+                               QEMU_VIRT_VIRTIO_MMIO_SIZE,
+                               QEMU_VIRT_VIRTIO_MMIO_STRIDE,
+                               &gpu_base) != 0) {
+        return -1;
+    }
+    if (virtio_gpu_draw(gpu_base, draw, context) != 0) {
+        return -1;
+    }
+    g_display_base = gpu_base;
+    g_display_ready = 1;
+    return 0;
+}
+
+int board_display_redraw(board_display_draw_fn_t draw, void *context) {
+    if (draw == 0 || g_display_ready == 0U) {
+        return -1;
+    }
+    return virtio_gpu_draw(g_display_base, draw, context);
+}
+
+uint32_t board_input_irq(void) {
     return QEMU_VIRT_VIRTIO_INPUT_IRQ;
 }
 
-int board_virtio_input_init(void) {
+int board_input_init(void) {
     uint64_t input_base;
 
     if (virtio_input_probe_range(QEMU_VIRT_VIRTIO_MMIO_BASE,
@@ -160,6 +197,6 @@ int board_virtio_input_init(void) {
     return virtio_input_init(&g_input_dev, input_base);
 }
 
-int board_virtio_input_poll(void) {
+int board_input_poll(void) {
     return virtio_input_poll(&g_input_dev);
 }

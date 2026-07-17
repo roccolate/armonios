@@ -17,13 +17,13 @@ The panel is a compact 40-pixel dock without a visible title bar. The kernel cla
 - `GUI_WINDOW_NO_DRAG`;
 - `GUI_WINDOW_SKIP_TASKBAR`.
 
-The taskbar is one row:
+The dock is one row:
 
 ```text
-[ Apps ] [ Shell ] [ Editor ] [ Files ] [ Monitor ]         [ 00:00:00 ]
+[ Apps ] [ > ] [ E ] [ F ] [ M ]                            [ 00:00:00 ]
 ```
 
-The first four applications are pinned. The clock area is both an uptime display and the task control for Clock.
+The first four applications are pinned compact launchers. Their labels live in the Apps menu; the dock uses compact ASCII glyph icons drawn with the existing text primitive. The clock area is both a session-time display and the task control for Clock.
 
 Each task target follows these rules:
 
@@ -63,7 +63,7 @@ The panel deliberately retains the existing neutral palette. State is communicat
 - focused: wide bottom marker plus an inner top line;
 - minimized: split bottom marker;
 - multiple instances: small marks in the upper-right corner;
-- hover: existing hover background and hand cursor region;
+- hover: hand cursor region only on the main dock; the dock does not repaint on mouse move;
 - open application menu: marker under the Apps control.
 
 No color or theme decision should be inferred from this implementation.
@@ -114,7 +114,7 @@ The following still require separate review:
 - global shortcuts such as Super and Alt-Tab;
 - compositor-to-panel lifecycle events replacing polling;
 - pin reordering or persistent settings;
-- icons and color theme work;
+- richer icon artwork and color theme work;
 - tooltips and context menus.
 
 Do not add placeholder controls for deferred behavior. Every visible control in the shipping panel must perform a real action.

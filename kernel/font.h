@@ -23,6 +23,10 @@ void font_draw_text(fb_t *fb, uint32_t x, uint32_t y, const char *text,
                     uint32_t color);
 void font_draw_text_clipped(fb_t *fb, uint32_t x, uint32_t y, uint32_t max_h,
                             const char *text, uint32_t color);
+void font_draw_text_rect_clipped(fb_t *fb, uint32_t x, uint32_t y,
+                                 uint32_t max_h, int32_t cx0, int32_t cy0,
+                                 int32_t cx1, int32_t cy1,
+                                 const char *text, uint32_t color);
 /*
  * Pixel width of the widest line in a text run. Newlines reset the current
  * run; they do not add width. The width does not include any trailing NUL.
