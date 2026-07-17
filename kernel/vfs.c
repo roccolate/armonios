@@ -3,11 +3,8 @@
 #include <stdint.h>
 
 #include "kernel/fat32.h"
-<<<<<<< HEAD
 #include "kernel/process.h"
-=======
 #include "kernel/kstring.h"
->>>>>>> 6022217 (refactor: consolidate duplicate strcmp into shared kstreq())
 
 /*
  * Small in-kernel virtual filesystem.
