@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "include/armonios/app_catalog.h"
 #include "kernel/boot_program.h"
 #include "kernel/kstring.h"
 #include "kernel/vfs.h"
@@ -20,12 +21,9 @@ typedef struct {
 } bootfs_entry_t;
 
 static const bootfs_entry_t g_bootfs_entries[] = {
-    { "shell", "/armonios/shell" },
-    { "editor", "/armonios/editor" },
-    { "files", "/armonios/files" },
-    { "monitor", "/armonios/monitor" },
-    { "panel", "/armonios/panel" },
-    { "clock", "/armonios/clock" },
+#define BOOTFS_ENTRY(id, label, path, pinned, is_clock) { #id, path },
+    ARMONIOS_BOOT_APP_CATALOG(BOOTFS_ENTRY)
+#undef BOOTFS_ENTRY
 };
 
 #define BOOTFS_ENTRY_COUNT \

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Verifies the KLI1 mutable-storage contract on the six shipping apps.
+# Verifies the KLI1 mutable-storage contract on the shipping apps.
 #
 # The .user_image layout (programs/apps/image.ld) forbids .data and .bss in
 # the flat image. Any app needing mutable static state must obtain it through
@@ -66,7 +66,9 @@ assert_negative_case() {
 passed=0
 failed=0
 
-for app in clock editor files monitor shell panel; do
+apps=(clock editor files monitor shell panel control)
+
+for app in "${apps[@]}"; do
     if check_elf_clean "$BIN_DIR/$app.elf" "$app"; then
         printf 'PASS: %s ELF has no .data or .bss sections\n' "$app"
         passed=$((passed + 1))
@@ -89,7 +91,7 @@ int main(int argc, char **argv) {
 }
 SRC
 
-for app in clock editor files monitor shell panel; do
+for app in "${apps[@]}"; do
     if assert_negative_case "$app" "$REGR_SRC"; then
         printf 'PASS: %s bss-regression rejected by KLI1 contract\n' "$app"
         passed=$((passed + 1))

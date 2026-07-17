@@ -140,4 +140,9 @@ int virtio_input_init(virtio_input_device_t *device, uint64_t base);
 int virtio_input_poll(virtio_input_device_t *device);
 int virtio_input_has_events(virtio_input_device_t *device);
 
+/* Translate Linux input-event keycodes from virtio-input into the
+ * kernel's shared input key space. Exposed for host tests. */
+uint32_t virtio_input_key_to_input_key(uint16_t code, uint8_t shifted,
+                                       uint8_t ctrl);
+
 #endif

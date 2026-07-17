@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "input/input.h"
+#include "input/keymap.h"
 #include "kernel/kernel_compiler.h"
 #include "uart/pl011.h"
 
@@ -74,6 +76,125 @@ static virtq_desc_t g_desc[VIRTIO_INPUT_QUEUE_SIZE] KERNEL_ALIGNED(16);
 static virtq_avail_t g_avail KERNEL_ALIGNED(2);
 static virtq_used_t g_used KERNEL_ALIGNED(4);
 static virtio_input_event_t g_events[VIRTIO_INPUT_QUEUE_SIZE] KERNEL_ALIGNED(8);
+static uint8_t g_shift_down;
+static uint8_t g_ctrl_down;
+static uint32_t g_pressed_values[128];
+
+static uint8_t linux_letter(uint16_t code) {
+    static const char top[] = "qwertyuiop";
+    static const char home[] = "asdfghjkl";
+    static const char bottom[] = "zxcvbnm";
+
+    if (code >= 16U && code <= 25U) {
+        return (uint8_t)top[code - 16U];
+    }
+    if (code >= 30U && code <= 38U) {
+        return (uint8_t)home[code - 30U];
+    }
+    if (code >= 44U && code <= 50U) {
+        return (uint8_t)bottom[code - 44U];
+    }
+    return 0;
+}
+
+static uint8_t shift_digit(uint8_t digit) {
+    static const char shifted[] = ")!@#$%^&*(";
+
+    if (digit >= '0' && digit <= '9') {
+        return (uint8_t)shifted[digit - '0'];
+    }
+    return digit;
+}
+
+static uint8_t linux_key_ascii(uint16_t code, uint8_t shifted) {
+    uint8_t letter = linux_letter(code);
+    if (letter != 0) {
+        return shifted ? (uint8_t)(letter - ('a' - 'A')) : letter;
+    }
+    if (code >= 2U && code <= 10U) {
+        uint8_t digit = (uint8_t)('1' + code - 2U);
+        return shifted ? shift_digit(digit) : digit;
+    }
+
+    switch (code) {
+    case 1U: return 0x1BU;
+    case 11U: return shifted ? ')' : '0';
+    case 12U: return shifted ? '_' : '-';
+    case 13U: return shifted ? '+' : '=';
+    case 14U: return '\b';
+    case 15U: return '\t';
+    case 26U: return shifted ? '{' : '[';
+    case 27U: return shifted ? '}' : ']';
+    case 28U: return '\n';
+    case 39U: return shifted ? ':' : ';';
+    case 40U: return shifted ? '"' : '\'';
+    case 41U: return shifted ? '~' : '`';
+    case 43U: return shifted ? '|' : '\\';
+    case 51U: return shifted ? '<' : ',';
+    case 52U: return shifted ? '>' : '.';
+    case 53U: return shifted ? '?' : '/';
+    case 57U: return ' ';
+    case 71U: return '7';
+    case 72U: return '8';
+    case 73U: return '9';
+    case 74U: return '-';
+    case 75U: return '4';
+    case 76U: return '5';
+    case 77U: return '6';
+    case 78U: return '+';
+    case 79U: return '1';
+    case 80U: return '2';
+    case 81U: return '3';
+    case 82U: return '0';
+    case 83U: return '.';
+    case 96U: return '\n';
+    default: return 0;
+    }
+}
+
+uint32_t virtio_input_key_to_input_key(uint16_t code, uint8_t shifted,
+                                       uint8_t ctrl) {
+    if (ctrl) {
+        uint8_t base = linux_letter(code);
+        if (base != 0) {
+            return input_key_from_ctrl_letter(base);
+        }
+    }
+
+    switch (code) {
+    case 102U: return input_key_from_nav(INPUT_NAV_HOME);
+    case 103U: return input_key_from_nav(INPUT_NAV_UP);
+    case 104U: return input_key_from_nav(INPUT_NAV_PGUP);
+    case 105U: return input_key_from_nav(INPUT_NAV_LEFT);
+    case 106U: return input_key_from_nav(INPUT_NAV_RIGHT);
+    case 107U: return input_key_from_nav(INPUT_NAV_END);
+    case 108U: return input_key_from_nav(INPUT_NAV_DOWN);
+    case 109U: return input_key_from_nav(INPUT_NAV_PGDN);
+    case 110U: return input_key_from_nav(INPUT_NAV_INSERT);
+    case 111U: return input_key_from_nav(INPUT_NAV_DELETE);
+    default:
+        break;
+    }
+
+    return linux_key_ascii(code, shifted);
+}
+
+static uint8_t virtio_input_modifier_code(uint16_t code, uint8_t *modifier) {
+    if (modifier == 0) {
+        return 0;
+    }
+    if (code == VIRTIO_INPUT_KEY_LEFTSHIFT ||
+        code == VIRTIO_INPUT_KEY_RIGHTSHIFT) {
+        *modifier = 1;
+        return 1;
+    }
+    if (code == VIRTIO_INPUT_KEY_LEFTCTRL ||
+        code == VIRTIO_INPUT_KEY_RIGHTCTRL) {
+        *modifier = 2;
+        return 1;
+    }
+    return 0;
+}
 
 static volatile uint32_t *virtio_reg(uint64_t base, uint32_t offset) {
     return (volatile uint32_t *)(uintptr_t)(base + offset);
@@ -195,6 +316,11 @@ int virtio_input_init(virtio_input_device_t *device, uint64_t base) {
     device->ready = 0;
     device->queue_size = 0;
     device->last_used_idx = 0;
+    g_shift_down = 0;
+    g_ctrl_down = 0;
+    for (uint32_t i = 0; i < 128U; i++) {
+        g_pressed_values[i] = 0;
+    }
 
     uint8_t status = 0;
     status |= VIRTIO_STATUS_ACKNOWLEDGE;
@@ -264,9 +390,41 @@ int virtio_input_poll(virtio_input_device_t *device) {
                 input_queue_push(&event);
                 break;
             }
-            event.type = (ev->value) ? INPUT_EVENT_KEY_PRESS : INPUT_EVENT_KEY_RELEASE;
-            event.data.key.key = ev->code;
-            input_queue_push(&event);
+            {
+                uint8_t modifier = 0;
+                if (virtio_input_modifier_code(ev->code, &modifier)) {
+                    if (modifier == 1) {
+                        g_shift_down = ev->value != 0 ? 1U : 0U;
+                    } else {
+                        g_ctrl_down = ev->value != 0 ? 1U : 0U;
+                    }
+                    break;
+                }
+
+                uint32_t key;
+                if (ev->value != 0) {
+                    key = virtio_input_key_to_input_key(
+                        ev->code, g_shift_down, g_ctrl_down);
+                    if (ev->code < 128U) {
+                        g_pressed_values[ev->code] = key;
+                    }
+                    event.type = INPUT_EVENT_KEY_PRESS;
+                } else {
+                    key = ev->code < 128U ? g_pressed_values[ev->code] : 0;
+                    if (key == 0) {
+                        key = virtio_input_key_to_input_key(
+                            ev->code, g_shift_down, g_ctrl_down);
+                    }
+                    if (ev->code < 128U) {
+                        g_pressed_values[ev->code] = 0;
+                    }
+                    event.type = INPUT_EVENT_KEY_RELEASE;
+                }
+                if (key != 0) {
+                    event.data.key.key = key;
+                    input_queue_push(&event);
+                }
+            }
             break;
         case VIRTIO_INPUT_EV_REL:
             if (ev->code == 0 || ev->code == 1) {

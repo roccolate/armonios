@@ -60,12 +60,7 @@ void uart_irq_handler(void *context) {
 
     while ((*uart_reg(UART_FR) & UART_FR_RXFE) == 0) {
         char c = (char)(*uart_reg(UART_DR) & 0xffU);
-        input_event_t event = {
-            .type = INPUT_EVENT_KEY_PRESS,
-            .timestamp = 0,
-            .data.key.key = (uint32_t)(uint8_t)c,
-        };
-        (void)input_queue_push(&event);
+        (void)input_inject_byte((uint8_t)c);
     }
 
     *uart_reg(UART_ICR) = UART_INT_RX | UART_INT_RT;
@@ -78,13 +73,7 @@ void uart_pump_input(void) {
 
     while ((*uart_reg(UART_FR) & UART_FR_RXFE) == 0) {
         char c = (char)(*uart_reg(UART_DR) & 0xffU);
-        input_event_t event = {
-            .type = INPUT_EVENT_KEY_PRESS,
-            .timestamp = 0,
-            .data.key.key = (uint32_t)(uint8_t)c,
-        };
-        (void)input_queue_push(&event);
+        (void)input_inject_byte((uint8_t)c);
     }
 }
-
 

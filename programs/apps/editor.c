@@ -329,6 +329,21 @@ static void print_argv(int argc, char **argv) {
 #define INPUT_KEY_RIGHT 0x104
 #define INPUT_KEY_UP    0x101
 #define INPUT_KEY_DOWN  0x102
+#define INPUT_KEY_HOME  0x107
+#define INPUT_KEY_END   0x108
+#define INPUT_KEY_DELETE 0x10a
+
+static int editor_delete(editor_state_t *e) {
+    if (e->caret >= e->file_len) {
+        return -1;
+    }
+    for (size_t i = e->caret; i + 1 < e->file_len; i++) {
+        e->file[i] = e->file[i + 1];
+    }
+    e->file_len--;
+    e->file[e->file_len] = '\0';
+    return 0;
+}
 
 int main(int argc, char **argv) {
     char path[PATH_CAP];
@@ -390,8 +405,19 @@ int main(int argc, char **argv) {
                 } else if (key == INPUT_KEY_DOWN) {
                     editor_down(e);
                     dirty = 1;
+                } else if (key == INPUT_KEY_HOME) {
+                    e->caret = editor_line_start(e, e->caret);
+                    dirty = 1;
+                } else if (key == INPUT_KEY_END) {
+                    e->caret = editor_line_end(e, e->caret);
+                    dirty = 1;
                 } else if (key == 8 || key == 127) {
                     if (editor_backspace(e) == 0) {
+                        copy_cstr(e->status, sizeof(e->status), "MODIFIED");
+                        dirty = 1;
+                    }
+                } else if (key == INPUT_KEY_DELETE) {
+                    if (editor_delete(e) == 0) {
                         copy_cstr(e->status, sizeof(e->status), "MODIFIED");
                         dirty = 1;
                     }

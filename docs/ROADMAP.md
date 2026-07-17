@@ -9,7 +9,7 @@ Status claims must follow `DOCUMENTATION_POLICY.md`. Active blockers and their e
 **Current state:** v0.9 QEMU desktop alpha  
 **Goal:** a repeatable QEMU desktop whose core process, file, GUI, and test contracts can be trusted.
 
-A v1.0 release candidate is not reached merely because the desktop appears. All P0 risks affecting QEMU v1.0 must be closed, mandatory runtime gates must assert success, and the visible FAT workflow must have a dated manual result.
+A v1.0 release candidate is not reached merely because the desktop appears. All P0 risks affecting QEMU v1.0 must be closed, mandatory runtime gates must assert success, the visible FAT workflow must have a dated manual result, and CI-hosted reproducibility must be recorded.
 
 ## Phase 0 — Documentation and baseline recovery
 
@@ -50,24 +50,32 @@ These two items block v1.0 regardless of desktop polish because they affect kern
 - [x] Make `qemu-fb-visible` depend on `$(VIRTIO_BLK_IMG)`.
 - [x] Attach the image through `virtio-blk-device`.
 - [x] Confirm `files` sees `/fat` in the visible desktop via the deterministic `tools/qemu_fb_fat_test.sh` gate.
-- [ ] A named human tester records the create/edit/save/rename/reopen/delete workflow on `make qemu-fb-visible` against a current commit.
+- [x] A named human tester records the create/edit/save/rename/reopen/delete workflow on `make qemu-fb-visible` against a current commit.
 
 ### Correct spawned-window focus — RISK-004
 
 - [x] Define the focus policy for a newly created normal application window.
 - [x] Ensure an editor spawned from `files` receives keyboard focus (kernel-side `GUI: focus` marker proves the syscall path).
-- [x] Add host coverage for the policy (`tools/qemu_focus_test.sh` runs against the auto-launch path; the visible flow still needs a named tester).
+- [x] Add host coverage for the policy (`tools/qemu_focus_test.sh` runs against the auto-launch path; rocco manually verified the visible flow on 2026-07-17).
 
 ### Fix compositor title-decoration artifacting
 
 - [x] Investigate and fix visible decoration fragments in `qemu-fb-visible`; root cause was titlebar/decorations being repainted without damage clipping during partial redraw.
 - [x] Audit the partial-redraw path for titlebar/decorations so it preserves z-order and never paints pixels outside the active damage/visible region.
 - [x] Add host coverage that reproduces overlapping titled windows and proves hidden or partially covered title controls do not bleed through the foreground window (`test_gui_partial_title_repaint_does_not_bleed_over_front_window`).
-- [ ] Confirm manually on `make qemu-fb-visible` that opening Files/Monitor/Editor leaves no stale close/minimize/maximize fragments, grey lines, or titlebar remnants.
+- [x] Confirm manually on `make qemu-fb-visible` that opening Files/Monitor/Editor leaves no stale close/minimize/maximize fragments, grey lines, or titlebar remnants.
 
 ### Manual FAT workflow
 
-After the two fixes above, record the date, commit, environment, and tester for this workflow:
+Manual result recorded 2026-07-17:
+
+- Tester: rocco.
+- Commit/baseline: `8c8400bcddd754d879e6e21b787b8d028a6c6036` working tree.
+- Environment: QEMU qemu-virt via `make qemu-fb-visible`.
+- Result: PASS.
+- Note: Editor appeared to show one visible text line, but save/reopen persistence passed; track as polish unless it blocks a concrete workflow.
+
+Verified workflow:
 
 1. Start the complete visible desktop target.
 2. Open `files` from the panel.
@@ -112,7 +120,8 @@ Required changes:
 - [x] each subsystem prints an explicit completion marker;
 - [x] the target exits non-zero if the marker is absent;
 - [x] timeout exit is not treated as success by itself;
-- [ ] CI runs all non-visual mandatory gates (blocked on RISK-011).
+- [x] CI workflow is configured to run all non-visual mandatory gates through `bash tools/verify.sh`.
+- [ ] A GitHub-hosted CI run reaches checkout, passes the baseline, and preserves QEMU serial logs as artifacts (RISK-011).
 
 Suggested markers:
 
@@ -147,18 +156,19 @@ All items below are mandatory:
 
 - [x] RISK-001 closed with host and QEMU evidence.
 - [x] RISK-002 closed with isolation and cleanup tests.
-- [ ] RISK-003 closed (wiring verified; interactive workflow still pending).
-- [ ] RISK-004 closed (pending named human tester).
+- [x] RISK-003 closed.
+- [x] RISK-004 closed.
 - [x] RISK-005 closed for every mandatory runtime target.
 - [x] RISK-006 build-contract closed (RPi4 links clean; physical serial pending under RISK-007).
 - [x] KLI1 `.data`/`.bss` policy explicitly defined and enforced.
-- [x] RISK-004 wiring closed (focus syscall path proven end-to-end on the auto-launch path; visible interaction still pending).
+- [x] RISK-004 wiring and visible interaction closed.
 - [x] RISK-010 documentation accurate in three independent sites.
-- [ ] Full host suite passes.
-- [ ] Kernel size gate passes.
-- [ ] Stack gate passes.
-- [ ] All deterministic QEMU gates pass.
-- [ ] Visible FAT workflow passes and is recorded.
+- [x] Full host suite passes locally on 2026-07-17.
+- [x] Kernel size gate passes locally on 2026-07-17 (`kernel.bin: 106524 bytes`, limit 108000).
+- [x] Stack gate passes locally on 2026-07-17 (maximum 368 bytes, limit 3072).
+- [x] All deterministic QEMU gates pass locally on 2026-07-17.
+- [ ] GitHub Actions runs the baseline and preserves QEMU serial logs (RISK-011).
+- [x] Visible FAT workflow passes and is recorded.
 - [ ] `README.md`, `CURRENT_STATE.md`, `ARCHITECTURE.md`, `MEMORY_MAP.md`, `SYSCALLS.md`, and this roadmap agree.
 - [ ] Every remaining P1 risk is closed or has a written acceptance rationale.
 

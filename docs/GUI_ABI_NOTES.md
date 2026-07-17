@@ -5,7 +5,7 @@
 Current GUI risks:
 
 - GUI output buffers are permission-checked but not fault-contained;
-- `RISK-004` — the focus syscall path is automated, but the visible files-to-editor workflow still needs a named human tester.
+- `RISK-004` — the focus syscall path is automated and the visible files-to-editor workflow was manually verified by rocco on 2026-07-17.
 
 ## Live range
 

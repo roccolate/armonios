@@ -18,20 +18,21 @@ The current codebase includes:
 - permission-aware kernel-to-user copy helpers with per-page PTE write checks;
 - per-process VFS file descriptors with central cleanup on exit, fault, and kill;
 - a kernel-owned window compositor with input, dragging, focus, backing buffers, and damage tracking;
-- `panel`, `shell`, `editor`, `files`, `monitor`, and `clock` applications;
+- `panel`, `shell`, `editor`, `files`, `monitor`, `control`, and `clock` applications;
 - bootfs, tmpfs, and a small FAT32 root-filesystem implementation;
 - QEMU virtio block, GPU, input, and network paths;
 - PCI/xHCI and basic USB HID support;
 - native host tests for core kernel, VFS, filesystem, driver-parser, GUI, and ABI logic;
 - an automated `tools/verify.sh` baseline that includes the EL0 user-copy permissions host and QEMU gates, the process-local VFS descriptor host gate, the KLI1 mutable-storage contract gate, the BOARD=rpi4 build-contract gate, and the GUI focus-syscall QEMU gate.
 
-Important limitations remain. In particular, the visible FAT/editor workflow has not been rerun on the current commit by a named tester, GitHub Actions is blocked before checkout, and Raspberry Pi support is not build- or hardware-verified.
+Important limitations remain. In particular, the updated GitHub Actions baseline still needs a successful hosted run with logs, Raspberry Pi support is not hardware-verified, and Editor currently appears to show one visible text line in the manual desktop workflow.
 
 Read these before making or evaluating claims:
 
 - [Current State](docs/CURRENT_STATE.md) - audited operational truth and verification evidence
 - [Technical Risks](docs/TECHNICAL_RISKS.md) - active blockers and correctness risks
 - [Documentation Policy](docs/DOCUMENTATION_POLICY.md) - evidence and maintenance rules
+- [Study Guide](docs/STUDY_GUIDE.md) - suggested reading path for the educational core
 - [Roadmap](docs/ROADMAP.md) - ordered release work
 
 ## What ArmoniOS is
@@ -97,7 +98,7 @@ Exit QEMU with `Ctrl+A`, then `X`.
 make qemu-fb-visible
 ```
 
-This target now builds and attaches the generated FAT32 virtio block image together with GPU, USB keyboard, and mouse devices. The wiring change is implemented, but the complete create/edit/save/rename/reopen/delete workflow has not yet been rerun on the current commit. Treat the visible result as `UNVERIFIED` until a named tester records it in issue #1.
+This target builds and attaches the generated FAT32 virtio block image together with GPU, USB keyboard, and mouse devices. rocco manually verified the complete create/edit/save/rename/reopen/delete workflow on 2026-07-17 against working-tree baseline `8c8400bcddd754d879e6e21b787b8d028a6c6036`.
 
 ### Run the storage smoke test
 
@@ -123,30 +124,33 @@ make qemu-usb
 make qemu-net
 ```
 
-At present these are runtime launch targets, not complete deterministic tests. A timeout alone is not proof that the associated subsystem passed.
+At present these are runtime launch targets. Use `bash tools/qemu_marker_test.sh all` or `bash tools/verify.sh` when you need deterministic pass/fail evidence and captured serial logs.
 
-## Current verified local baseline
+## Current Verified Local Baseline
 
-The latest local verification recorded on commit `9157aa2360fa346dd98e9c64ac2050f8af111ce9` reports:
+The latest local verification was run on 2026-07-17 against the working tree
+based on `8c8400bcddd754d879e6e21b787b8d028a6c6036`:
 
 ```text
 make                              passed
-make size                         kernel.bin: 97344 bytes, limit 100000
+make size                         kernel.bin: 106524 bytes, limit 108000
 make -C tests test                ALL TESTS PASSED (0)
 tests/run_vfs_process_fd_test.sh  process-local VFS descriptors + exit cleanup PASS
 tests/run_user_copy_permissions_test.sh  writable / ERR_PERM / mixed atomicity PASS
 make stack-check                  maximum 368 bytes, limit 3072
 make qemu-fs-test                 storage: initialized + FAT32: mounted + /fat mounted
-tools/qemu_usercopy_test.sh       6 EL0 probes rejected, panel: ready + clock: starting
+tools/qemu_usercopy_test.sh       7 EL0 probes rejected, panel: ready + clock: starting
+tools/qemu_focus_test.sh          6 focus transitions across 6 distinct windows
 tools/qemu_marker_test.sh all     fb (VIRTIO gpu + panel: ready)
                                   usb (controller + enumeration + 2 HID devices)
                                   net (network: initialized + DHCP ack)
 tools/qemu_fb_fat_test.sh         FAT32 + GPU + panel: ready in one boot
 ```
 
-Run `git checkout 9157aa2` to reproduce this baseline byte for byte.
-
-Record the exact commit and serial log when promoting the baseline. The full visible files/editor/FAT workflow and deterministic framebuffer, USB, and network gates remain incomplete. See `docs/CURRENT_STATE.md` for the per-subsystem evidence and scope.
+Record the exact commit and serial log when promoting the baseline. The visible
+Files/Editor/FAT workflow is manually verified on the current baseline, with a
+known Editor single-visible-line polish note. See `docs/CURRENT_STATE.md` for
+the per-subsystem evidence and scope.
 
 ## Architecture summary
 
@@ -187,7 +191,7 @@ Per-process VFS file descriptors are now isolated and reclaimed on exit/fault/ki
 
 ## Application format
 
-Shipping applications are linked as flat KLI1 images with a fixed header and entry table. The current format is tested for the six included applications and explicitly forbids mutable static `.data` / `.bss`: `programs/apps/image.ld` `ASSERT`s both sections are empty, and `tests/run_kli1_contract_test.sh` confirms the six shipping ELFs link clean and that a regression `.bss` source is rejected with a clear `KLI1 forbids .bss` message. Apps that need mutable state obtain it through `SYS_MMAP` at runtime.
+Shipping applications are linked as flat KLI1 images with a fixed header and entry table. The current format is tested for the seven included applications and explicitly forbids mutable static `.data` / `.bss`: `programs/apps/image.ld` `ASSERT`s both sections are empty, and `tests/run_kli1_contract_test.sh` confirms the seven shipping ELFs link clean and that a regression `.bss` source is rejected with a clear `KLI1 forbids .bss` message. Apps that need mutable state obtain it through `SYS_MMAP` at runtime.
 
 ## Raspberry Pi status
 
@@ -201,13 +205,9 @@ The repository does **not** claim that ArmoniOS boots on physical Raspberry Pi h
 
 The next release goal is a repeatable **v1.0 QEMU desktop release candidate**. The immediate work is correctness and reproducibility, not new multimedia or hardware scope.
 
-Both syscall-boundary P0 risks (`RISK-001` and `RISK-002`) are closed on `4494c55`; the deterministic QEMU gate scaffold (`RISK-005`) and the visible-desktop FAT wiring (`RISK-003`) are closed on `9157aa2`. See `docs/TECHNICAL_RISKS.md` for the recorded evidence.
+Both syscall-boundary P0 risks (`RISK-001` and `RISK-002`) are closed; the deterministic QEMU gate scaffold (`RISK-005`) is covered by the current automated baseline; the visible-desktop FAT workflow and editor focus risks (`RISK-003` and `RISK-004`) are closed with manual evidence. See `docs/TECHNICAL_RISKS.md` for the recorded evidence.
 
-Major remaining blockers include:
-
-1. a named human tester records the visible create/edit/save/rename/reopen/delete FAT workflow (`RISK-003` interactive half);
-2. a named human tester confirms the visible files-to-editor focus behaviour (`RISK-004` interactive half);
-3. restoring GitHub Actions runner execution and logs (`RISK-011`).
+The remaining v1.0 blocker is recording a successful GitHub Actions run of the updated baseline with QEMU serial-log artifacts (`RISK-011`).
 
 See [Roadmap](docs/ROADMAP.md).
 

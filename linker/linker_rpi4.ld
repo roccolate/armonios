@@ -45,10 +45,21 @@ SECTIONS {
         __app_panel_end = .;
     } :text
 
+    /*
+     * App sections stay explicit on purpose: the linker script defines
+     * binary layout and exported blob symbols. Runtime metadata lives in
+     * include/armonios/app_catalog.h.
+     */
     .app_clock : ALIGN(16) {
         __app_clock_start = .;
         KEEP(*(.app_clock_blob*))
         __app_clock_end = .;
+    } :text
+
+    .app_control : ALIGN(16) {
+        __app_control_start = .;
+        KEEP(*(.app_control_blob*))
+        __app_control_end = .;
     } :text
 
     __text_end = .;

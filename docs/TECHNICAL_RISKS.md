@@ -14,14 +14,14 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 
 | ID | Severity | Area | Status | Summary |
 |---|---:|---|---|---|
-| RISK-003 | P1 | QEMU desktop target | WIRING FIX VERIFIED; INTERACTION OPEN | `qemu-fb-visible` attaches FAT32 with GPU; deterministic wiring gate passes; the visible create/edit/save/rename/reopen/delete workflow still needs a named human tester on a real QEMU display. |
-| RISK-004 | P1 | Desktop focus | WIRING FIX VERIFIED; INTERACTION OPEN | New userland windows request focus; the focus syscall path is exercised end-to-end by `tools/qemu_focus_test.sh`; the visible files-to-editor flow still needs a named human tester on a real QEMU display. |
+| RISK-003 | P1 | QEMU desktop target | CLOSED 2026-07-17 | `qemu-fb-visible` attaches FAT32 with GPU; deterministic wiring gate passes; rocco manually verified the visible create/edit/save/rename/reopen/delete workflow on a real QEMU display. |
+| RISK-004 | P1 | Desktop focus | CLOSED 2026-07-17 | New userland windows request focus; `tools/qemu_focus_test.sh` passes; rocco manually confirmed editor keyboard focus without an extra click on a real QEMU display. |
 | RISK-006 | P1 | Raspberry Pi 4 build | CLOSED 2026-07-16 (next commit); CONTRACT UPDATED 2026-07-17 | `make BOARD=rpi4` compiles, links, and stays under the kernel size gate. Display/input are generic board calls with explicit RPi4 safe failures. |
 | RISK-007 | P0 for hardware track | Raspberry Pi storage | OPEN | The current eMMC implementation is contradictory and not hardware-validated. |
 | RISK-008 | P1 | Memory protection | CLOSED | W^X enforced: kernel text RX, data+bss+stack RW+NX, MMIO device+NX, remaining RAM RW+NX. Rodata still merged with data (shares a page). |
 | RISK-009 | P1 | KLI1 application format | CLOSED 2026-07-16 (next commit) | Mutable `.data`/`.bss` is now explicitly forbidden by `programs/apps/image.ld` and verified by `tests/run_kli1_contract_test.sh`. |
 | RISK-010 | P2 | Scheduling documentation | CLOSED 2026-07-16 (next commit) | EL0 processes are preemptive, EL1 helper threads are cooperative; the contract is documented in three independent places and the scheduler exposes the explicit `sched_yield` path that EL1 helpers must take. |
-| RISK-011 | P1 | Verification infrastructure | OPEN | GitHub Actions jobs fail before checkout and expose no step logs. Issue #12 tracks the repository/account-level investigation. |
+| RISK-011 | P1 | Verification infrastructure | WORKFLOW UPDATED; REMOTE RUN OPEN | The workflow now has a runner-bootstrap step, installs QEMU, runs `bash tools/verify.sh`, and uploads QEMU logs. A successful GitHub-hosted run with checkout logs is still required. |
 
 ## RISK-003 — Visible desktop FAT wiring requires verification
 
@@ -33,9 +33,11 @@ The documented visible FAT workflow used `make qemu-fb-visible`, but that target
 
 The target now depends on `$(VIRTIO_BLK_IMG)` and attaches it through `virtio-blk-device`. This removes the static wiring defect. The automated gate `tools/qemu_fb_fat_test.sh` boots QEMU with both `virtio-gpu-device` and the generated virtio block attached, captures the serial log, and asserts `FAT32: mounted`, `FAT32 root: mounted`, `display: windows`, and `panel: ready` all appear in the same run. The gate is part of `tools/verify.sh` so the wiring cannot silently regress.
 
-The remaining gap is the interactive create/edit/save/rename/reopen/delete workflow through the visible GUI. Headless QEMU serial automation cannot prove that a named user sees the expected sequence on a real display, so that part remains pending a named tester on a real QEMU display.
+The interactive create/edit/save/rename/reopen/delete workflow through the visible GUI was manually verified by rocco on 2026-07-17 against working-tree baseline `8c8400bcddd754d879e6e21b787b8d028a6c6036` using `make qemu-fb-visible`. The visible flow passed: Files listed `/fat`, a valid 8.3 file was created, opened in Editor, edited, saved with Ctrl-S, closed, renamed, reopened with content intact, deleted, and no longer appeared after refresh. The tester also reported no stale titlebar/decorator artifacts during the workflow.
 
-**Exit criteria:** the deterministic `qemu-fb-fat` gate passes (recorded for this commit) and the visible interactive workflow passes in `make qemu-fb-visible` with a dated, named tester entry.
+The Editor currently appears to show one visible text line. That did not block save/reopen/delete verification and is tracked as application polish, not as a v1.0 FAT workflow blocker.
+
+**Exit criteria:** satisfied on 2026-07-17 by the deterministic `qemu-fb-fat` gate and rocco's dated manual pass on `make qemu-fb-visible`.
 
 ## RISK-004 — Spawned editor lacks initial focus
 
@@ -49,9 +51,9 @@ The common `libkarmdesk` window-create wrapper now requests focus after a succes
 
 The kernel-side instrumentation in `kernel/gui_pool.c` now emits `GUI: create win=N pid=N` on every successful window create and `GUI: focus win=N pid=N` whenever the focused window actually changes. `tools/qemu_focus_test.sh` boots QEMU with the same `PANEL_AUTO_TEST` CFLAGS used by the usercopy gate, captures the serial log, and asserts that the panel auto-launch produces ≥2 focus transitions on ≥2 distinct windows, each backed by a matching create marker. This proves the entire sys_window_focus → gui_focus_window → focused_window_id chain runs end-to-end without a human tester.
 
-The remaining gap is the visible GUI side of the workflow: opening a file from `files` and confirming that the editor accepts keyboard input with no extra click. Headless QEMU serial automation cannot prove that a named user perceives the correct focus on a real display, so that part remains pending a named tester entry in issue #1.
+The visible GUI side of the workflow was manually verified by rocco on 2026-07-17 against working-tree baseline `8c8400bcddd754d879e6e21b787b8d028a6c6036` using `make qemu-fb-visible`. A file opened from `files` accepted keyboard input in `editor` immediately without an extra click.
 
-**Exit criteria:** `bash tools/verify.sh` passes (recorded against this commit) and a named tester confirms that a file opened from `files` accepts keyboard input in `editor` immediately without an extra click on `make qemu-fb-visible`.
+**Exit criteria:** satisfied on 2026-07-17 by `bash tools/verify.sh` plus rocco's dated manual focus confirmation on `make qemu-fb-visible`.
 
 ## RISK-005 — Deterministic QEMU gates need real execution
 
@@ -94,9 +96,9 @@ The board contract now exposes generic `board_input_*` and `board_display_*` ent
 **Closing evidence on the closing commit:**
 
 - `drivers/boards/rpi4/board.c:160-180` adds the three stubs with a comment explaining the contract.
-- `make BOARD=rpi4` produces `build-rpi4/kernel.bin` at 97312 bytes (size limit 100000).
+- `make BOARD=rpi4` produces `build-rpi4/kernel.bin` at 102428 bytes (size limit 108000).
 - `tests/run_board_build_test.sh` (wired into `tools/verify.sh` as `board-rpi4`) does a clean `BOARD=rpi4` build in `build-rpi4/` so it never collides with the qemu_virt artefact, and asserts the resulting kernel size gate.
-- `make BOARD=qemu_virt` continues to produce `build/kernel.bin` at 97344 bytes, confirming the QEMU reference path is unaffected.
+- `make BOARD=qemu_virt` continues to produce `build/kernel.bin` at 106524 bytes, confirming the QEMU reference path is unaffected.
 
 Hardware-mile RISK-007 (eMMC driver correctness, FAT mount on physical hardware) still requires physical validation; this commit only closes the **build-contract** milestone defined in the roadmap. See RISK-007 for the storage track.
 
@@ -142,15 +144,15 @@ This increases page-table cost, forces global TLB invalidation during switches, 
 
 The KLI1 image script now explicitly places header, text, rodata, and end marker and is paired with `ASSERT(SIZEOF(.kli1.data_dummy) == 0, ...)` and `ASSERT(SIZEOF(.kli1.bss_dummy) == 0, ...)` so any `.data` / `.bss` input into the link is captured into private NOLOAD sections and the link fails fast with a clear `KLI1 forbids .data/.bss` message instead of silently dropping the offending input.
 
-Applications that need mutable static state obtain it through `SYS_MMAP` at runtime; the six shipping apps already follow this pattern.
+Applications that need mutable static state obtain it through `SYS_MMAP` at runtime; the seven shipping apps already follow this pattern.
 
 **Closing evidence (recorded on the closing commit):**
 
 - `programs/apps/image.ld` carries the two ASSERTs.
-- `tests/run_kli1_contract_test.sh` (host-side, wired into `tools/verify.sh` as `kli1-contract`) checks the six shipping ELFs (`clock`, `editor`, `files`, `monitor`, `shell`, `panel`) have no `.data` / `.bss` sections, and that a synthetic `.bss`-emitting source is rejected by the linker on each app's `_header.S` / `_end.S` glue with the KLI1 message — proving the contract is genuinely enforced rather than silently dropped.
+- `tests/run_kli1_contract_test.sh` (host-side, wired into `tools/verify.sh` as `kli1-contract`) checks the seven shipping ELFs (`clock`, `control`, `editor`, `files`, `monitor`, `shell`, `panel`) have no `.data` / `.bss` sections, and that a synthetic `.bss`-emitting source is rejected by the linker on each app's `_header.S` / `_end.S` glue with the KLI1 message — proving the contract is genuinely enforced rather than silently dropped.
 - `kernel/user_image_format.h` documents the contract next to the format itself.
 
-**Exit criteria:** the KLI1 contract is explicitly defined as no mutable static storage in the flat image, the link fails fast on a violation, and a host test exercises both halves on the six shipping apps.
+**Exit criteria:** the KLI1 contract is explicitly defined as no mutable static storage in the flat image, the link fails fast on a violation, and a host test exercises both halves on the seven shipping apps.
 
 ## RISK-010 — Kernel-thread scheduling is cooperative
 
@@ -169,15 +171,17 @@ Timer IRQ preemption applies to EL0 process trap frames. EL1 helper threads chan
 
 **Exit criteria:** documentation is accurate in three independent places and the scheduler exposes the explicit `sched_yield` boundary.
 
-## RISK-011 — GitHub Actions does not reach checkout
+## RISK-011 — GitHub Actions release baseline needs hosted evidence
 
 **Severity:** P1
 **Affected release:** v1.0 reproducibility
-**Evidence:** repeated pull-request workflow runs for both the historical and replacement workflows
+**Evidence:** repeated pull-request workflow runs for both the historical and replacement workflows; local workflow update on 2026-07-17
 
 GitHub creates the jobs, but they finish with failure before exposing any step or downloadable job log. The historical `CI - Tests` workflow and the new CI-only PR #11 show the same pattern, so no build or test failure can be inferred from those runs.
 
-Issue #12 tracks the required repository/account-level investigation. Until a runner reaches checkout, local `bash tools/verify.sh` output is the only available automated release evidence; `tools/verify.sh` now also runs the `usercopy-host`, `usercopy-qemu`, and `process-fd-isolation` gates so that the local baseline covers both syscall-boundary P0s.
+The workflow file has been updated to emit a `Runner bootstrap` step before checkout, install `qemu-system-arm` alongside the AArch64 cross-toolchain, run the full local baseline through `bash tools/verify.sh`, and upload `build/qemu-*.log`, `build-focus/qemu-*.log`, and `build-usercopy-test/qemu-*.log` as artifacts. This is a repository-side CI configuration fix, not hosted evidence yet.
+
+Issue #12 still tracks any repository/account-level investigation if the hosted runner fails before showing the bootstrap or checkout logs. Until a hosted runner reaches checkout and runs the baseline, local `bash tools/verify.sh` output is the only available automated release evidence; `tools/verify.sh` now covers build, size, board-rpi4, host tests, process-fd-isolation, usercopy-host, kli1-contract, stack-check, qemu-fs-test, usercopy-qemu, qemu-focus, qemu-markers, and qemu-fb-fat.
 
 **Exit criteria:** a GitHub-hosted runner reaches checkout, logs are available, the local verification baseline runs in CI, and the FAT32 serial log is preserved as an artifact.
 
@@ -252,7 +256,7 @@ No risk may be moved here without the evidence and exit criteria required by `DO
 
 **Summary of what was open:** the KLI1 user-image linker script emitted only header/text/rodata/end, but there was no explicit rejection if an application accidentally introduced `.data` or `.bss` symbols. Apps were kept clean by convention.
 
-**Closing evidence:** the linker script now `ASSERT`s that `.data` and `.bss` input is empty; the host-side `tests/run_kli1_contract_test.sh` proves all six shipping apps link clean and that a synthetic `.bss` source is rejected with the `KLI1 forbids .bss` message; the assertion is part of `tools/verify.sh` so the contract cannot regress silently.
+**Closing evidence:** the linker script now `ASSERT`s that `.data` and `.bss` input is empty; the host-side `tests/run_kli1_contract_test.sh` proves all seven shipping apps link clean and that a synthetic `.bss` source is rejected with the `KLI1 forbids .bss` message; the assertion is part of `tools/verify.sh` so the contract cannot regress silently.
 
 ### RISK-006 (CLOSED 2026-07-16, build-contract milestone)
 
@@ -263,7 +267,7 @@ No risk may be moved here without the evidence and exit criteria required by `DO
 
 **Summary of what was open:** `make BOARD=rpi4` failed to link because generic kernel code called board functions that the RPi4 backend did not define. The repository therefore could not claim `BOARD=rpi4` is build-verified.
 
-**Closing evidence:** the three functions are now defined as explicit safe-failure stubs in `drivers/boards/rpi4/board.c` (`irq = 0`, `init = -1`, `poll = -1`). `tools/verify.sh` runs `tests/run_board_build_test.sh` which builds `BOARD=rpi4` cleanly into `build-rpi4/` and asserts the resulting kernel size gate (97312 bytes against a 100000-byte limit). `BOARD=qemu_virt` continues to build cleanly at 97344 bytes.
+**Closing evidence:** the three functions are now defined as explicit safe-failure stubs in `drivers/boards/rpi4/board.c` (`irq = 0`, `init = -1`, `poll = -1`). `tools/verify.sh` runs `tests/run_board_build_test.sh` which builds `BOARD=rpi4` cleanly into `build-rpi4/` and asserts the resulting kernel size gate (102428 bytes against a 108000-byte limit). `BOARD=qemu_virt` continues to build cleanly at 106524 bytes.
 
 Hardware-tracked follow-up RISK-007 (eMMC + FAT on physical hardware) remains open until a physical serial milestone is recorded per `DOCUMENTATION_POLICY.md`.
 

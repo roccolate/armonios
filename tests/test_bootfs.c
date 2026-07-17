@@ -16,6 +16,8 @@ extern char __app_panel_start[];
 extern char __app_panel_end[];
 extern char __app_clock_start[];
 extern char __app_clock_end[];
+extern char __app_control_start[];
+extern char __app_control_end[];
 
 void test_bootfs_find_existing_file_metadata(void) {
     const bootfs_file_t *file = bootfs_find("shell");
@@ -34,6 +36,7 @@ void test_bootfs_find_returns_each_registered_app(void) {
     TEST_ASSERT_NOT_NULL(bootfs_find("files"));
     TEST_ASSERT_NOT_NULL(bootfs_find("monitor"));
     TEST_ASSERT_NOT_NULL(bootfs_find("clock"));
+    TEST_ASSERT_NOT_NULL(bootfs_find("control"));
 }
 
 void test_bootfs_finds_editor_and_panel_for_taskbar_spawn(void) {
@@ -191,6 +194,7 @@ void test_bootfs_mount_vfs_exposes_remaining_app_paths(void) {
     TEST_ASSERT_NOT_NULL(vfs_find("/armonios/monitor"));
     TEST_ASSERT_NOT_NULL(vfs_find("/armonios/clock"));
     TEST_ASSERT_NOT_NULL(vfs_find("/armonios/files"));
+    TEST_ASSERT_NOT_NULL(vfs_find("/armonios/control"));
 }
 
 void test_bootfs_mount_vfs_reads_editor_through_vfs(void) {
@@ -251,6 +255,7 @@ void test_bootfs_find_results_survive_later_lookups(void) {
     TEST_ASSERT_NOT_NULL(bootfs_find("panel"));
     TEST_ASSERT_NOT_NULL(bootfs_find("files"));
     TEST_ASSERT_NOT_NULL(bootfs_find("clock"));
+    TEST_ASSERT_NOT_NULL(bootfs_find("control"));
 
     TEST_ASSERT_EQUAL_UINT64('e', editor->name[0]);
     TEST_ASSERT_EQUAL_UINT64((uint64_t)(uintptr_t)__app_editor_start,

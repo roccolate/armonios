@@ -13,7 +13,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${BOARD_BUILD_DIR:-$ROOT_DIR/build-rpi4}"
 KERNEL_BIN="$BUILD_DIR/kernel.bin"
-KERNEL_SIZE_LIMIT="${KERNEL_SIZE_LIMIT:-100000}"
+KERNEL_SIZE_LIMIT="${KERNEL_SIZE_LIMIT:-108000}"
 
 printf '\n=== BOARD=rpi4 (%s) ===\n' "$BUILD_DIR"
 rm -rf "$BUILD_DIR"

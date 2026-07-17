@@ -9,19 +9,40 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 20
 
     steps:
+    - name: Runner bootstrap
+      run: |
+        echo "runner: ${RUNNER_NAME}"
+        echo "os: ${RUNNER_OS}"
+        echo "arch: ${RUNNER_ARCH}"
+        date -u +%Y-%m-%dT%H:%M:%SZ
+
     - name: Checkout
       uses: actions/checkout@v4
 
     - name: Install build dependencies
-      run: sudo apt-get update && sudo apt-get install -y build-essential gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          gcc-aarch64-linux-gnu \
+          binutils-aarch64-linux-gnu \
+          qemu-system-arm
 
-    - name: Run unit tests
-      run: make -C tests test
+    - name: Verify release baseline
+      run: bash tools/verify.sh
 
-    - name: Build kernel
-      run: make
-
-    - name: Check kernel size
-      run: make size
+    - name: Upload QEMU serial logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: qemu-serial-logs
+        if-no-files-found: ignore
+        path: |
+          build/qemu-*.log
+          build-focus/qemu-*.log
+          build-usercopy-test/qemu-*.log

@@ -1,5 +1,8 @@
 #include "usb/hid.h"
 
+#include "input/input.h"
+#include "input/keymap.h"
+
 int hid_parse_boot_keyboard(const uint8_t *buf, uint32_t len,
                             hid_boot_keyboard_report_t *out) {
     if (buf == 0 || out == 0 || len < HID_BOOT_KEYBOARD_REPORT_SIZE) {
@@ -79,4 +82,31 @@ uint8_t hid_usage_to_ascii(uint8_t usage, uint8_t shifted) {
         return kHIDShifted[usage];
     }
     return kHIDUnshifted[usage];
+}
+
+uint32_t hid_usage_to_input_key(uint8_t usage, uint8_t modifiers) {
+    uint8_t ctrl = (modifiers & (HID_MOD_LCTRL | HID_MOD_RCTRL)) ? 1U : 0U;
+    uint8_t shifted =
+        (modifiers & (HID_MOD_LSHIFT | HID_MOD_RSHIFT)) ? 1U : 0U;
+
+    if (ctrl && usage >= 0x04U && usage <= 0x1DU) {
+        return input_key_from_ctrl_letter((uint8_t)('a' + usage - 0x04U));
+    }
+
+    switch (usage) {
+    case 0x49U: return input_key_from_nav(INPUT_NAV_INSERT);
+    case 0x4AU: return input_key_from_nav(INPUT_NAV_HOME);
+    case 0x4BU: return input_key_from_nav(INPUT_NAV_PGUP);
+    case 0x4CU: return input_key_from_nav(INPUT_NAV_DELETE);
+    case 0x4DU: return input_key_from_nav(INPUT_NAV_END);
+    case 0x4EU: return input_key_from_nav(INPUT_NAV_PGDN);
+    case 0x4FU: return input_key_from_nav(INPUT_NAV_RIGHT);
+    case 0x50U: return input_key_from_nav(INPUT_NAV_LEFT);
+    case 0x51U: return input_key_from_nav(INPUT_NAV_DOWN);
+    case 0x52U: return input_key_from_nav(INPUT_NAV_UP);
+    default:
+        break;
+    }
+
+    return hid_usage_to_ascii(usage, shifted);
 }

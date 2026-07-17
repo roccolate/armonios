@@ -231,11 +231,12 @@ The shipping set is:
 - `editor`
 - `files`
 - `monitor`
+- `control`
 - `clock`
 
 KLI1 is a small flat-image format with a fixed header and entry offsets. The current linker script explicitly orders the image header, text, rodata, and end marker.
 
-Mutable `.data` and `.bss` are forbidden for shipping app images. `programs/apps/image.ld` asserts that contract, and `tests/run_kli1_contract_test.sh` verifies both the six shipping apps and a synthetic violation.
+Mutable `.data` and `.bss` are forbidden for shipping app images. `programs/apps/image.ld` asserts that contract, and `tests/run_kli1_contract_test.sh` verifies both the seven shipping apps and a synthetic violation.
 
 ## Testing architecture
 

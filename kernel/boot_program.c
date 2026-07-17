@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "include/armonios/app_catalog.h"
 #include "kernel/kstring.h"
 #include "kernel/user_image_format.h"
 
@@ -14,18 +15,11 @@
  * bytes through user_image_load_bootfs_flat.
  */
 
-extern char __app_shell_start[];
-extern char __app_shell_end[];
-extern char __app_editor_start[];
-extern char __app_editor_end[];
-extern char __app_files_start[];
-extern char __app_files_end[];
-extern char __app_monitor_start[];
-extern char __app_monitor_end[];
-extern char __app_panel_start[];
-extern char __app_panel_end[];
-extern char __app_clock_start[];
-extern char __app_clock_end[];
+#define DECLARE_APP_SYMBOLS(id, label, path, pinned, is_clock) \
+    extern char __app_##id##_start[]; \
+    extern char __app_##id##_end[];
+ARMONIOS_BOOT_APP_CATALOG(DECLARE_APP_SYMBOLS)
+#undef DECLARE_APP_SYMBOLS
 
 typedef struct {
     const char *name;
@@ -37,36 +31,14 @@ typedef struct {
     (sizeof(g_boot_programs) / sizeof(g_boot_programs[0]))
 
 static const boot_program_source_t g_boot_programs[] = {
-    {
-        .name = "shell",
-        .image_start = (const uint8_t *)(const void *)__app_shell_start,
-        .image_end = (const uint8_t *)(const void *)__app_shell_end,
+#define BOOT_PROGRAM_ENTRY(id, label, path, pinned, is_clock) \
+    { \
+        .name = #id, \
+        .image_start = (const uint8_t *)(const void *)__app_##id##_start, \
+        .image_end = (const uint8_t *)(const void *)__app_##id##_end, \
     },
-    {
-        .name = "editor",
-        .image_start = (const uint8_t *)(const void *)__app_editor_start,
-        .image_end = (const uint8_t *)(const void *)__app_editor_end,
-    },
-    {
-        .name = "files",
-        .image_start = (const uint8_t *)(const void *)__app_files_start,
-        .image_end = (const uint8_t *)(const void *)__app_files_end,
-    },
-    {
-        .name = "monitor",
-        .image_start = (const uint8_t *)(const void *)__app_monitor_start,
-        .image_end = (const uint8_t *)(const void *)__app_monitor_end,
-    },
-    {
-        .name = "panel",
-        .image_start = (const uint8_t *)(const void *)__app_panel_start,
-        .image_end = (const uint8_t *)(const void *)__app_panel_end,
-    },
-    {
-        .name = "clock",
-        .image_start = (const uint8_t *)(const void *)__app_clock_start,
-        .image_end = (const uint8_t *)(const void *)__app_clock_end,
-    },
+    ARMONIOS_BOOT_APP_CATALOG(BOOT_PROGRAM_ENTRY)
+#undef BOOT_PROGRAM_ENTRY
 };
 
 static boot_program_t g_found_programs[

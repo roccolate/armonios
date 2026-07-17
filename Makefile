@@ -37,10 +37,12 @@ BOARD ?= qemu_virt
 BOARD_DIR := drivers/boards/$(BOARD)
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
-# 100 KB covers the libkarm-migrated apps plus the xHCI command/event
-# ring backend while keeping the kernel binary under a tight ceiling.
-KERNEL_SIZE_LIMIT ?= 100000
-APPS := shell editor files monitor clock panel
+# 108 KB covers the usable-input baseline plus the built-in registry
+# Control Panel while keeping the kernel binary under a tight ceiling.
+KERNEL_SIZE_LIMIT ?= 108000
+# Keep this explicit: app object order and linker sections are build/linker
+# boundaries, while include/armonios/app_catalog.h owns runtime app metadata.
+APPS := shell editor files monitor clock panel control
 APPS_DIR := programs/apps
 APP_OBJS := $(addprefix $(BUILD_DIR)/$(APPS_DIR)/,$(addsuffix .o,$(APPS)))
 APP_HEADER_OBJS := $(addprefix $(BUILD_DIR)/$(APPS_DIR)/,$(addsuffix _header.o,$(APPS)))
@@ -77,6 +79,7 @@ APP_LIBS_files :=
 APP_LIBS_monitor := $(LIBKARM_STRING_OBJ)
 APP_LIBS_panel :=
 APP_LIBS_shell := $(LIBKARM_STRING_OBJ)
+APP_LIBS_control :=
 
 LOAD_ADDR := 0x40080000
 LOAD_ADDR_HEX := 40080000
@@ -168,6 +171,7 @@ OBJS := \
     $(APP_BLOBS) \
     $(BUILD_DIR)/drivers/uart/pl011.o \
     $(BUILD_DIR)/drivers/input/input.o \
+    $(BUILD_DIR)/drivers/input/keymap.o \
     $(BUILD_DIR)/drivers/input/virtio_input.o \
     $(BUILD_DIR)/drivers/pci/pci.o \
     $(BUILD_DIR)/drivers/usb/hid.o \

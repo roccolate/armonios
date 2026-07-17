@@ -4,7 +4,7 @@
 
 Modern panel phase 1 is isolated in draft PR #21 on branch `agent/modern-panel-phase1`.
 
-Phase 2 is implemented on dependent branch `agent/modern-panel-phase2`. Both phases remain **UNVERIFIED** until the complete build, size, host, stack, QEMU framebuffer, and visible desktop gates pass.
+Phase 2 is implemented on dependent branch `agent/modern-panel-phase2`. The 2026-07-17 working-tree baseline passed build, size, host, stack, QEMU marker, and visible desktop FAT workflow verification; any branch-specific PR promotion still needs its own recorded run.
 
 The implementation remains userland-only. It does not add a syscall, renumber the ABI, or broaden an owner-only window permission.
 
@@ -44,7 +44,7 @@ The `Apps` control opens a real second window owned by the panel process. It is 
 
 The menu:
 
-- lists Shell, Editor, Files, Monitor, and Clock;
+- lists Shell, Editor, Files, Monitor, Control Panel, and Clock;
 - launches or activates the selected application;
 - supports mouse hover and click;
 - supports Up, Down, Enter, and Escape;

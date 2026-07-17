@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "include/armonios/app_catalog.h"
 #include "libkarm/syscall.h"
 #include "libkarmdesk/gui.h"
 #include "panel_model.h"
@@ -47,6 +48,39 @@ typedef struct {
     int window_count;
     int process_count;
 } panel_app_t;
+
+#define PANEL_APP_INDEX_ENUM(id, label, path, pinned, is_clock) \
+    PANEL_APP_INDEX_##id,
+enum {
+    ARMONIOS_APP_CATALOG(PANEL_APP_INDEX_ENUM)
+    PANEL_APP_INDEX_COUNT
+};
+#undef PANEL_APP_INDEX_ENUM
+
+#define PANEL_COUNT_APP(id, label, path, pinned, is_clock) + 1
+#define PANEL_COUNT_PINNED(id, label, path, pinned, is_clock) + pinned
+#define PANEL_COUNT_CLOCK(id, label, path, pinned, is_clock) + is_clock
+#define PANEL_CLOCK_INDEX_TERM(id, label, path, pinned, is_clock) \
+    + ((is_clock) ? PANEL_APP_INDEX_##id : 0)
+enum {
+    PANEL_CATALOG_APP_COUNT = 0 ARMONIOS_APP_CATALOG(PANEL_COUNT_APP),
+    PANEL_CATALOG_PINNED_COUNT = 0 ARMONIOS_APP_CATALOG(PANEL_COUNT_PINNED),
+    PANEL_CATALOG_CLOCK_COUNT = 0 ARMONIOS_APP_CATALOG(PANEL_COUNT_CLOCK),
+    PANEL_CLOCK_APP_INDEX = 0 ARMONIOS_APP_CATALOG(PANEL_CLOCK_INDEX_TERM),
+};
+#undef PANEL_COUNT_APP
+#undef PANEL_COUNT_PINNED
+#undef PANEL_COUNT_CLOCK
+#undef PANEL_CLOCK_INDEX_TERM
+
+_Static_assert(PANEL_CATALOG_APP_COUNT == PANEL_APP_COUNT,
+               "panel model app count must match app catalog");
+_Static_assert(PANEL_CATALOG_PINNED_COUNT == PANEL_PINNED_COUNT,
+               "panel pinned count must match app catalog");
+_Static_assert(PANEL_CATALOG_CLOCK_COUNT == 1,
+               "panel catalog must mark exactly one clock app");
+_Static_assert(PANEL_CLOCK_APP_INDEX < PANEL_APP_COUNT,
+               "panel clock app index must be valid");
 
 typedef struct {
     long wid;
@@ -104,11 +138,29 @@ static void init_app(panel_app_t *app, const char *process_name,
 }
 
 static void init_apps(panel_state_t *panel) {
-    init_app(&panel->apps[0], "shell", "Shell", "/armonios/shell");
-    init_app(&panel->apps[1], "editor", "Editor", "/armonios/editor");
-    init_app(&panel->apps[2], "files", "Files", "/armonios/files");
-    init_app(&panel->apps[3], "monitor", "Monitor", "/armonios/monitor");
-    init_app(&panel->apps[4], "clock", "Clock", "/armonios/clock");
+#define PANEL_INIT_APP(id, label, path, pinned, is_clock) \
+    init_app(&panel->apps[PANEL_APP_INDEX_##id], #id, label, path);
+    ARMONIOS_APP_CATALOG(PANEL_INIT_APP)
+#undef PANEL_INIT_APP
+}
+
+static int panel_pinned_app_index(int pinned_slot) {
+    int seen = 0;
+
+    if (pinned_slot < 0 || pinned_slot >= PANEL_PINNED_COUNT) {
+        return -1;
+    }
+
+#define PANEL_PINNED_MATCH(id, label, path, pinned, is_clock) \
+    if (pinned) { \
+        if (seen == pinned_slot) { \
+            return PANEL_APP_INDEX_##id; \
+        } \
+        seen++; \
+    }
+    ARMONIOS_APP_CATALOG(PANEL_PINNED_MATCH)
+#undef PANEL_PINNED_MATCH
+    return -1;
 }
 
 static void clear_app_windows(panel_app_t *app) {
@@ -246,9 +298,11 @@ static void draw_app_icon(panel_state_t *panel, int app_index, int x) {
                                COLOR_TEXT, app_icon(app_index));
 }
 
-static void draw_app_button(panel_state_t *panel, int app_index) {
+static void draw_app_button(panel_state_t *panel, int pinned_slot) {
+    int app_index = panel_pinned_app_index(pinned_slot);
+    if (app_index < 0) return;
     panel_app_t *app = &panel->apps[app_index];
-    int x = panel_app_x(app_index);
+    int x = panel_app_x(pinned_slot);
     panel_visual_state_t state = panel_app_visual_state(
         app->window_states, app->window_count, app->process_count);
     (void)gui_window_draw_rect(panel->wid, x, PANEL_ITEM_Y,
@@ -259,7 +313,7 @@ static void draw_app_button(panel_state_t *panel, int app_index) {
 }
 
 static void draw_clock(panel_state_t *panel) {
-    panel_app_t *clock_app = &panel->apps[PANEL_APP_COUNT - 1];
+    panel_app_t *clock_app = &panel->apps[PANEL_CLOCK_APP_INDEX];
     panel_visual_state_t state = panel_app_visual_state(
         clock_app->window_states, clock_app->window_count,
         clock_app->process_count);
@@ -415,7 +469,7 @@ static void refresh_panel_tick(panel_state_t *panel) {
     }
     if (refresh_clock(panel) != 0) {
         redraw_target(panel, PANEL_TARGET_CLOCK);
-    } else if ((changed & (1U << (PANEL_APP_COUNT - 1))) != 0U) {
+    } else if ((changed & (1U << (uint32_t)PANEL_CLOCK_APP_INDEX)) != 0U) {
         redraw_target(panel, PANEL_TARGET_CLOCK);
     }
     if (changed != 0U && panel->menu_wid >= 0) {
@@ -474,8 +528,11 @@ static void on_click(panel_state_t *panel, int32_t absolute_x,
         return;
     }
     if (panel->menu_wid >= 0) close_menu(panel, 0);
-    if (target >= 0 && target < PANEL_PINNED_COUNT) activate_app(panel, target);
-    else if (target == PANEL_TARGET_CLOCK) activate_app(panel, PANEL_APP_COUNT - 1);
+    if (target >= 0 && target < PANEL_PINNED_COUNT) {
+        activate_app(panel, panel_pinned_app_index(target));
+    } else if (target == PANEL_TARGET_CLOCK) {
+        activate_app(panel, PANEL_CLOCK_APP_INDEX);
+    }
 }
 
 static void on_move(panel_state_t *panel, int32_t absolute_x,

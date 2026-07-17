@@ -11,16 +11,19 @@
  * collide with the 7-bit ASCII range that the UART and most
  * keyboards emit. The shell uses UP/DOWN for command history; LEFT/
  * RIGHT are reserved for future line editing (cursor movement, etc.)
- * and are forwarded the same way. PGUP/PGDN come from the
- * `ESC [ 5~` / `ESC [ 6~` ANSI sequences and let the shell scroll
- * its log buffer without fighting the command-history keys.
+ * and are forwarded the same way. HOME/END/INSERT/DELETE/PGUP/PGDN
+ * come from ANSI, USB HID, and virtio-input navigation keys.
  */
-#define INPUT_KEY_UP    0x101U
-#define INPUT_KEY_DOWN  0x102U
-#define INPUT_KEY_LEFT  0x103U
-#define INPUT_KEY_RIGHT 0x104U
-#define INPUT_KEY_PGUP  0x105U
-#define INPUT_KEY_PGDN  0x106U
+#define INPUT_KEY_UP     0x101U
+#define INPUT_KEY_DOWN   0x102U
+#define INPUT_KEY_LEFT   0x103U
+#define INPUT_KEY_RIGHT  0x104U
+#define INPUT_KEY_PGUP   0x105U
+#define INPUT_KEY_PGDN   0x106U
+#define INPUT_KEY_HOME   0x107U
+#define INPUT_KEY_END    0x108U
+#define INPUT_KEY_INSERT 0x109U
+#define INPUT_KEY_DELETE 0x10aU
 
 typedef enum {
     INPUT_EVENT_KEY_PRESS,

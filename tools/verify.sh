@@ -33,4 +33,4 @@ run_gate qemu-markers bash tools/qemu_marker_test.sh all
 run_gate qemu-fb-fat bash tools/qemu_fb_fat_test.sh
 
 printf '\nALL AUTOMATED BASELINE GATES PASSED\n'
-printf 'Manual desktop verification is still required with: make qemu-fb-visible\n'
+printf 'Manual desktop verification is required before promoting a new baseline: make qemu-fb-visible\n'

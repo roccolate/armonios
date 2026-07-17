@@ -48,28 +48,28 @@ Required outcome:
 
 ### P0 — RISK-002: process-owned file descriptors
 
-The VFS currently exposes one global eight-entry descriptor table.
+The VFS now exposes process-local descriptors with central cleanup.
 
-Required outcome:
+Verified outcome:
 
-- descriptors owned by or local to a process;
-- cross-process access rejected;
-- offsets not unintentionally shared;
+- descriptors are owned by or local to a process;
+- cross-process access is rejected;
+- offsets are not unintentionally shared;
 - process exit/fault/kill closes descriptors;
-- lifecycle and isolation tests.
+- lifecycle and isolation tests run through `tests/run_vfs_process_fd_test.sh`.
 
 ### P1 — Complete visible FAT workflow
 
-- attach `$(VIRTIO_BLK_IMG)` to `qemu-fb-visible`;
-- define/fix focus for an editor spawned by `files`;
-- manually verify create/edit/save/rename/reopen/delete;
-- record the date, commit, environment, and tester.
+- `$(VIRTIO_BLK_IMG)` is attached to `qemu-fb-visible`;
+- editor focus from `files` is covered by `tools/qemu_focus_test.sh`;
+- rocco manually verified create/edit/save/rename/reopen/delete on 2026-07-17;
+- recorded baseline: `8c8400bcddd754d879e6e21b787b8d028a6c6036` working tree via `make qemu-fb-visible`.
 
 ### P1 — Deterministic QEMU gates
 
-`qemu-fs-test` checks serial markers. `qemu-fb`, `qemu-usb`, and `qemu-net` currently do not.
+`qemu-fs-test`, `tools/qemu_focus_test.sh`, `tools/qemu_usercopy_test.sh`, `tools/qemu_marker_test.sh all`, and `tools/qemu_fb_fat_test.sh` check serial markers. The raw `qemu-fb`, `qemu-usb`, and `qemu-net` targets remain launch commands.
 
-Convert mandatory runtime targets into tests that fail when a final subsystem marker is absent. An external timeout is not a pass condition.
+Use the marker scripts for release evidence. An external timeout is not a pass condition.
 
 ## Hard rules
 
@@ -92,8 +92,8 @@ Convert mandatory runtime targets into tests that fail when a final subsystem ma
 - Current process tables also identity-map full RAM for EL1 with W^X (text RX, rodata R+NX, data+bss+stack RW+NX, MMIO device+NX, remaining RAM RW+NX). ALIGN(4096) before `.data` keeps rodata and data on separate pages.
 - TTBR1 and ASIDs are not used.
 - The PMM manages at most 128 MiB.
-- File descriptors are currently global and unsafe for a stable multi-process contract.
-- KLI1 does not yet define general mutable `.data`/`.bss` behavior.
+- File descriptors are process-local and reclaimed centrally on process exit/fault/kill.
+- KLI1 explicitly forbids mutable `.data`/`.bss` in flat application images.
 - FAT32 scope is root-only and short-name-only.
 - USB scope is basic directly attached boot-protocol HID; no hub claim.
 - Networking is a minimal internal DHCP path, not a socket API.
@@ -108,6 +108,10 @@ make size
 make -C tests test
 make stack-check
 make qemu-fs-test
+bash tools/qemu_usercopy_test.sh
+bash tools/qemu_focus_test.sh
+bash tools/qemu_marker_test.sh all
+bash tools/qemu_fb_fat_test.sh
 ```
 
 ### Current launch targets requiring explicit marker inspection
@@ -118,7 +122,7 @@ timeout 25s make qemu-usb
 timeout 25s make qemu-net
 ```
 
-Do not report the second group as passing tests merely because timeout exit code 124 was accepted.
+Do not report the second group as passing tests merely because timeout exit code 124 was accepted. Use `bash tools/qemu_marker_test.sh all` or `bash tools/verify.sh` for deterministic marker evidence.
 
 ### Visible desktop
 
@@ -126,7 +130,7 @@ Do not report the second group as passing tests merely because timeout exit code
 make qemu-fb-visible
 ```
 
-The current target does not include the FAT block image. Fix RISK-003 before using it for the documented FAT workflow.
+The current target includes the FAT block image, GPU, keyboard, and mouse. The deterministic wiring half of RISK-003 is covered by `tools/qemu_fb_fat_test.sh`; the documented FAT workflow was manually verified by rocco on 2026-07-17. Editor appears to show one visible text line, which is tracked as polish unless it blocks a concrete workflow.
 
 ## Required workflow for an agent task
 

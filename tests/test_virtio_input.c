@@ -1,5 +1,6 @@
 #include "unity/unity.h"
 
+#include "input/input.h"
 #include "input/virtio_input.h"
 
 #include <stdint.h>
@@ -65,4 +66,22 @@ void test_virtio_input_rejects_invalid_inputs(void) {
     TEST_ASSERT_EQUAL_UINT64(0, virtio_input_has_events(0));
     TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
                              (uint64_t)virtio_input_poll(0));
+}
+
+void test_virtio_input_key_translation_maps_ascii_and_navigation(void) {
+    TEST_ASSERT_EQUAL_UINT64('a',
+        virtio_input_key_to_input_key(VIRTIO_INPUT_KEY_A, 0, 0));
+    TEST_ASSERT_EQUAL_UINT64('A',
+        virtio_input_key_to_input_key(VIRTIO_INPUT_KEY_A, 1, 0));
+    TEST_ASSERT_EQUAL_UINT64(INPUT_KEY_UP,
+        virtio_input_key_to_input_key(VIRTIO_INPUT_KEY_UP, 0, 0));
+    TEST_ASSERT_EQUAL_UINT64(INPUT_KEY_DELETE,
+        virtio_input_key_to_input_key(VIRTIO_INPUT_KEY_DELETE, 0, 0));
+}
+
+void test_virtio_input_key_translation_maps_ctrl_letters(void) {
+    TEST_ASSERT_EQUAL_UINT64(19,
+        virtio_input_key_to_input_key(VIRTIO_INPUT_KEY_S, 0, 1));
+    TEST_ASSERT_EQUAL_UINT64(17,
+        virtio_input_key_to_input_key(VIRTIO_INPUT_KEY_Q, 1, 1));
 }

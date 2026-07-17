@@ -378,6 +378,7 @@ DECLARE_APP_BLOB(files)
 DECLARE_APP_BLOB(monitor)
 DECLARE_APP_BLOB(clock)
 DECLARE_APP_BLOB(panel)
+DECLARE_APP_BLOB(control)
 
 static void assert_app_image_size(const char *app_name,
                                   const char *start,
@@ -438,4 +439,10 @@ void test_user_image_runtime_shipping_panel_image_size(void) {
     assert_app_image_size("panel",
         _binary____build_programs_apps_panel_bin_start,
         _binary____build_programs_apps_panel_bin_end);
+}
+
+void test_user_image_runtime_shipping_control_image_size(void) {
+    assert_app_image_size("control",
+        _binary____build_programs_apps_control_bin_start,
+        _binary____build_programs_apps_control_bin_end);
 }

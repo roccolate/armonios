@@ -16,7 +16,8 @@ APP_BLOB_BINS  := $(BUILD_DIR)/$(APPS_DIR)/shell.bin \
                   $(BUILD_DIR)/$(APPS_DIR)/files.bin \
                   $(BUILD_DIR)/$(APPS_DIR)/monitor.bin \
                   $(BUILD_DIR)/$(APPS_DIR)/clock.bin \
-                  $(BUILD_DIR)/$(APPS_DIR)/panel.bin
+                  $(BUILD_DIR)/$(APPS_DIR)/panel.bin \
+                  $(BUILD_DIR)/$(APPS_DIR)/control.bin
 APP_BLOB_OBJS  := $(patsubst %.bin,%.host_blob.o,$(APP_BLOB_BINS))
 
 SRCS=unity/unity.c main.c \
@@ -50,7 +51,8 @@ SRCS=unity/unity.c main.c \
      ../kernel/dtb.c ../kernel/dtb_framebuffer.c \
      ../drivers/fb/fb.c ../drivers/storage/virtio_blk.c \
      ../drivers/net/virtio_net.c \
-     ../drivers/input/input.c ../drivers/input/virtio_input.c \
+     ../drivers/input/input.c ../drivers/input/keymap.c \
+     ../drivers/input/virtio_input.c \
      ../drivers/usb/hid.c ../drivers/usb/hid_driver.c \
      ../drivers/usb/xhci.c ../drivers/usb/usb_core.c \
      ../drivers/pci/pci.c test_pl011_stub.c test_panel_boot_recovery_stub.c \

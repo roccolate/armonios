@@ -34,6 +34,10 @@
 
 #define INPUT_KEY_UP    0x101
 #define INPUT_KEY_DOWN  0x102
+#define INPUT_KEY_PGUP  0x105
+#define INPUT_KEY_PGDN  0x106
+#define INPUT_KEY_HOME  0x107
+#define INPUT_KEY_END   0x108
 
 typedef enum {
     FILES_MODE_NORMAL = 0,
@@ -118,6 +122,17 @@ static int valid_83_name(const char *name) {
     return base > 0 && (in_ext == 0 || ext > 0);
 }
 
+static int text_equal(const char *left, const char *right) {
+    int i = 0;
+    while (left[i] != '\0' || right[i] != '\0') {
+        if (left[i] != right[i]) {
+            return 0;
+        }
+        i++;
+    }
+    return 1;
+}
+
 static void build_fat_path(char *out, size_t out_size, const char *name) {
     static const char prefix[] = "/fat/";
     size_t i = 0;
@@ -170,7 +185,25 @@ static void parse_list(files_state_t *s, long bytes) {
     }
 }
 
+static void restore_selection(files_state_t *s, const char *name) {
+    if (name == 0 || name[0] == '\0') {
+        return;
+    }
+    for (int i = 0; i < s->count; i++) {
+        if (text_equal(s->entries[i], name)) {
+            s->selected = i;
+            return;
+        }
+    }
+}
+
 static void refresh_list(files_state_t *s) {
+    char previous[NAME_CAP];
+    previous[0] = '\0';
+    if (s->count > 0 && s->selected >= 0 && s->selected < s->count) {
+        copy_cstr(previous, sizeof(previous), s->entries[s->selected]);
+    }
+
     long n = kli_readdir("/fat", s->list_buf, sizeof(s->list_buf));
     if (n < 0) {
         clear_entries(s);
@@ -178,6 +211,7 @@ static void refresh_list(files_state_t *s) {
         return;
     }
     parse_list(s, n);
+    restore_selection(s, previous);
     copy_cstr(s->status, sizeof(s->status),
               s->count == 0 ? "NO FILES" : "FAT READY");
 }
@@ -191,7 +225,7 @@ static void redraw(files_state_t *s) {
     (void)gui_window_draw_rect(s->wid, 1, 0, WIN_W - 2,
                                WIN_H - TITLE_BAR_H - 2, COLOR_BG);
     draw_text(s->wid, 12, 8, COLOR_TEXT, "FILES /fat");
-    draw_text(s->wid, 12, 24, COLOR_DIM, "ENTER OPEN  N NEW  R RENAME  D DEL");
+    draw_text(s->wid, 12, 24, COLOR_DIM, "ENTER OPEN  N NEW  R RENAME  D DEL  F REFRESH");
     draw_text(s->wid, 12, 40,
               s->mode == FILES_MODE_DELETE ? COLOR_WARN : COLOR_DIM,
               s->status);
@@ -383,6 +417,28 @@ static int handle_key(files_state_t *s, int key) {
         }
         return 1;
     }
+    if (key == INPUT_KEY_HOME) {
+        s->selected = 0;
+        return 1;
+    }
+    if (key == INPUT_KEY_END) {
+        s->selected = s->count > 0 ? s->count - 1 : 0;
+        return 1;
+    }
+    if (key == INPUT_KEY_PGUP) {
+        s->selected -= ENTRY_CAP;
+        if (s->selected < 0) {
+            s->selected = 0;
+        }
+        return 1;
+    }
+    if (key == INPUT_KEY_PGDN) {
+        s->selected += ENTRY_CAP;
+        if (s->selected >= s->count) {
+            s->selected = s->count > 0 ? s->count - 1 : 0;
+        }
+        return 1;
+    }
     if (key == 13 || key == 10) {
         open_selected(s);
         return 1;
@@ -406,6 +462,12 @@ static int handle_key(files_state_t *s, int key) {
             s->mode = FILES_MODE_DELETE;
             copy_cstr(s->status, sizeof(s->status), "CONFIRM DELETE");
         }
+        return 1;
+    }
+    if (key == 'f' || key == 'F') {
+        refresh_list(s);
+        copy_cstr(s->status, sizeof(s->status),
+                  s->count == 0 ? "NO FILES" : "REFRESHED");
         return 1;
     }
     return 0;

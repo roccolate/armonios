@@ -72,4 +72,9 @@ int hid_parse_boot_mouse(const uint8_t *buf, uint32_t len,
  * (modifiers, function keys, navigation keys). */
 uint8_t hid_usage_to_ascii(uint8_t usage, uint8_t shifted);
 
+/* Translate a USB HID Usage ID plus the boot-report modifier byte into
+ * the kernel's input key space: ASCII/control bytes or INPUT_KEY_*.
+ * Returns 0 for keys the kernel does not expose yet. */
+uint32_t hid_usage_to_input_key(uint8_t usage, uint8_t modifiers);
+
 #endif

@@ -60,6 +60,23 @@ void test_hid_usage_to_ascii_high_usage_ids_return_zero(void) {
     TEST_ASSERT_EQUAL_UINT64(0, hid_usage_to_ascii(0xFFU, 0));
 }
 
+void test_hid_usage_to_input_key_maps_navigation(void) {
+    TEST_ASSERT_EQUAL_UINT64(INPUT_KEY_UP, hid_usage_to_input_key(0x52U, 0));
+    TEST_ASSERT_EQUAL_UINT64(INPUT_KEY_DOWN, hid_usage_to_input_key(0x51U, 0));
+    TEST_ASSERT_EQUAL_UINT64(INPUT_KEY_LEFT, hid_usage_to_input_key(0x50U, 0));
+    TEST_ASSERT_EQUAL_UINT64(INPUT_KEY_RIGHT, hid_usage_to_input_key(0x4FU, 0));
+    TEST_ASSERT_EQUAL_UINT64(INPUT_KEY_PGUP, hid_usage_to_input_key(0x4BU, 0));
+    TEST_ASSERT_EQUAL_UINT64(INPUT_KEY_PGDN, hid_usage_to_input_key(0x4EU, 0));
+    TEST_ASSERT_EQUAL_UINT64(INPUT_KEY_HOME, hid_usage_to_input_key(0x4AU, 0));
+    TEST_ASSERT_EQUAL_UINT64(INPUT_KEY_END, hid_usage_to_input_key(0x4DU, 0));
+    TEST_ASSERT_EQUAL_UINT64(INPUT_KEY_DELETE, hid_usage_to_input_key(0x4CU, 0));
+}
+
+void test_hid_usage_to_input_key_maps_ctrl_letters(void) {
+    TEST_ASSERT_EQUAL_UINT64(19, hid_usage_to_input_key(0x16U, HID_MOD_LCTRL));
+    TEST_ASSERT_EQUAL_UINT64(17, hid_usage_to_input_key(0x14U, HID_MOD_RCTRL));
+}
+
 /*
  * Tests for the boot report -> input_event_t conversion.
  *
@@ -78,6 +95,29 @@ void test_hid_keyboard_report_emits_press_for_new_key(void) {
     TEST_ASSERT_EQUAL_UINT64(1, n);
     TEST_ASSERT_EQUAL_UINT64(INPUT_EVENT_KEY_PRESS, events[0].type);
     TEST_ASSERT_EQUAL_UINT64('a', events[0].data.key.key);
+}
+
+void test_hid_keyboard_report_emits_navigation_key(void) {
+    usb_hid_device_t dev = { 0 };
+    hid_boot_keyboard_report_t r = { 0 };
+    r.keys[0] = 0x52U; /* Up */
+    input_event_t events[8];
+    uint8_t n = usb_hid_keyboard_report(&dev, &r, events, 8);
+    TEST_ASSERT_EQUAL_UINT64(1, n);
+    TEST_ASSERT_EQUAL_UINT64(INPUT_EVENT_KEY_PRESS, events[0].type);
+    TEST_ASSERT_EQUAL_UINT64(INPUT_KEY_UP, events[0].data.key.key);
+}
+
+void test_hid_keyboard_report_emits_ctrl_s(void) {
+    usb_hid_device_t dev = { 0 };
+    hid_boot_keyboard_report_t r = { 0 };
+    r.modifiers = HID_MOD_LCTRL;
+    r.keys[0] = 0x16U; /* 's' */
+    input_event_t events[8];
+    uint8_t n = usb_hid_keyboard_report(&dev, &r, events, 8);
+    TEST_ASSERT_EQUAL_UINT64(1, n);
+    TEST_ASSERT_EQUAL_UINT64(INPUT_EVENT_KEY_PRESS, events[0].type);
+    TEST_ASSERT_EQUAL_UINT64(19, events[0].data.key.key);
 }
 
 void test_hid_keyboard_report_emits_release_when_key_dropped(void) {
