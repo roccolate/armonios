@@ -128,7 +128,7 @@ Enforced by `programs/apps/image.ld` ASSERTs and verified by `tests/run_kli1_con
 W^X enforced in v1.0. Remaining items deferred to v1.1 (TTBR1 split, ASIDs, scoped TLB invalidation, non-duplicated per-process kernel mappings):
 
 - [x] map kernel text RX, mutable kernel data+bss+stack RW/NX, MMIO device/NX, remaining RAM RW/NX;
-- [ ] rodata read-only (requires linker-script reorganisation since `.rodata` currently shares a page with `.data`);
+- [x] rodata read-only (ALIGN(4096) before `.data` puts rodata and data on separate pages, mapped R+NX);
 - [ ] shared kernel mappings via TTBR1;
 - [ ] ASIDs;
 - [ ] scoped TLB invalidation on process switch;

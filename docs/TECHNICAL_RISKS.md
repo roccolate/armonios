@@ -130,7 +130,7 @@ This increases page-table cost, forces global TLB invalidation during switches, 
 
 **Closing evidence (recorded on the closing commit):**
 - `linker/linker.ld` and `linker/linker_rpi4.ld` carry `__text_end`, `__rodata_end`, `__data_end` for section-aware page-table construction.
-- `kernel/mm/vmm.c` provides `vmm_map_kernel_identity()` which maps kernel text RX, data+bss+stack RW+NX, MMIO device+NX, and all remaining RAM pages RW+NX.  (Rodata is merged into the RW+NX segment because `.rodata` shares a page with `.data`; making it truly read-only would require reorganising the linker script.)
+- `kernel/mm/vmm.c` provides `vmm_map_kernel_identity()` which maps kernel text RX, rodata R+NX, data+bss+stack RW+NX, MMIO device+NX, and all remaining RAM pages RW+NX.  (ALIGN(4096) before `.data` in the linker script ensures rodata and data reside on separate pages.)
 - `kernel/kernel.c` `enable_identity_mmu()` (bootstrap PGD) and `kernel/panel_boot.c` `map_kernel_identity()` (per-process PGD) both delegate to `vmm_map_kernel_identity()`.
 - All 13 gates in `tools/verify.sh` PASS: build, size, board-rpi4, host-tests, process-fd-isolation, usercopy-host, kli1-contract, stack-check, qemu-fs-test, usercopy-qemu, qemu-focus, qemu-markers, qemu-fb-fat.
 
