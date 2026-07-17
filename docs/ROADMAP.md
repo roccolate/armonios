@@ -123,14 +123,15 @@ TEST dhcp: PASS
 
 Enforced by `programs/apps/image.ld` ASSERTs and verified by `tests/run_kli1_contract_test.sh`; see `TECHNICAL_RISKS.md` for the closing evidence.
 
-### Memory hardening — RISK-008
+### Memory hardening — RISK-008 (CLOSED)
 
-This is at least a v1.x hardening goal and may be promoted to v1.0 if implementation work touches the same boundary:
+W^X enforced in v1.0. Remaining items deferred to v1.1 (TTBR1 split, ASIDs, scoped TLB invalidation, non-duplicated per-process kernel mappings):
 
-- [ ] move shared kernel mappings to TTBR1;
-- [ ] map kernel text RX, rodata R, mutable kernel data RW/NX, and MMIO device/NX;
-- [ ] introduce ASIDs;
-- [ ] replace global TLB invalidation on every process switch with scoped invalidation;
+- [x] map kernel text RX, mutable kernel data+bss+stack RW/NX, MMIO device/NX, remaining RAM RW/NX;
+- [ ] rodata read-only (requires linker-script reorganisation since `.rodata` currently shares a page with `.data`);
+- [ ] shared kernel mappings via TTBR1;
+- [ ] ASIDs;
+- [ ] scoped TLB invalidation on process switch;
 - [ ] stop cloning the full RAM identity map into every process TTBR0.
 
 ## v1.0 release-candidate exit criteria

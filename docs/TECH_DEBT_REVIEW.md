@@ -71,7 +71,7 @@ The 2026-07-13 audit found, among other items:
 - several QEMU gates are timeout-only launch commands (`RISK-005`);
 - the RPi4 board contract is incomplete (`RISK-006`);
 - the experimental eMMC code is not a valid hardware driver claim (`RISK-007`);
-- kernel mappings remain full-RAM identity RWX (`RISK-008`);
+- kernel mappings now enforce W^X (text RX, data+bss+stack RW+NX, MMIO device+NX, remaining RAM RW+NX) (`RISK-008`, closed);
 - KLI1 mutable `.data`/`.bss` semantics are undefined (`RISK-009`).
 
 The earlier item “user-buffer validation centralized” is still true as a refactoring statement. It must not be interpreted as permission-safe user copying.

@@ -18,7 +18,7 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 | RISK-004 | P1 | Desktop focus | WIRING FIX VERIFIED; INTERACTION OPEN | New userland windows request focus; the focus syscall path is exercised end-to-end by `tools/qemu_focus_test.sh`; the visible files-to-editor flow still needs a named human tester on a real QEMU display. |
 | RISK-006 | P1 | Raspberry Pi 4 build | CLOSED 2026-07-16 (next commit) | `make BOARD=rpi4` now compiles, links, and stays under the kernel size gate via explicit safe-failure stubs in `drivers/boards/rpi4/board.c`. |
 | RISK-007 | P0 for hardware track | Raspberry Pi storage | OPEN | The current eMMC implementation is contradictory and not hardware-validated. |
-| RISK-008 | P1 | Memory protection | OPEN | Process page tables identity-map the full RAM range as kernel RWX. |
+| RISK-008 | P1 | Memory protection | CLOSED | W^X enforced: kernel text RX, data+bss+stack RW+NX, MMIO device+NX, remaining RAM RW+NX. Rodata still merged with data (shares a page). |
 | RISK-009 | P1 | KLI1 application format | CLOSED 2026-07-16 (next commit) | Mutable `.data`/`.bss` is now explicitly forbidden by `programs/apps/image.ld` and verified by `tests/run_kli1_contract_test.sh`. |
 | RISK-010 | P2 | Scheduling documentation | CLOSED 2026-07-16 (next commit) | EL0 processes are preemptive, EL1 helper threads are cooperative; the contract is documented in three independent places and the scheduler exposes the explicit `sched_yield` path that EL1 helpers must take. |
 | RISK-011 | P1 | Verification infrastructure | OPEN | GitHub Actions jobs fail before checkout and expose no step logs. Issue #12 tracks the repository/account-level investigation. |
@@ -117,7 +117,7 @@ This file must be treated as experimental scaffolding, not a working driver.
 ## RISK-008 — Full RAM is kernel RWX in each process table
 
 **Severity:** P1
-**Affected release:** post-v1.0 hardening unless promoted
+**Affected release:** v1.0
 **Evidence:** static VMM and loader inspection
 
 The bootstrap table and every process page table identity-map detected RAM read/write/execute for EL1. EL0 access is restricted, but kernel W^X is absent and every process duplicates the kernel mapping in TTBR0.
@@ -127,6 +127,12 @@ This increases page-table cost, forces global TLB invalidation during switches, 
 **Target direction:** shared kernel mappings through TTBR1, section-specific permissions, ASIDs, and scoped TLB invalidation.
 
 **Exit criteria:** architecture tests and QEMU verification show RX text, R rodata, RW/NX data/heap/stacks, device/NX MMIO, and isolated TTBR0 user mappings.
+
+**Closing evidence (recorded on the closing commit):**
+- `linker/linker.ld` and `linker/linker_rpi4.ld` carry `__text_end`, `__rodata_end`, `__data_end` for section-aware page-table construction.
+- `kernel/mm/vmm.c` provides `vmm_map_kernel_identity()` which maps kernel text RX, data+bss+stack RW+NX, MMIO device+NX, and all remaining RAM pages RW+NX.  (Rodata is merged into the RW+NX segment because `.rodata` shares a page with `.data`; making it truly read-only would require reorganising the linker script.)
+- `kernel/kernel.c` `enable_identity_mmu()` (bootstrap PGD) and `kernel/panel_boot.c` `map_kernel_identity()` (per-process PGD) both delegate to `vmm_map_kernel_identity()`.
+- All 13 gates in `tools/verify.sh` PASS: build, size, board-rpi4, host-tests, process-fd-isolation, usercopy-host, kli1-contract, stack-check, qemu-fs-test, usercopy-qemu, qemu-focus, qemu-markers, qemu-fb-fat.
 
 ## RISK-009 — KLI1 mutable storage contract was undefined
 

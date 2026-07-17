@@ -89,7 +89,7 @@ Convert mandatory runtime targets into tests that fail when a final subsystem ma
 - EL0 processes are preemptive through IRQ trap frames.
 - EL1 helper threads are cooperative.
 - Each process has a separate TTBR0 root.
-- Current process tables also identity-map full RAM for EL1 as RWX.
+- Current process tables also identity-map full RAM for EL1 with W^X (text RX, data+bss+stack RW+NX, MMIO device+NX, remaining RAM RW+NX). Rodata is merged into the RW+NX region because `.rodata` shares a page with `.data`.
 - TTBR1 and ASIDs are not used.
 - The PMM manages at most 128 MiB.
 - File descriptors are currently global and unsafe for a stable multi-process contract.

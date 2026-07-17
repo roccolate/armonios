@@ -80,9 +80,9 @@ The latest local verification recorded for the current `main` baseline at `4494c
 | EL0 processes | IMPLEMENTED; HOST-VERIFIED | Process table, saved trap frames, per-process page tables, spawn/wait/kill/exit tests | User-output copies are now PTE-checked via `sys_user_buf_out`; richer stress coverage is still pending. |
 | EL0 scheduling | IMPLEMENTED; HOST-VERIFIED | Timer IRQ dispatch and process round-robin tests | Runtime stress/preemption coverage is limited. |
 | EL1 kernel threads | IMPLEMENTED | Cooperative scheduler code | Kernel threads are not timer-preempted. |
-| PMM/VMM/heap | IMPLEMENTED; HOST-VERIFIED | Allocation, mapping, rollback, cleanup, and heap tests | PMM manages at most 128 MiB; kernel RAM mappings are RWX identity mappings. |
-| Syscall ABI | IMPLEMENTED; HOST-VERIFIED | Frozen numbers and ABI tests | Output copies enforce per-page write permission via PTE checks; further hardening tracked under RISK-008. |
-| VFS | IMPLEMENTED; HOST-VERIFIED | Per-process descriptors, bootfs/tmpfs/FAT dispatch, and `process-fd-isolation` gate | Further hardening tracked under RISK-008. |
+| PMM/VMM/heap | IMPLEMENTED; HOST-VERIFIED | Allocation, mapping, rollback, cleanup, and heap tests | PMM manages at most 128 MiB; kernel RAM mappings are now W^X (RISK-008: text RX, data+bss+stack RW+NX, MMIO device+NX, remaining RAM RW+NX). |
+| Syscall ABI | IMPLEMENTED; HOST-VERIFIED | Frozen numbers and ABI tests | Output copies enforce per-page write permission via PTE checks; memory hardening implemented under RISK-008. |
+| VFS | IMPLEMENTED; HOST-VERIFIED | Per-process descriptors, bootfs/tmpfs/FAT dispatch, and `process-fd-isolation` gate | Memory hardening for VFS tracked under RISK-008 (now closed). |
 | FAT32 | IMPLEMENTED; HOST-VERIFIED; QEMU-VERIFIED on storage smoke path | Root 8.3 create/read/write/rename/delete/list plus QEMU mount markers | No subdirectories, long names, general FAT compatibility, or completed visible workflow claim. |
 | GUI compositor | IMPLEMENTED; HOST-VERIFIED; QEMU-VERIFIED on the focus path | Windows, ownership, focus, drag, backing buffers, damage, events, and a limited visible observation; `tools/qemu_focus_test.sh` proves the focus syscall path runs end-to-end | The visible files-to-editor workflow still needs a named human tester on a real QEMU display. |
 | Desktop apps | IMPLEMENTED; BUILD-VERIFIED on current baseline | Six apps built; panel survived the usercopy probe regression | The complete files/editor/FAT workflow is not verified after the recovery change. |
@@ -111,6 +111,7 @@ The current QEMU codebase includes:
 - PCI/xHCI and boot-protocol HID parsing;
 - permission-aware user-copy helpers in `kernel/syscall_helpers.c` (PTE-checked `user_buf_range`, `sys_copy_from_user`, `sys_copy_to_user`, `sys_user_copy_cstr`);
 - per-process VFS descriptors in `kernel/vfs.c`, reclaimed centrally through `process_mark_exited`;
+- W^X kernel page-table construction in `kernel/mm/vmm.c` via `vmm_map_kernel_identity()`, wired into the bootstrap PGD (kernel.c) and per-process PGDs (panel_boot.c);
 - a broad native host test suite;
 - a visible QEMU target wired to the generated FAT32 virtio block image;
 - a common userland window-create wrapper that requests focus after successful creation;

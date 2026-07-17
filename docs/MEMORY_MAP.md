@@ -48,7 +48,7 @@ For the bootstrap table and every process table:
 - TTBR0 contains both user mappings and the kernel identity map;
 - a process switch changes TTBR0 and performs a global EL1 TLB invalidation.
 
-EL0 cannot use the kernel mappings merely because they exist in TTBR0: kernel RAM entries are not marked user-accessible. However, the current design still lacks kernel W^X, duplicates kernel mappings for every process, and does not use ASIDs.
+EL0 cannot use the kernel mappings merely because they exist in TTBR0: kernel RAM entries are not marked user-accessible. Kernel W^X is now enforced (RISK-008, text RX, data+bss+stack RW+NX, MMIO device+NX, remaining RAM RW+NX) but the design still duplicates kernel mappings for every process and does not use ASIDs (future v1.1 work).
 
 Target direction:
 

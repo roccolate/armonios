@@ -66,7 +66,7 @@ Current behavior:
 - TTBR1 is disabled;
 - changing process TTBR0 invalidates the complete EL1 TLB.
 
-This provides basic EL0 separation, but it is not a hardened split-address-space design. `RISK-008` tracks the intended TTBR1, W^X, ASID, and scoped-invalidation work.
+This provides basic EL0 separation, but it is not a hardened split-address-space design. `RISK-008` implemented kernel-page W^X (text RX, data+bss+stack RW+NX, MMIO device+NX); the remaining TTBR1, ASID, and scoped-invalidation work is future v1.1 material.
 
 ### Process user regions
 
