@@ -32,7 +32,7 @@ LOG_QEMU = @printf "  QEMU    %s\n" "$@";
 LOG_SIZE = @printf "  SIZE    %s\n" "$<";
 endif
 
-BUILD_DIR := build
+BUILD_DIR ?= build
 BOARD ?= qemu_virt
 BOARD_DIR := drivers/boards/$(BOARD)
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
