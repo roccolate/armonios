@@ -10,8 +10,26 @@
 - **Project state:** v0.9 QEMU desktop alpha
 - **Release target:** v1.0 QEMU desktop release candidate
 - **Audit date:** 2026-07-16
-- **Code baseline synchronized:** `main` at `4494c554df212401ffbd294d1a44b5977696fa0b`
-- **Audit method:** repository-wide static inspection plus a fresh local verification run of `bash tools/verify.sh`, including the new `process-fd-isolation`, `usercopy-host`, and `usercopy-qemu` automated gates. The post-fix serial log for the usercopy QEMU gate lives at `build-usercopy-test/qemu-usercopy-test.log`.
+- **Code baseline synchronized:** `main` at `9157aa2360fa346dd98e9c64ac2050f8af111ce9`
+- **Audit method:** repository-wide static inspection plus a fresh local verification run of `bash tools/verify.sh`, including `process-fd-isolation`, `usercopy-host`, `usercopy-qemu`, `qemu-markers`, and `qemu-fb-fat` automated gates. Serial logs for the QEMU gates live under `build/qemu-*-test.log` and `build-usercopy-test/qemu-usercopy-test.log`.
+
+## Verification record (commit `9157aa2`)
+
+| Check | Status | Evidence |
+|---|---|---|
+| `make` | BUILD-VERIFIED | Baseline build with `kernel/vfs.c`, `drivers/input/input.c`, `tests/Makefile`, and `tests/run_*_test.sh` toolchain fixups. |
+| `make size` | BUILD-VERIFIED | `kernel.bin: 97344 bytes (limit: 100000)`. |
+| `make -C tests test` | HOST-VERIFIED | `ALL TESTS PASSED (0)`. |
+| `bash tests/run_vfs_process_fd_test.sh` | HOST-VERIFIED | `process-local VFS descriptors` and `process exit closes VFS descriptors`. |
+| `bash tests/run_user_copy_permissions_test.sh` | HOST-VERIFIED | writable copies, `ERR_PERM` on read-only destinations, mixed RW→RO atomicity. |
+| `make stack-check` | HOST-VERIFIED | Maximum 368 bytes in `editor` with a 3072-byte limit. |
+| `make qemu-fs-test` | QEMU-VERIFIED | `storage: initialized`, `FAT32: mounted`, `FAT32 root: mounted`, `FAT32 shell bytes`, `FAT32 edit file: mounted`, `storage app image: FAT32`. |
+| `bash tools/qemu_usercopy_test.sh` | QEMU-VERIFIED | Six `USERCOPY: RX output rejected` probes across distinct EL0 processes followed by `panel: ready` and `clock: starting`. Log: `build-usercopy-test/qemu-usercopy-test.log`. |
+| `bash tools/qemu_marker_test.sh all` | QEMU-VERIFIED | `qemu-fb` (`VIRTIO gpu: windows`, `panel: ready`), `qemu-usb` (`USB: controller initialized`, `USB: enumeration ok`, `USB HID: 2 devices`), `qemu-net` (`network: initialized`, `[net] DHCP ack: IP=10.0.2.15`). |
+| `bash tools/qemu_fb_fat_test.sh` | QEMU-VERIFIED | Visible-desktop wiring: `FAT32: mounted`, `FAT32 root: mounted`, `VIRTIO gpu: windows`, `panel: ready` in the same boot. |
+| `make qemu-fb-visible` interactive workflow | UNVERIFIED | The static wiring is provable from logs; the visible create/edit/save/rename/reopen/delete flow still needs a named human tester on a real QEMU display. |
+| `make BOARD=rpi4` | KNOWN-BROKEN | The RPi4 board backend does not satisfy the full interface used by generic kernel code. |
+| Physical Raspberry Pi 4 boot | PLANNED | No hardware boot claim. |
 
 The v0.9 label means that a usable desktop path exists in QEMU. It does **not** mean the kernel is hardened, the visible FAT workflow is complete, or Raspberry Pi support exists.
 
@@ -101,14 +119,13 @@ These implementation facts do not override the limitations in the subsystem tabl
 
 ## v1.0 blockers
 
-Both syscall-boundary P0 risks are now closed. The remaining v1.0 work is verification and reproducibility:
+Both syscall-boundary P0 risks, the deterministic QEMU gate scaffold, and the visible-desktop FAT wiring are now closed. The remaining v1.0 work is human-driven verification and reproducibility:
 
-1. **RISK-003:** verify the visible target's FAT32 attachment through the complete workflow.
-2. **RISK-004:** verify new-window focus in the files-to-editor workflow.
-3. **RISK-005:** execute the deterministic framebuffer, USB, and DHCP marker gates on real QEMU and record their logs. The `usercopy-qemu` gate is already part of the automated baseline; the subsystem markers still need real logs.
-4. Complete the visible create/edit/save/rename/reopen/delete FAT workflow.
-5. Resolve the GitHub Actions pre-step infrastructure failure tracked in issue #12.
-6. Reconcile release documentation after the verified blockers are closed.
+1. **RISK-003:** the visible create/edit/save/rename/reopen/delete FAT workflow must be recorded by a named human tester on `make qemu-fb-visible` against a current commit. The deterministic wiring gate (`tools/qemu_fb_fat_test.sh`) already proves the FAT + GPU + panel hot path boots together.
+2. **RISK-004:** the files-to-editor focus behaviour must be confirmed by a named human tester on `make qemu-fb-visible` against a current commit.
+3. Complete the visible create/edit/save/rename/reopen/delete FAT workflow (same as RISK-003).
+4. Resolve the GitHub Actions pre-step infrastructure failure tracked in issue #12.
+5. Reconcile release documentation after the verified blockers are closed.
 
 ## Explicit non-claims
 

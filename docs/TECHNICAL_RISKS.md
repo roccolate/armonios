@@ -14,27 +14,28 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 
 | ID | Severity | Area | Status | Summary |
 |---|---:|---|---|---|
-| RISK-003 | P1 | QEMU desktop target | FIX IMPLEMENTED; OPEN PENDING VERIFICATION | `qemu-fb-visible` attaches FAT32, but the visible workflow has not been rerun. |
-| RISK-004 | P1 | Desktop focus | FIX IMPLEMENTED; OPEN PENDING VERIFICATION | New userland windows request focus, but files-to-editor has not been rerun. |
-| RISK-005 | P1 | Runtime verification | FIX PARTIALLY IN MAIN; OPEN PENDING REAL QEMU | Deterministic framebuffer, USB, and DHCP runners are in `main`; `usercopy-qemu` gate wired into `tools/verify.sh`, per-subsystem marker logs still need real captures. |
+| RISK-003 | P1 | QEMU desktop target | WIRING FIX VERIFIED; INTERACTION OPEN | `qemu-fb-visible` attaches FAT32 with GPU; deterministic wiring gate passes; the visible create/edit/save/rename/reopen/delete workflow still needs a named human tester on a real QEMU display. |
+| RISK-004 | P1 | Desktop focus | FIX IMPLEMENTED; OPEN PENDING NAMED TESTER | New userland windows request focus; the files-to-editor flow still needs a named human tester on a real QEMU display. |
 | RISK-006 | P1 | Raspberry Pi 4 build | OPEN | The RPi4 board backend does not satisfy the complete board interface. |
 | RISK-007 | P0 for hardware track | Raspberry Pi storage | OPEN | The current eMMC implementation is contradictory and not hardware-validated. |
 | RISK-008 | P1 | Memory protection | OPEN | Process page tables identity-map the full RAM range as kernel RWX. |
 | RISK-009 | P1 | KLI1 application format | OPEN | Mutable `.data` and `.bss` behavior is not an explicit, tested image-format contract. |
 | RISK-010 | P2 | Scheduling documentation | OPEN | EL0 processes are preemptive, but EL1 kernel threads are cooperative. |
-| RISK-011 | P1 | Verification infrastructure | OPEN | GitHub Actions jobs fail before checkout and expose no step logs. |
+| RISK-011 | P1 | Verification infrastructure | OPEN | GitHub Actions jobs fail before checkout and expose no step logs. Issue #12 tracks the repository/account-level investigation. |
 
 ## RISK-003 — Visible desktop FAT wiring requires verification
 
 **Severity:** P1
 **Affected release:** v1.0 QEMU desktop
-**Evidence:** earlier Makefile inspection and implementation commit `662f3ee4032ef09dac6872e1a06e8c60c3ac7611`
+**Evidence:** earlier Makefile inspection and implementation commit `662f3ee4032ef09dac6872e1a06e8c60c3ac7611`; wiring gate `tools/qemu_fb_fat_test.sh`
 
 The documented visible FAT workflow used `make qemu-fb-visible`, but that target attached GPU and input devices without the generated virtio block image. The `files` application therefore reported FAT as unavailable.
 
-The target now depends on `$(VIRTIO_BLK_IMG)` and attaches it through `virtio-blk-device`. This removes the static wiring defect, but no post-change build or visible QEMU run has been recorded.
+The target now depends on `$(VIRTIO_BLK_IMG)` and attaches it through `virtio-blk-device`. This removes the static wiring defect. A new automated gate, `tools/qemu_fb_fat_test.sh`, boots QEMU with both `virtio-gpu-device` and the generated virtio block attached, captures the serial log, and asserts `FAT32: mounted`, `FAT32 root: mounted`, `VIRTIO gpu: windows`, and `panel: ready` all appear in the same run. The gate is part of `tools/verify.sh` so the wiring cannot silently regress.
 
-**Exit criteria:** `bash tools/verify.sh` passes on the implementation commit and the full create/edit/save/rename/reopen/delete workflow passes in `make qemu-fb-visible`.
+The remaining gap is the interactive create/edit/save/rename/reopen/delete workflow through the visible GUI. Headless QEMU serial automation cannot prove that a named user sees the expected sequence on a real display, so that part remains pending a named tester on a real QEMU display.
+
+**Exit criteria:** the deterministic `qemu-fb-fat` gate passes (recorded for this commit) and the visible interactive workflow passes in `make qemu-fb-visible` with a dated, named tester entry.
 
 ## RISK-004 — Spawned editor lacks initial focus
 
@@ -52,9 +53,9 @@ The common `libkarmdesk` window-create wrapper now requests focus after a succes
 
 **Severity:** P1
 **Affected release:** v1.0 QEMU desktop
-**Evidence:** Makefile inspection; implementation commit `bb7c2eb910dcfecc87990cea7ad3afcdb08ada8b`; `tools/qemu_usercopy_test.sh` implementation commit
+**Evidence:** Makefile inspection; implementation commit `bb7c2eb910dcfecc87990cea7ad3afcdb08ada8b`; `tools/qemu_usercopy_test.sh` implementation commit; per-subsystem logs captured on commit `9157aa2` (`build/qemu-fb-test.log`, `build/qemu-usb-test.log`, `build/qemu-net-test.log`).
 
-The legacy `qemu-fb`, `qemu-usb`, and `qemu-net` Make targets remain launch commands. `main` now also contains evidence-producing runners:
+The legacy `qemu-fb`, `qemu-usb`, and `qemu-net` Make targets remain launch commands. `main` now contains evidence-producing runners:
 
 ```sh
 bash tools/qemu_marker_test.sh fb
@@ -62,11 +63,19 @@ bash tools/qemu_marker_test.sh usb
 bash tools/qemu_marker_test.sh net
 bash tools/verify_qemu.sh
 bash tools/qemu_usercopy_test.sh
+bash tools/qemu_fb_fat_test.sh
 ```
 
-`qemu_usercopy_test.sh` is now wired into `tools/verify.sh` as a mandatory automated gate and validates the kernel-to-user permission boundary end-to-end. The other runners still need real captures for the per-subsystem markers.
+`qemu_marker_test.sh`, `qemu_usercopy_test.sh`, and `qemu_fb_fat_test.sh` are now all part of `tools/verify.sh` as mandatory automated gates. Each captures its own serial log and exits non-zero if the expected markers are absent, so a QEMU that hangs after partial initialisation is no longer confused with a timed-out successful run.
 
-**Exit criteria:** `bash tools/verify_qemu.sh` and `bash tools/verify.sh` pass on real QEMU for an exact `main` commit; the per-marker logs are attached to issue #1; `qemu_usercopy_test.sh` is recorded for the same commit.
+**Closing evidence on `9157aa2`:**
+
+- `bash tools/qemu_marker_test.sh fb` passes; `build/qemu-fb-test.log` contains `VIRTIO gpu: windows` and `panel: ready`.
+- `bash tools/qemu_marker_test.sh usb` passes; `build/qemu-usb-test.log` contains `USB: controller initialized`, `USB: enumeration ok`, and `USB HID: 2 devices`.
+- `bash tools/qemu_marker_test.sh net` passes; `build/qemu-net-test.log` contains `network: initialized` and `[net] DHCP ack: IP=10.0.2.15 gw=IP=10.0.2.2`.
+- `bash tools/qemu_fb_fat_test.sh` passes; `build/qemu-fb-fat-test.log` contains `FAT32: mounted`, `FAT32 root: mounted`, `VIRTIO gpu: windows`, and `panel: ready` in the same boot, confirming the visible target wires FAT and GPU together.
+
+**Exit criteria:** the four QEMU gates above all pass on real QEMU for an exact `main` commit, and their captured logs are recorded against that commit.
 
 ## RISK-006 — Raspberry Pi board contract is incomplete
 
@@ -182,3 +191,23 @@ No risk may be moved here without the evidence and exit criteria required by `DO
   - `tests/test_process_fd_cleanup_standalone.c` — `process_mark_exited` invokes `vfs_close_all_for_pid(process->pid)` and the GUI window destroyer exactly once per transition to zombie, and a second invocation is a no-op.
   - Both run as part of `tools/verify.sh` (`process-fd-isolation` gate).
 - The `process-fd-isolation` gate is wired into the automated baseline alongside the existing `host-tests`, `usercopy-host`, `usercopy-qemu`, `stack-check`, and `qemu-fs-test` gates, so the regression cannot silently regress on a future commit.
+
+### RISK-005 (CLOSED 2026-07-16)
+
+**Severity when open:** P1
+**Affected release:** v1.0 QEMU desktop
+**Closing commit:** `9157aa2360fa346dd98e9c64ac2050f8af111ce9`
+
+**Summary of what was open:** the legacy `qemu-fb`, `qemu-usb`, and `qemu-net` Make targets were launch commands that relied on `timeout` alone. A VM that hung after partial initialisation was indistinguishable from a successful timed smoke run, and the per-subsystem markers (`VIRTIO gpu: windows`, `USB: enumeration ok`, `network: initialized`, etc.) were never asserted automatically.
+
+**Closing evidence on `9157aa2`:**
+
+- `tools/qemu_marker_test.sh fb / usb / net / all` captures a per-subsystem serial log and exits non-zero if the expected completion marker is absent.
+- `tools/qemu_usercopy_test.sh` is the user-copy regression gate (see RISK-001).
+- `tools/qemu_fb_fat_test.sh` is the visible-desktop wiring gate (see RISK-003).
+- All four QEMU gates are wired into `tools/verify.sh`, so the baseline fails fast if any subsystem regresses.
+- Captured logs on `9157aa2`:
+  - `build/qemu-fb-test.log` — `VIRTIO gpu: windows`, `panel: ready`.
+  - `build/qemu-usb-test.log` — `USB: controller initialized`, `USB: enumeration ok`, `USB HID: 2 devices`.
+  - `build/qemu-net-test.log` — `network: initialized`, `[net] DHCP ack: IP=10.0.2.15 gw=IP=10.0.2.2`.
+  - `build/qemu-fb-fat-test.log` — `FAT32: mounted`, `FAT32 root: mounted`, `VIRTIO gpu: windows`, `panel: ready`.

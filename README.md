@@ -63,7 +63,7 @@ cd armonios
 bash tools/verify.sh
 ```
 
-The script records the current commit, runs the kernel build, binary-size gate, native host tests, process-local VFS descriptor host gate, the standalone user-copy permissions host gate, userland stack check, the FAT32 QEMU serial-marker storage smoke test, and the EL0 user-copy permissions QEMU regression. It stops on the first failure.
+The script records the current commit, runs the kernel build, binary-size gate, native host tests, process-local VFS descriptor host gate, the standalone user-copy permissions host gate, userland stack check, the FAT32 QEMU serial-marker storage smoke test, the EL0 user-copy permissions QEMU regression, the per-subsystem marker gates (framebuffer, USB, network) under `tools/qemu_marker_test.sh all`, and the visible-desktop FAT+GPU wiring gate. It stops on the first failure.
 
 Equivalent individual commands are:
 
@@ -76,6 +76,8 @@ bash tests/run_user_copy_permissions_test.sh
 make stack-check
 make qemu-fs-test
 bash tools/qemu_usercopy_test.sh
+bash tools/qemu_marker_test.sh all
+bash tools/qemu_fb_fat_test.sh
 ```
 
 ### Run the serial target
@@ -122,7 +124,7 @@ At present these are runtime launch targets, not complete deterministic tests. A
 
 ## Current verified local baseline
 
-The latest local verification recorded on commit `4494c554df212401ffbd294d1a44b5977696fa0b` reports:
+The latest local verification recorded on commit `9157aa2360fa346dd98e9c64ac2050f8af111ce9` reports:
 
 ```text
 make                              passed
@@ -131,9 +133,15 @@ make -C tests test                ALL TESTS PASSED (0)
 tests/run_vfs_process_fd_test.sh  process-local VFS descriptors + exit cleanup PASS
 tests/run_user_copy_permissions_test.sh  writable / ERR_PERM / mixed atomicity PASS
 make stack-check                  maximum 368 bytes, limit 3072
-make qemu-fs-test                 passed after direct QEMU serial-file capture
+make qemu-fs-test                 storage: initialized + FAT32: mounted + /fat mounted
 tools/qemu_usercopy_test.sh       6 EL0 probes rejected, panel: ready + clock: starting
+tools/qemu_marker_test.sh all     fb (VIRTIO gpu + panel: ready)
+                                  usb (controller + enumeration + 2 HID devices)
+                                  net (network: initialized + DHCP ack)
+tools/qemu_fb_fat_test.sh         FAT32 + GPU + panel: ready in one boot
 ```
+
+Run `git checkout 9157aa2` to reproduce this baseline byte for byte.
 
 Record the exact commit and serial log when promoting the baseline. The full visible files/editor/FAT workflow and deterministic framebuffer, USB, and network gates remain incomplete. See `docs/CURRENT_STATE.md` for the per-subsystem evidence and scope.
 
@@ -190,15 +198,13 @@ Do not describe ArmoniOS as running on Raspberry Pi until the hardware criteria 
 
 The next release goal is a repeatable **v1.0 QEMU desktop release candidate**. The immediate work is correctness and reproducibility, not new multimedia or hardware scope.
 
-Both syscall-boundary P0 risks (`RISK-001` and `RISK-002`) are closed on `4494c55`; see `docs/TECHNICAL_RISKS.md` for the recorded evidence.
+Both syscall-boundary P0 risks (`RISK-001` and `RISK-002`) are closed on `4494c55`; the deterministic QEMU gate scaffold (`RISK-005`) and the visible-desktop FAT wiring (`RISK-003`) are closed on `9157aa2`. See `docs/TECHNICAL_RISKS.md` for the recorded evidence.
 
 Major remaining blockers include:
 
-1. verification of the visible FAT attachment on the current commit (`RISK-003`);
-2. verification of initial focus for spawned app windows (`RISK-004`);
-3. deterministic framebuffer, USB, and network QEMU gates (`RISK-005`);
-4. successful end-to-end files/editor/FAT verification;
-5. restoring GitHub Actions runner execution and logs (`RISK-011`).
+1. a named human tester records the visible create/edit/save/rename/reopen/delete FAT workflow (`RISK-003` interactive half);
+2. a named human tester confirms the files-to-editor focus behaviour (`RISK-004`);
+3. restoring GitHub Actions runner execution and logs (`RISK-011`).
 
 See [Roadmap](docs/ROADMAP.md).
 

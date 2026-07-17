@@ -47,9 +47,10 @@ These two items block v1.0 regardless of desktop polish because they affect kern
 
 ### Complete QEMU desktop target — RISK-003
 
-- [ ] Make `qemu-fb-visible` depend on `$(VIRTIO_BLK_IMG)`.
-- [ ] Attach the image through `virtio-blk-device`.
-- [ ] Confirm `files` sees `/fat` in the visible desktop.
+- [x] Make `qemu-fb-visible` depend on `$(VIRTIO_BLK_IMG)`.
+- [x] Attach the image through `virtio-blk-device`.
+- [x] Confirm `files` sees `/fat` in the visible desktop via the deterministic `tools/qemu_fb_fat_test.sh` gate.
+- [ ] A named human tester records the create/edit/save/rename/reopen/delete workflow on `make qemu-fb-visible` against a current commit.
 
 ### Correct spawned-window focus — RISK-004
 
@@ -100,11 +101,11 @@ timeout 25s make qemu-net
 
 Required changes:
 
-- [ ] each target captures guest serial output;
-- [ ] each subsystem prints an explicit completion marker;
-- [ ] the target exits non-zero if the marker is absent;
-- [ ] timeout exit is not treated as success by itself;
-- [ ] CI runs all non-visual mandatory gates.
+- [x] each target captures guest serial output;
+- [x] each subsystem prints an explicit completion marker;
+- [x] the target exits non-zero if the marker is absent;
+- [x] timeout exit is not treated as success by itself;
+- [ ] CI runs all non-visual mandatory gates (blocked on RISK-011).
 
 Suggested markers:
 
@@ -139,9 +140,9 @@ All items below are mandatory:
 
 - [x] RISK-001 closed with host and QEMU evidence.
 - [x] RISK-002 closed with isolation and cleanup tests.
-- [ ] RISK-003 closed.
-- [ ] RISK-004 closed.
-- [ ] RISK-005 closed for every mandatory runtime target.
+- [ ] RISK-003 closed (wiring verified; interactive workflow still pending).
+- [ ] RISK-004 closed (pending named human tester).
+- [x] RISK-005 closed for every mandatory runtime target.
 - [ ] KLI1 `.data`/`.bss` policy explicitly defined and enforced.
 - [ ] Full host suite passes.
 - [ ] Kernel size gate passes.
