@@ -59,7 +59,7 @@ SECTIONS {
 
     __rodata_end = .;
 
-    .data : ALIGN(8) {
+    .data : ALIGN(4096) {
         *(.data*)
     } :data
 

@@ -336,8 +336,9 @@ uint64_t vmm_virt_to_phys(uint64_t *pgd, uint64_t vaddr) {
 int vmm_map_kernel_identity(uint64_t *pgd, uint64_t memory_base,
                              uint64_t memory_size,
                              int (*map_mmio)(uint64_t *)) {
-    uint64_t kstart  = (uint64_t)(uintptr_t)__kernel_start;
+    uint64_t kstart    = (uint64_t)(uintptr_t)__kernel_start;
     uint64_t text_end  = (uint64_t)(uintptr_t)__text_end;
+    uint64_t rodata_end = (uint64_t)(uintptr_t)__rodata_end;
     uint64_t data_end  = (uint64_t)(uintptr_t)__data_end;
     uint64_t ram_end = memory_base + memory_size;
     uint64_t size;
@@ -346,7 +347,6 @@ int vmm_map_kernel_identity(uint64_t *pgd, uint64_t memory_base,
         return -1;
     }
 
-    /* Low RAM before kernel image – RW, no exec. */
     if (memory_base < kstart) {
         size = kstart - memory_base;
         if (vmm_map_range(pgd, memory_base, memory_base, size,
@@ -355,25 +355,32 @@ int vmm_map_kernel_identity(uint64_t *pgd, uint64_t memory_base,
         }
     }
 
-    /* Kernel text – RX. Rounded to page boundaries to avoid overlap with
-     * adjacent sections that may share a page. */
-    if (vmm_map_range(pgd, kstart, kstart,
-                      page_align_up(text_end) - kstart,
+    size = page_align_up(text_end) - kstart;
+    if (vmm_map_range(pgd, kstart, kstart, size,
                       VMM_FLAG_READ | VMM_FLAG_EXEC) != 0) {
         return -1;
     }
 
-    /* Kernel data+bss+stack – RW, no exec. Covers rodata, data, bss, and
-     * the kernel stack from the page after text to the end of the kernel
-     * image.  Rodata shares pages with .data so we cannot make it
-     * read-only without first reorganising the linker script. */
-    if (vmm_map_range(pgd, page_align_up(text_end), page_align_up(text_end),
-                      page_align_up(data_end) - page_align_up(text_end),
-                      VMM_FLAG_READ | VMM_FLAG_WRITE) != 0) {
-        return -1;
+    /* Rodata – R-only, no exec/no write.  The linker's ALIGN(4096) on .data
+     * ensures rodata and data are on separate pages. */
+    if (page_align_up(text_end) < page_align_up(rodata_end)) {
+        size = page_align_up(rodata_end) - page_align_up(text_end);
+        if (vmm_map_range(pgd, page_align_up(text_end),
+                          page_align_up(text_end), size,
+                          VMM_FLAG_READ) != 0) {
+            return -1;
+        }
     }
 
-    /* Remainder of RAM – RW, no exec. */
+    if (page_align_up(rodata_end) < page_align_up(data_end)) {
+        size = page_align_up(data_end) - page_align_up(rodata_end);
+        if (vmm_map_range(pgd, page_align_up(rodata_end),
+                          page_align_up(rodata_end), size,
+                          VMM_FLAG_READ | VMM_FLAG_WRITE) != 0) {
+            return -1;
+        }
+    }
+
     if (page_align_up(data_end) < ram_end) {
         size = ram_end - page_align_up(data_end);
         if (vmm_map_range(pgd, page_align_up(data_end),
