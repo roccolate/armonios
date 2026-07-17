@@ -16,7 +16,7 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 |---|---:|---|---|---|
 | RISK-003 | P1 | QEMU desktop target | WIRING FIX VERIFIED; INTERACTION OPEN | `qemu-fb-visible` attaches FAT32 with GPU; deterministic wiring gate passes; the visible create/edit/save/rename/reopen/delete workflow still needs a named human tester on a real QEMU display. |
 | RISK-004 | P1 | Desktop focus | FIX IMPLEMENTED; OPEN PENDING NAMED TESTER | New userland windows request focus; the files-to-editor flow still needs a named human tester on a real QEMU display. |
-| RISK-006 | P1 | Raspberry Pi 4 build | OPEN | The RPi4 board backend does not satisfy the complete board interface. |
+| RISK-006 | P1 | Raspberry Pi 4 build | CLOSED 2026-07-16 (next commit) | `make BOARD=rpi4` now compiles, links, and stays under the kernel size gate via explicit safe-failure stubs in `drivers/boards/rpi4/board.c`. |
 | RISK-007 | P0 for hardware track | Raspberry Pi storage | OPEN | The current eMMC implementation is contradictory and not hardware-validated. |
 | RISK-008 | P1 | Memory protection | OPEN | Process page tables identity-map the full RAM range as kernel RWX. |
 | RISK-009 | P1 | KLI1 application format | CLOSED 2026-07-16 (next commit) | Mutable `.data`/`.bss` is now explicitly forbidden by `programs/apps/image.ld` and verified by `tests/run_kli1_contract_test.sh`. |
@@ -81,9 +81,20 @@ bash tools/qemu_fb_fat_test.sh
 
 **Severity:** P1
 **Affected release:** v1.5 hardware bring-up
-**Evidence:** static board-interface inspection
+**Evidence:** static board-interface inspection; `make BOARD=rpi4` build proof on commit `8f17e76`
 
 The generic board contract requires functions the current RPi4 backend does not provide. The repository must not claim `BOARD=rpi4` is build-verified until a clean compile and link is recorded.
+
+The kernel calls three virtio-input functions that the original RPi4 backend did not implement: `board_virtio_input_irq`, `board_virtio_input_init`, `board_virtio_input_poll`. They were added as explicit safe-failure stubs in `drivers/boards/rpi4/board.c`. `init_input()` already treats a non-zero `board_virtio_input_init()` return as "device absent" and continues with serial input, so the stubs preserve the existing behaviour for cases without a virtio-input device.
+
+**Closing evidence on the closing commit:**
+
+- `drivers/boards/rpi4/board.c:160-180` adds the three stubs with a comment explaining the contract.
+- `make BOARD=rpi4` produces `build-rpi4/kernel.bin` at 97312 bytes (size limit 100000).
+- `tests/run_board_build_test.sh` (wired into `tools/verify.sh` as `board-rpi4`) does a clean `BOARD=rpi4` build in `build-rpi4/` so it never collides with the qemu_virt artefact, and asserts the resulting kernel size gate.
+- `make BOARD=qemu_virt` continues to produce `build/kernel.bin` at 97344 bytes, confirming the QEMU reference path is unaffected.
+
+Hardware-mile RISK-007 (eMMC driver correctness, FAT mount on physical hardware) still requires physical validation; this commit only closes the **build-contract** milestone defined in the roadmap. See RISK-007 for the storage track.
 
 **Exit criteria:** CI or equivalent evidence builds and links `make BOARD=rpi4`; unsupported capabilities return explicit safe failures; no generic kernel symbol remains unresolved.
 
@@ -225,3 +236,16 @@ No risk may be moved here without the evidence and exit criteria required by `DO
 **Summary of what was open:** the KLI1 user-image linker script emitted only header/text/rodata/end, but there was no explicit rejection if an application accidentally introduced `.data` or `.bss` symbols. Apps were kept clean by convention.
 
 **Closing evidence:** the linker script now `ASSERT`s that `.data` and `.bss` input is empty; the host-side `tests/run_kli1_contract_test.sh` proves all six shipping apps link clean and that a synthetic `.bss` source is rejected with the `KLI1 forbids .bss` message; the assertion is part of `tools/verify.sh` so the contract cannot regress silently.
+
+### RISK-006 (CLOSED 2026-07-16, build-contract milestone)
+
+**Severity when open:** P1
+**Affected release:** v1.5 hardware bring-up
+**Closing commit:** pending on the next commit
+**Documented at:** `drivers/boards/rpi4/board.c`, `tests/run_board_build_test.sh`
+
+**Summary of what was open:** `make BOARD=rpi4` failed to link because generic kernel code calls three virtio-input functions that the RPi4 backend never defined (`board_virtio_input_irq`, `board_virtio_input_init`, `board_virtio_input_poll`). The repository therefore could not claim `BOARD=rpi4` is build-verified.
+
+**Closing evidence:** the three functions are now defined as explicit safe-failure stubs in `drivers/boards/rpi4/board.c` (`irq = 0`, `init = -1`, `poll = -1`). `tools/verify.sh` runs `tests/run_board_build_test.sh` which builds `BOARD=rpi4` cleanly into `build-rpi4/` and asserts the resulting kernel size gate (97312 bytes against a 100000-byte limit). `BOARD=qemu_virt` continues to build cleanly at 97344 bytes.
+
+Hardware-tracked follow-up RISK-007 (eMMC + FAT on physical hardware) remains open until a physical serial milestone is recorded per `DOCUMENTATION_POLICY.md`.

@@ -15,8 +15,12 @@ printf 'ArmoniOS verification\n'
 printf 'commit: %s\n' "$(git rev-parse --verify HEAD 2>/dev/null || printf unknown)"
 printf 'date: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-run_gate build make
-run_gate size make size
+# Establish the QEMU virt tree first so size, stack-check, and every QEMU
+# gate operate on a consistent kernel. The board-rpi4 gate runs in its own
+# build-rpi4/ directory so its artefact never clobbers the qemu one.
+run_gate build make BOARD=qemu_virt
+run_gate size make BOARD=qemu_virt size
+run_gate board-rpi4 bash tests/run_board_build_test.sh
 run_gate host-tests make -C tests test
 run_gate process-fd-isolation bash tests/run_vfs_process_fd_test.sh
 run_gate usercopy-host bash tests/run_user_copy_permissions_test.sh
@@ -26,6 +30,9 @@ run_gate qemu-fs-test make qemu-fs-test
 run_gate usercopy-qemu bash tools/qemu_usercopy_test.sh
 run_gate qemu-markers bash tools/qemu_marker_test.sh all
 run_gate qemu-fb-fat bash tools/qemu_fb_fat_test.sh
+
+printf '\nALL AUTOMATED BASELINE GATES PASSED\n'
+printf 'Manual desktop verification is still required with: make qemu-fb-visible\n'
 
 printf '\nALL AUTOMATED BASELINE GATES PASSED\n'
 printf 'Manual desktop verification is still required with: make qemu-fb-visible\n'

@@ -142,6 +142,7 @@ All items below are mandatory:
 - [ ] RISK-003 closed (wiring verified; interactive workflow still pending).
 - [ ] RISK-004 closed (pending named human tester).
 - [x] RISK-005 closed for every mandatory runtime target.
+- [x] RISK-006 build-contract closed (RPi4 links clean; physical serial pending under RISK-007).
 - [x] KLI1 `.data`/`.bss` policy explicitly defined and enforced.
 - [ ] Full host suite passes.
 - [ ] Kernel size gate passes.
@@ -184,10 +185,12 @@ The current `rpi4` files are experimental scaffolding, not a working port.
 
 ### Build-contract milestone — RISK-006
 
-- [ ] `make BOARD=rpi4` compiles and links in CI.
-- [ ] every required board function exists;
-- [ ] unsupported capabilities return explicit safe failures;
-- [ ] generic kernel code no longer assumes virtio capability functions exist on every board.
+- [x] `make BOARD=rpi4` compiles and links in CI (recorded through `tools/verify.sh` `board-rpi4` gate).
+- [x] every required board function exists (virtio-input stubs added).
+- [x] unsupported capabilities return explicit safe failures (`irq = 0`, `init = -1`, `poll = -1`).
+- [x] generic kernel code no longer assumes virtio capability functions exist on every board.
+
+Build-contract closed; storage and serial milestones remain under RISK-007.
 
 ### Serial milestone
 

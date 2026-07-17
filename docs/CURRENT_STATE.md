@@ -68,7 +68,7 @@ The latest local verification recorded for the current `main` baseline at `4494c
 | `timeout 25s make qemu-usb` | UNVERIFIED | No current deterministic pass record in the repository. |
 | `timeout 25s make qemu-net` | UNVERIFIED | No current deterministic pass record in the repository. |
 | `make qemu-fb-visible` | IMPLEMENTED; UNVERIFIED after recovery change | The target attaches the FAT32 image and new userland windows request focus, but the create/edit/save/rename/reopen/delete workflow has not been rerun by a named tester. |
-| `make BOARD=rpi4` | KNOWN-BROKEN | Static inspection shows the board backend does not satisfy the full interface used by generic kernel code. |
+| `make BOARD=rpi4` | BUILD-VERIFIED | `tests/run_board_build_test.sh` (the `board-rpi4` gate inside `tools/verify.sh`) does a clean BOARD=rpi4 build into `build-rpi4/` and asserts the kernel size gate. The RPi4 backend exposes explicit safe-failure stubs for virtio-input; eMMC and physical serial are still pending. |
 | Physical Raspberry Pi 4 boot | PLANNED | No hardware boot claim. |
 
 ## Subsystem status
@@ -91,7 +91,7 @@ The latest local verification recorded for the current `main` baseline at `4494c
 | USB xHCI/HID | IMPLEMENTED; HOST-VERIFIED; deterministic runner IMPLEMENTED | USB marker runner requires controller, enumeration, and two HID devices | No real run of the new marker gate; no hub support claim. |
 | virtio network/DHCP | IMPLEMENTED; HOST-VERIFIED; deterministic runner IMPLEMENTED | Network runner requires initialization and DHCP ACK | Real end-to-end QEMU DHCP remains `UNVERIFIED`; no sockets, TCP, or HTTP. |
 | KLI1 application images | IMPLEMENTED; HOST-VERIFIED | Image layout and shipping blob tests | Mutable `.data`/`.bss` is now explicitly forbidden by the linker script and exercised by `tests/run_kli1_contract_test.sh`. |
-| Raspberry Pi 4 board layer | IMPLEMENTED; KNOWN-BROKEN; UNVERIFIED | Initial board, linker, mailbox, and eMMC files exist | Target is not build- or boot-verified; contract is incomplete and eMMC is experimental. |
+| Raspberry Pi 4 board layer | IMPLEMENTED; BUILD-VERIFIED for contract; UNVERIFIED on hardware | virtio-input stubs added; `make BOARD=rpi4` and the `board-rpi4` gate in `tools/verify.sh` both clean | eMMC driver and physical serial milestone still pending (RISK-007). |
 
 ## Confirmed implementation facts
 
@@ -114,7 +114,7 @@ The current QEMU codebase includes:
 - a visible QEMU target wired to the generated FAT32 virtio block image;
 - a common userland window-create wrapper that requests focus after successful creation;
 - a KLI1 mutable-storage contract enforced by `programs/apps/image.ld` ASSERTs and verified by `tests/run_kli1_contract_test.sh`;
-- `tools/verify.sh` as the one-command local baseline (now also running `tests/run_vfs_process_fd_test.sh`, `tests/run_user_copy_permissions_test.sh`, `tests/run_kli1_contract_test.sh`, `tools/qemu_usercopy_test.sh`, `tools/qemu_marker_test.sh all`, and `tools/qemu_fb_fat_test.sh`);
+- `tools/verify.sh` as the one-command local baseline (now also running `tests/run_vfs_process_fd_test.sh`, `tests/run_user_copy_permissions_test.sh`, `tests/run_kli1_contract_test.sh`, `tests/run_board_build_test.sh`, `tools/qemu_usercopy_test.sh`, `tools/qemu_marker_test.sh all`, and `tools/qemu_fb_fat_test.sh`);
 - deterministic serial-marker tools for framebuffer, USB, and DHCP QEMU paths.
 
 These implementation facts do not override the limitations in the subsystem table or active risk register.

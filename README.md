@@ -23,7 +23,7 @@ The current codebase includes:
 - QEMU virtio block, GPU, input, and network paths;
 - PCI/xHCI and basic USB HID support;
 - native host tests for core kernel, VFS, filesystem, driver-parser, GUI, and ABI logic;
-- an automated `tools/verify.sh` baseline that includes the EL0 user-copy permissions host and QEMU gates, the process-local VFS descriptor host gate, and the KLI1 mutable-storage contract gate.
+- an automated `tools/verify.sh` baseline that includes the EL0 user-copy permissions host and QEMU gates, the process-local VFS descriptor host gate, the KLI1 mutable-storage contract gate, and the BOARD=rpi4 build-contract gate.
 
 Important limitations remain. In particular, the visible FAT/editor workflow has not been rerun on the current commit by a named tester, GitHub Actions is blocked before checkout, and Raspberry Pi support is not build- or hardware-verified.
 
@@ -63,13 +63,14 @@ cd armonios
 bash tools/verify.sh
 ```
 
-The script records the current commit, runs the kernel build, binary-size gate, native host tests, process-local VFS descriptor host gate, the standalone user-copy permissions host gate, the KLI1 mutable-storage contract gate, userland stack check, the FAT32 QEMU serial-marker storage smoke test, the EL0 user-copy permissions QEMU regression, the per-subsystem marker gates (framebuffer, USB, network) under `tools/qemu_marker_test.sh all`, and the visible-desktop FAT+GPU wiring gate. It stops on the first failure.
+The script records the current commit, runs the kernel build, binary-size gate, the BOARD=rpi4 build-contract gate, native host tests, process-local VFS descriptor host gate, the standalone user-copy permissions host gate, the KLI1 mutable-storage contract gate, userland stack check, the FAT32 QEMU serial-marker storage smoke test, the EL0 user-copy permissions QEMU regression, the per-subsystem marker gates (framebuffer, USB, network) under `tools/qemu_marker_test.sh all`, and the visible-desktop FAT+GPU wiring gate. It stops on the first failure.
 
 Equivalent individual commands are:
 
 ```bash
-make
-make size
+make BOARD=qemu_virt
+make BOARD=qemu_virt size
+bash tests/run_board_build_test.sh
 make -C tests test
 bash tests/run_vfs_process_fd_test.sh
 bash tests/run_user_copy_permissions_test.sh
@@ -191,9 +192,9 @@ Shipping applications are linked as flat KLI1 images with a fixed header and ent
 
 Raspberry Pi 4 and 5 are planned targets only.
 
-The repository contains an early `rpi4` board directory, linker script, mailbox scaffolding, and experimental eMMC code. This does not constitute support. The RPi4 backend has not been recorded as building and linking cleanly, has not reached a physical serial milestone, and its storage code must not be treated as validated.
+The `rpi4` board backend now compiles and links cleanly under the v1.0 size gate via `tests/run_board_build_test.sh` (the `board-rpi4` gate in `tools/verify.sh`). virtio-input is wired with explicit safe-failure stubs because the hardware-track bring-up does not expose a virtio-input device yet; the kernel still works with serial input alone.
 
-Do not describe ArmoniOS as running on Raspberry Pi until the hardware criteria in `docs/DOCUMENTATION_POLICY.md` and `docs/PORTING.md` are satisfied.
+The repository does **not** claim that ArmoniOS boots on physical Raspberry Pi hardware. The eMMC driver remains experimental scaffolding and the storage milestone (RISK-007) still requires a physical serial capture and sector read on real hardware per `docs/DOCUMENTATION_POLICY.md` and `docs/PORTING.md`. Do not describe ArmoniOS as running on Raspberry Pi until those hardware criteria are satisfied.
 
 ## Release direction
 

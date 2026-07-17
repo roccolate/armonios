@@ -155,3 +155,22 @@ int board_storage_init(void) {
     g_emmc_initialized = 1;
     return 0;
 }
+
+/*
+ * virtio-input is a QEMU-only path. The RPi4 bring-up track does not wire
+ * it yet, so the kernel must still link cleanly: we expose explicit safe
+ * failures here. init_input() treats a non-zero init as "device absent"
+ * and continues with serial input; the IRQ is never requested because
+ * init returns -1; poll() is a no-op for the same reason.
+ */
+uint32_t board_virtio_input_irq(void) {
+    return 0U;
+}
+
+int board_virtio_input_init(void) {
+    return -1;
+}
+
+int board_virtio_input_poll(void) {
+    return -1;
+}
