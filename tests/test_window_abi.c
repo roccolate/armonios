@@ -247,7 +247,7 @@ void test_window_abi_get_bounds_returns_current_geometry(void) {
 
     TEST_ASSERT_EQUAL_UINT64(0,
                              (uint64_t)gui_create_window_for_pid(
-                                 &desktop, 7U, 12, 24, 100, 60, 0xff000000U,
+                                 &desktop, 7U, 2, 4, 60, 50, 0xff000000U,
                                  0xffffffffU, "bounds_test", &window_id));
 
     uint32_t x = 0;
@@ -256,17 +256,17 @@ void test_window_abi_get_bounds_returns_current_geometry(void) {
     uint32_t h = 0;
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)gui_window_get_bounds(
                                      &desktop.windows[window_id], &x, &y, &w, &h));
-    TEST_ASSERT_EQUAL_UINT64(12ULL, (uint64_t)x);
-    TEST_ASSERT_EQUAL_UINT64(24ULL, (uint64_t)y);
-    TEST_ASSERT_EQUAL_UINT64(100ULL, (uint64_t)w);
-    TEST_ASSERT_EQUAL_UINT64(60ULL, (uint64_t)h);
+    TEST_ASSERT_EQUAL_UINT64(2ULL, (uint64_t)x);
+    TEST_ASSERT_EQUAL_UINT64(4ULL, (uint64_t)y);
+    TEST_ASSERT_EQUAL_UINT64(60ULL, (uint64_t)w);
+    TEST_ASSERT_EQUAL_UINT64(50ULL, (uint64_t)h);
 
     /* Each out-pointer is independently optional. */
     uint32_t only_w = 0;
     TEST_ASSERT_EQUAL_UINT64(
         0, (uint64_t)gui_window_get_bounds(&desktop.windows[window_id],
                                            0, 0, &only_w, 0));
-    TEST_ASSERT_EQUAL_UINT64(100ULL, (uint64_t)only_w);
+    TEST_ASSERT_EQUAL_UINT64(60ULL, (uint64_t)only_w);
 }
 
 void test_window_abi_resize_window_updates_geometry_and_queues_event(void) {

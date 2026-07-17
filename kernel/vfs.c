@@ -415,7 +415,7 @@ int vfs_unmount_static(const char *path) {
     }
 
     for (uint32_t i = 0; i < g_vfs_node_count; i++) {
-        if (vfs_path_equals(g_vfs_nodes[i].path, path)) {
+        if (kstreq(g_vfs_nodes[i].path, path)) {
             const vfs_node_t *node = &g_vfs_nodes[i];
             vfs_drop_open_files_for_node(node);
             vfs_clear_node(i);

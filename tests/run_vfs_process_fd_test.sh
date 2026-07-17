@@ -12,12 +12,15 @@ mkdir -p "$OUT_DIR"
     -I"$ROOT_DIR" \
     "$ROOT_DIR/tests/test_vfs_process_fd_standalone.c" \
     "$ROOT_DIR/kernel/vfs.c" \
+    "$ROOT_DIR/kernel/kstring.c" \
     -o "$OUT_DIR/vfs_process_fd"
 "$OUT_DIR/vfs_process_fd"
 
 "$CC_BIN" -std=c11 -Wall -Wextra -Werror -DARMONIOS_TEST \
     -I"$ROOT_DIR" \
+    -I"$ROOT_DIR/drivers" \
     "$ROOT_DIR/tests/test_process_fd_cleanup_standalone.c" \
     "$ROOT_DIR/kernel/process.c" \
+    "$ROOT_DIR/kernel/kstring.c" \
     -o "$OUT_DIR/process_fd_cleanup"
 "$OUT_DIR/process_fd_cleanup"

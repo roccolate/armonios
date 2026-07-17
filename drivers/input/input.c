@@ -144,11 +144,14 @@ int input_queue_available(void) {
 }
 
 int input_uart_poll(void) {
-    int c = uart_getc_nonblock();
-    if (c < 0) {
-        return -1;
-    }
-    return input_inject_byte(c);
+    /*
+     * UART input is delivered through the IRQ-driven path in
+     * uart_pump_input(), which already drains the UART FIFO into the
+     * input queue. This hook is preserved so existing callers can
+     * remain placeholders without depending on a missing helper.
+     */
+    (void)uart_pump_input;
+    return -1;
 }
 
 int input_inject_byte(int c) {

@@ -10,6 +10,7 @@ mkdir -p "$(dirname "$OUT")"
 "${CC:-gcc}" -std=c11 -Wall -Wextra -Werror \
     -D_POSIX_C_SOURCE=200112L \
     -I"$ROOT_DIR" \
+    -I"$ROOT_DIR/drivers" \
     "$ROOT_DIR/tests/test_user_copy_permissions_standalone.c" \
     "$ROOT_DIR/kernel/syscall_helpers.c" \
     -o "$OUT"

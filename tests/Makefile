@@ -45,7 +45,7 @@ SRCS=unity/unity.c main.c \
      ../kernel/init_status.c \
      ../kernel/ipc.c ../kernel/irq.c ../kernel/process.c \
      ../kernel/sched/sched.c \
-     ../kernel/tmpfs.c ../kernel/syscall_helpers.c \
+     ../kernel/tmpfs.c ../kernel/syscall_helpers.c ../kernel/kstring.c \
      ../kernel/user_image.c ../kernel/user_vm.c ../kernel/vfs.c \
      ../kernel/dtb.c ../kernel/dtb_framebuffer.c \
      ../drivers/fb/fb.c ../drivers/storage/virtio_blk.c \

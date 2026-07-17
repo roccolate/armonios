@@ -2,10 +2,10 @@
 
 > A small freestanding AArch64 operating system with a graphical QEMU desktop, inspired by KolibriOS and MenuetOS.
 
-[![License: GPL-2.0](https://img.shields.io/badge/License-GPL%202.0-blue.svg)](LICENSE)
-[![Architecture](https://img.shields.io/badge/arch-AArch64-green.svg)]()
-[![Language](https://img.shields.io/badge/lang-C%20%2B%20ASM-orange.svg)]()
-[![Status](https://img.shields.io/badge/status-QEMU%20desktop%20alpha-blue.svg)]()
+[![License: GPL-2.0](https://img.shields.io/badge/License/GPL%202.0-blue.svg)](LICENSE)
+[![Architecture](https://img.shields.io/badge/arch/AArch64-green.svg)]()
+[![Language](https://img.shields.io/badge/lang/C%20%2B%20ASM-orange.svg)]()
+[![Status](https://img.shields.io/badge/status/QEMU%20desktop%20alpha-blue.svg)]()
 
 ## Project status
 
@@ -15,22 +15,24 @@ The current codebase includes:
 
 - an AArch64 EL1 kernel and freestanding EL0 applications;
 - per-process page tables, process dispatch, syscalls, IPC, and anonymous mappings;
+- permission-aware kernel-to-user copy helpers with per-page PTE write checks;
+- per-process VFS file descriptors with central cleanup on exit, fault, and kill;
 - a kernel-owned window compositor with input, dragging, focus, backing buffers, and damage tracking;
 - `panel`, `shell`, `editor`, `files`, `monitor`, and `clock` applications;
 - bootfs, tmpfs, and a small FAT32 root-filesystem implementation;
 - QEMU virtio block, GPU, input, and network paths;
 - PCI/xHCI and basic USB HID support;
-- native host tests for core kernel, VFS, filesystem, driver-parser, GUI, and ABI logic.
+- native host tests for core kernel, VFS, filesystem, driver-parser, GUI, and ABI logic;
+- an automated `tools/verify.sh` baseline that includes the EL0 user-copy permissions host and QEMU gates and the process-local VFS descriptor host gate.
 
-Important limitations remain. In particular, user-output buffers on `main` are not yet checked for write permission, VFS file descriptors are global rather than process-owned, the repaired visible FAT/editor workflow has not yet been rerun, GitHub Actions is blocked before checkout, and Raspberry Pi support is not build- or hardware-verified.
-Important limitations remain. In particular, user-output buffers are not yet checked for write permission, VFS file descriptors are global rather than process-owned, the visible desktop target does not currently attach its FAT disk, and Raspberry Pi support is not build- or hardware-verified.
+Important limitations remain. In particular, the visible FAT/editor workflow has not been rerun on the current commit by a named tester, GitHub Actions is blocked before checkout, and Raspberry Pi support is not build- or hardware-verified.
 
 Read these before making or evaluating claims:
 
-- [Current State](docs/CURRENT_STATE.md) — audited operational truth and verification evidence
-- [Technical Risks](docs/TECHNICAL_RISKS.md) — active blockers and correctness risks
-- [Documentation Policy](docs/DOCUMENTATION_POLICY.md) — evidence and maintenance rules
-- [Roadmap](docs/ROADMAP.md) — ordered release work
+- [Current State](docs/CURRENT_STATE.md) - audited operational truth and verification evidence
+- [Technical Risks](docs/TECHNICAL_RISKS.md) - active blockers and correctness risks
+- [Documentation Policy](docs/DOCUMENTATION_POLICY.md) - evidence and maintenance rules
+- [Roadmap](docs/ROADMAP.md) - ordered release work
 
 ## What ArmoniOS is
 
@@ -53,8 +55,7 @@ sudo apt update && sudo apt install -y \
   make
 ```
 
-### Run the automated local baseline
-### Build
+### Build and run the automated baseline
 
 ```bash
 git clone https://github.com/roccolate/armonios
@@ -62,7 +63,7 @@ cd armonios
 bash tools/verify.sh
 ```
 
-The script records the current commit and runs the kernel build, binary-size gate, native host tests, userland stack check, and FAT32 QEMU serial-marker smoke test. It stops on the first failure.
+The script records the current commit, runs the kernel build, binary-size gate, native host tests, process-local VFS descriptor host gate, the standalone user-copy permissions host gate, userland stack check, the FAT32 QEMU serial-marker storage smoke test, and the EL0 user-copy permissions QEMU regression. It stops on the first failure.
 
 Equivalent individual commands are:
 
@@ -70,8 +71,11 @@ Equivalent individual commands are:
 make
 make size
 make -C tests test
+bash tests/run_vfs_process_fd_test.sh
+bash tests/run_user_copy_permissions_test.sh
 make stack-check
 make qemu-fs-test
+bash tools/qemu_usercopy_test.sh
 ```
 
 ### Run the serial target
@@ -98,47 +102,13 @@ make qemu-fs-test
 
 This is the strongest current QEMU integration test because it captures guest serial output and checks explicit storage/FAT markers.
 
-Other QEMU launch targets exist:
+### Run the user-copy permissions regression
 
 ```bash
-make qemu-fb
-make qemu-usb
-make qemu-net
+bash tools/qemu_usercopy_test.sh
 ```
 
-At present these are runtime launch targets, not complete deterministic tests. A timeout alone is not proof that the associated subsystem passed.
-
-## Current verified local baseline
-
-The latest verification recorded in issue #1, before the visible-recovery merge, reports:
-make
-make size
-make -C tests test
-```
-
-### Run the serial target
-
-```bash
-make qemu
-```
-
-Exit QEMU with `Ctrl+A`, then `X`.
-
-### Run the visible desktop
-
-```bash
-make qemu-fb-visible
-```
-
-This target currently provides GPU and input devices. It does **not** yet attach the generated FAT32 block image, so the `files` application will not expose the documented FAT workflow until that build-target defect is fixed. See `RISK-003` in `docs/TECHNICAL_RISKS.md`.
-
-### Run the storage smoke test
-
-```bash
-make qemu-fs-test
-```
-
-This is the strongest current QEMU integration test because it captures guest serial output and checks explicit storage/FAT markers.
+This QEMU gate boots a kernel whose EL0 crt0 probes a read-only image address through `sys_user_buf_out`, requires at least two `USERCOPY: RX output rejected` markers, and asserts that `panel: ready` and `clock: starting` still appear, proving the kernel rejected the invalid output buffer without halting. The serial log is written to `build-usercopy-test/qemu-usercopy-test.log`.
 
 Other QEMU launch targets exist:
 
@@ -152,18 +122,20 @@ At present these are runtime launch targets, not complete deterministic tests. A
 
 ## Current verified local baseline
 
-The latest verification recorded in issue #1 reports:
+The latest local verification recorded on commit `4494c554df212401ffbd294d1a44b5977696fa0b` reports:
 
 ```text
-make                  passed
-make size             kernel.bin: 92696 bytes, limit 100000
-make -C tests test    ALL TESTS PASSED (0)
-make stack-check      maximum 368 bytes, limit 3072
-make qemu-fs-test     passed after direct QEMU serial-file capture
+make                              passed
+make size                         kernel.bin: 97344 bytes, limit 100000
+make -C tests test                ALL TESTS PASSED (0)
+tests/run_vfs_process_fd_test.sh  process-local VFS descriptors + exit cleanup PASS
+tests/run_user_copy_permissions_test.sh  writable / ERR_PERM / mixed atomicity PASS
+make stack-check                  maximum 368 bytes, limit 3072
+make qemu-fs-test                 passed after direct QEMU serial-file capture
+tools/qemu_usercopy_test.sh       6 EL0 probes rejected, panel: ready + clock: starting
 ```
 
-Those results are historical evidence, not proof for the current `main`. Run `bash tools/verify.sh` and record its exact commit before promoting the current baseline. The full visible files/editor/FAT workflow and deterministic framebuffer, USB, and network gates remain incomplete. See `docs/CURRENT_STATE.md` for exact evidence and scope.
-The full visible files/editor/FAT workflow is still incomplete and the remaining QEMU targets do not yet have deterministic pass records. See `docs/CURRENT_STATE.md` for exact evidence and scope.
+Record the exact commit and serial log when promoting the baseline. The full visible files/editor/FAT workflow and deterministic framebuffer, USB, and network gates remain incomplete. See `docs/CURRENT_STATE.md` for the per-subsystem evidence and scope.
 
 ## Architecture summary
 
@@ -184,7 +156,9 @@ EL0 processes are preempted through IRQ trap frames. EL1 helper threads are curr
 
 Each process has its own TTBR0 root, image, stack, and anonymous mappings. The current process tables also identity-map the full detected RAM range for EL1 as read/write/execute. A future hardening step should move shared kernel mappings to TTBR1 and apply section-specific permissions.
 
-See [Architecture](docs/ARCHITECTURE.md) and [Memory Map](docs/MEMORY_MAP.md).
+Output-producing syscalls route user-pointer writes through `kernel/syscall_helpers.c`, which validates every covered page of the destination against the process's own L3 page table and rejects non-writable ranges with `ERR_PERM` before any byte is copied. The VFS layer records an `owner_pid` per open file and routes every fd operation through that owner check; descriptors are reclaimed through `process_mark_exited`.
+
+See [Architecture](docs/ARCHITECTURE.md), [Memory Map](docs/MEMORY_MAP.md), and [Syscalls](docs/SYSCALLS.md).
 
 ## Filesystem scope
 
@@ -198,7 +172,7 @@ The current FAT32 implementation supports:
 
 It does not claim long-file-name support, directories, partition discovery, crash consistency, or broad FAT32 interoperability.
 
-The current VFS has eight global file descriptors shared by the kernel. They are not yet isolated per process. See `RISK-002`.
+Per-process VFS file descriptors are now isolated and reclaimed on exit/fault/kill.
 
 ## Application format
 
@@ -216,21 +190,15 @@ Do not describe ArmoniOS as running on Raspberry Pi until the hardware criteria 
 
 The next release goal is a repeatable **v1.0 QEMU desktop release candidate**. The immediate work is correctness and reproducibility, not new multimedia or hardware scope.
 
-Major blockers include:
+Both syscall-boundary P0 risks (`RISK-001` and `RISK-002`) are closed on `4494c55`; see `docs/TECHNICAL_RISKS.md` for the recorded evidence.
 
-1. permission-aware user-copy helpers and a QEMU negative regression;
-2. process-owned file descriptors and exit cleanup;
-3. verification of the visible FAT attachment on the current commit;
-4. verification of initial focus for spawned app windows;
-5. deterministic framebuffer, USB, and network QEMU gates;
-6. successful end-to-end files/editor/FAT verification;
-7. restoring GitHub Actions runner execution and logs.
-1. permission-aware user-copy helpers;
-2. process-owned file descriptors and exit cleanup;
-3. a visible desktop target with FAT storage;
-4. correct initial window focus for spawned apps;
-5. deterministic framebuffer, USB, and network QEMU gates;
-6. successful end-to-end files/editor/FAT verification.
+Major remaining blockers include:
+
+1. verification of the visible FAT attachment on the current commit (`RISK-003`);
+2. verification of initial focus for spawned app windows (`RISK-004`);
+3. deterministic framebuffer, USB, and network QEMU gates (`RISK-005`);
+4. successful end-to-end files/editor/FAT verification;
+5. restoring GitHub Actions runner execution and logs (`RISK-011`).
 
 See [Roadmap](docs/ROADMAP.md).
 
@@ -248,7 +216,6 @@ programs/libkarm/      syscall and small userland runtime helpers
 programs/libkarmdesk/  GUI wrappers
 tests/                native host test suite
 tools/                host build and verification utilities
-tools/                host build utilities
 linker/               kernel linker scripts
 docs/                 architecture, ABI, status, risks, and maintenance policy
 ```

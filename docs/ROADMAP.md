@@ -23,19 +23,23 @@ A v1.0 release candidate is not reached merely because the desktop appears. All 
 
 ### User-copy permissions — RISK-001
 
-- [ ] Store effective read/write/execute permissions with each registered user region.
-- [ ] Split pointer handling into `copy_from_user`, `copy_to_user`, and c-string helpers.
-- [ ] Reject kernel-to-user writes to read-only image pages.
-- [ ] Add host tests for readable, writable, boundary-crossing, and read-only destinations.
-- [ ] Add a QEMU test application that attempts an invalid output buffer and proves the kernel remains responsive.
+- [x] Store effective read/write/execute permissions with each registered user region.
+- [x] Split pointer handling into `copy_from_user`, `copy_to_user`, and c-string helpers.
+- [x] Reject kernel-to-user writes to read-only image pages.
+- [x] Add host tests for readable, writable, boundary-crossing, and read-only destinations.
+- [x] Add a QEMU test application that attempts an invalid output buffer and proves the kernel remains responsive.
+
+Closed on `4494c55`; see `TECHNICAL_RISKS.md` for the recorded evidence and `tools/verify.sh` for the regression gate.
 
 ### Process-owned file descriptors — RISK-002
 
-- [ ] Define per-process descriptor ownership.
-- [ ] Make descriptor numbers local to the caller.
-- [ ] Close descriptors on exit, fault, kill, and explicit wait/reclaim.
-- [ ] Add tests proving one process cannot use or close another process's descriptor.
-- [ ] Add exhaustion/reuse tests across repeated process lifecycles.
+- [x] Define per-process descriptor ownership.
+- [x] Make descriptor numbers local to the caller.
+- [x] Close descriptors on exit, fault, kill, and explicit wait/reclaim.
+- [x] Add tests proving one process cannot use or close another process's descriptor.
+- [x] Add exhaustion/reuse tests across repeated process lifecycles.
+
+Closed on `4494c55`; see `TECHNICAL_RISKS.md` for the recorded evidence and the `process-fd-isolation` gate in `tools/verify.sh`.
 
 These two items block v1.0 regardless of desktop polish because they affect kernel correctness and isolation.
 
@@ -133,8 +137,8 @@ This is at least a v1.x hardening goal and may be promoted to v1.0 if implementa
 
 All items below are mandatory:
 
-- [ ] RISK-001 closed with host and QEMU evidence.
-- [ ] RISK-002 closed with isolation and cleanup tests.
+- [x] RISK-001 closed with host and QEMU evidence.
+- [x] RISK-002 closed with isolation and cleanup tests.
 - [ ] RISK-003 closed.
 - [ ] RISK-004 closed.
 - [ ] RISK-005 closed for every mandatory runtime target.
