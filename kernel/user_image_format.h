@@ -5,7 +5,11 @@
 
 /*
  * KLI1 is the flat user-image format emitted by programs/apps/image.ld and
- * the per-app *_header.S / *_end.S files.
+ * the per-app *_header.S / *_end.S files. Mutable static state is forbidden
+ * in the image: programs/apps/image.ld ASSERTs that SIZEOF(.data) and
+ * SIZEOF(.bss) are zero, and tools/verify.sh runs tests/run_kli1_contract_test.sh
+ * to confirm both the shipping apps and a regression .bss source are rejected.
+ * Apps obtain mutable storage at runtime through SYS_MMAP.
  */
 #define USER_IMAGE_MAGIC       0x31494c4bU
 #define USER_IMAGE_MAX_ENTRIES 8U

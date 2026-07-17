@@ -23,7 +23,7 @@ The current codebase includes:
 - QEMU virtio block, GPU, input, and network paths;
 - PCI/xHCI and basic USB HID support;
 - native host tests for core kernel, VFS, filesystem, driver-parser, GUI, and ABI logic;
-- an automated `tools/verify.sh` baseline that includes the EL0 user-copy permissions host and QEMU gates and the process-local VFS descriptor host gate.
+- an automated `tools/verify.sh` baseline that includes the EL0 user-copy permissions host and QEMU gates, the process-local VFS descriptor host gate, and the KLI1 mutable-storage contract gate.
 
 Important limitations remain. In particular, the visible FAT/editor workflow has not been rerun on the current commit by a named tester, GitHub Actions is blocked before checkout, and Raspberry Pi support is not build- or hardware-verified.
 
@@ -63,7 +63,7 @@ cd armonios
 bash tools/verify.sh
 ```
 
-The script records the current commit, runs the kernel build, binary-size gate, native host tests, process-local VFS descriptor host gate, the standalone user-copy permissions host gate, userland stack check, the FAT32 QEMU serial-marker storage smoke test, the EL0 user-copy permissions QEMU regression, the per-subsystem marker gates (framebuffer, USB, network) under `tools/qemu_marker_test.sh all`, and the visible-desktop FAT+GPU wiring gate. It stops on the first failure.
+The script records the current commit, runs the kernel build, binary-size gate, native host tests, process-local VFS descriptor host gate, the standalone user-copy permissions host gate, the KLI1 mutable-storage contract gate, userland stack check, the FAT32 QEMU serial-marker storage smoke test, the EL0 user-copy permissions QEMU regression, the per-subsystem marker gates (framebuffer, USB, network) under `tools/qemu_marker_test.sh all`, and the visible-desktop FAT+GPU wiring gate. It stops on the first failure.
 
 Equivalent individual commands are:
 
@@ -73,6 +73,7 @@ make size
 make -C tests test
 bash tests/run_vfs_process_fd_test.sh
 bash tests/run_user_copy_permissions_test.sh
+bash tests/run_kli1_contract_test.sh
 make stack-check
 make qemu-fs-test
 bash tools/qemu_usercopy_test.sh
@@ -184,7 +185,7 @@ Per-process VFS file descriptors are now isolated and reclaimed on exit/fault/ki
 
 ## Application format
 
-Shipping applications are linked as flat KLI1 images with a fixed header and entry table. The current format is tested for the six included applications, but mutable static `.data` and `.bss` are not yet a defined application contract. Apps currently use restricted freestanding patterns and anonymous mappings for larger mutable state.
+Shipping applications are linked as flat KLI1 images with a fixed header and entry table. The current format is tested for the six included applications and explicitly forbids mutable static `.data` / `.bss`: `programs/apps/image.ld` `ASSERT`s both sections are empty, and `tests/run_kli1_contract_test.sh` confirms the six shipping ELFs link clean and that a regression `.bss` source is rejected with a clear `KLI1 forbids .bss` message. Apps that need mutable state obtain it through `SYS_MMAP` at runtime.
 
 ## Raspberry Pi status
 

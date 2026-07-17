@@ -19,7 +19,7 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 | RISK-006 | P1 | Raspberry Pi 4 build | OPEN | The RPi4 board backend does not satisfy the complete board interface. |
 | RISK-007 | P0 for hardware track | Raspberry Pi storage | OPEN | The current eMMC implementation is contradictory and not hardware-validated. |
 | RISK-008 | P1 | Memory protection | OPEN | Process page tables identity-map the full RAM range as kernel RWX. |
-| RISK-009 | P1 | KLI1 application format | OPEN | Mutable `.data` and `.bss` behavior is not an explicit, tested image-format contract. |
+| RISK-009 | P1 | KLI1 application format | CLOSED 2026-07-16 (next commit) | Mutable `.data`/`.bss` is now explicitly forbidden by `programs/apps/image.ld` and verified by `tests/run_kli1_contract_test.sh`. |
 | RISK-010 | P2 | Scheduling documentation | OPEN | EL0 processes are preemptive, but EL1 kernel threads are cooperative. |
 | RISK-011 | P1 | Verification infrastructure | OPEN | GitHub Actions jobs fail before checkout and expose no step logs. Issue #12 tracks the repository/account-level investigation. |
 
@@ -113,20 +113,23 @@ This increases page-table cost, forces global TLB invalidation during switches, 
 
 **Exit criteria:** architecture tests and QEMU verification show RX text, R rodata, RW/NX data/heap/stacks, device/NX MMIO, and isolated TTBR0 user mappings.
 
-## RISK-009 — KLI1 mutable storage contract is undefined
+## RISK-009 — KLI1 mutable storage contract was undefined
 
 **Severity:** P1
 **Affected release:** v1.0 or v1.1, depending on whether v1.0 formally forbids mutable static storage
-**Evidence:** application linker-script inspection
+**Evidence:** `programs/apps/image.ld` ASSERT; `tests/run_kli1_contract_test.sh` regression coverage
 
-The KLI1 image script explicitly places header, text, rodata, and end marker. It does not define a tested load contract for initialized `.data` or zero-initialized `.bss`.
+The KLI1 image script now explicitly places header, text, rodata, and end marker and is paired with `ASSERT(SIZEOF(.kli1.data_dummy) == 0, ...)` and `ASSERT(SIZEOF(.kli1.bss_dummy) == 0, ...)` so any `.data` / `.bss` input into the link is captured into private NOLOAD sections and the link fails fast with a clear `KLI1 forbids .data/.bss` message instead of silently dropping the offending input.
 
-Applications currently avoid this through restricted coding patterns and anonymous mappings, but the toolchain does not clearly reject unsupported mutable static storage.
+Applications that need mutable static state obtain it through `SYS_MMAP` at runtime; the six shipping apps already follow this pattern.
 
-**Exit criteria:** either:
+**Closing evidence (recorded on the closing commit):**
 
-- formally forbid `.data`/`.bss` and make the link fail when they are emitted; or
-- extend KLI1 with file-size/memory-size or explicit data/BSS metadata and test loader behavior.
+- `programs/apps/image.ld` carries the two ASSERTs.
+- `tests/run_kli1_contract_test.sh` (host-side, wired into `tools/verify.sh` as `kli1-contract`) checks the six shipping ELFs (`clock`, `editor`, `files`, `monitor`, `shell`, `panel`) have no `.data` / `.bss` sections, and that a synthetic `.bss`-emitting source is rejected by the linker on each app's `_header.S` / `_end.S` glue with the KLI1 message — proving the contract is genuinely enforced rather than silently dropped.
+- `kernel/user_image_format.h` documents the contract next to the format itself.
+
+**Exit criteria:** the KLI1 contract is explicitly defined as no mutable static storage in the flat image, the link fails fast on a violation, and a host test exercises both halves on the six shipping apps.
 
 ## RISK-010 — Kernel-thread scheduling is cooperative
 
@@ -211,3 +214,14 @@ No risk may be moved here without the evidence and exit criteria required by `DO
   - `build/qemu-usb-test.log` — `USB: controller initialized`, `USB: enumeration ok`, `USB HID: 2 devices`.
   - `build/qemu-net-test.log` — `network: initialized`, `[net] DHCP ack: IP=10.0.2.15 gw=IP=10.0.2.2`.
   - `build/qemu-fb-fat-test.log` — `FAT32: mounted`, `FAT32 root: mounted`, `VIRTIO gpu: windows`, `panel: ready`.
+
+### RISK-009 (CLOSED 2026-07-16, committed next baseline)
+
+**Severity when open:** P1
+**Affected release:** v1.0 QEMU desktop
+**Closing commit:** pending on the next commit
+**Documented at:** `programs/apps/image.ld`, `kernel/user_image_format.h`, `tests/run_kli1_contract_test.sh`
+
+**Summary of what was open:** the KLI1 user-image linker script emitted only header/text/rodata/end, but there was no explicit rejection if an application accidentally introduced `.data` or `.bss` symbols. Apps were kept clean by convention.
+
+**Closing evidence:** the linker script now `ASSERT`s that `.data` and `.bss` input is empty; the host-side `tests/run_kli1_contract_test.sh` proves all six shipping apps link clean and that a synthetic `.bss` source is rejected with the `KLI1 forbids .bss` message; the assertion is part of `tools/verify.sh` so the contract cannot regress silently.

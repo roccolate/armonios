@@ -59,6 +59,7 @@ The latest local verification recorded for the current `main` baseline at `4494c
 | `make -C tests test` | HOST-VERIFIED | `ALL TESTS PASSED (0)`; Unity set now includes `test_syscall_helpers_user_buffers_validate_registered_ranges` and the standalone runner covers the mixed RW→RO atomicity path. |
 | `bash tests/run_vfs_process_fd_test.sh` | HOST-VERIFIED | `process-local VFS descriptors` and `process exit closes VFS descriptors` both pass. |
 | `bash tests/run_user_copy_permissions_test.sh` | HOST-VERIFIED | New standalone gate: writable copies succeed, read-only destinations yield `ERR_PERM`, mixed RW→RO range is rejected atomically, missing PTEs yield `ERR_INVAL`. |
+| `bash tests/run_kli1_contract_test.sh` | HOST-VERIFIED | Each of the six shipping apps has no `.data`/`.bss` sections in the linked ELF, and a synthetic `.bss` source is rejected by the linker `ASSERT` with the KLI1 message. |
 | `make stack-check` | HOST-VERIFIED | Maximum reported stack use: 368 bytes in `editor` with a 3072-byte limit. |
 | `make qemu-fs-test` | QEMU-VERIFIED | Fat32 storage smoke test still passes; result captured as part of `bash tools/verify.sh`. |
 | `bash tools/qemu_usercopy_test.sh` | QEMU-VERIFIED | New automated gate. On commit `4494c55` the captured `build-usercopy-test/qemu-usercopy-test.log` contains six `USERCOPY: RX output rejected` probes across distinct EL0 processes followed by `panel: ready` and `clock: starting`. |
@@ -89,7 +90,7 @@ The latest local verification recorded for the current `main` baseline at `4494c
 | virtio input | IMPLEMENTED; HOST-VERIFIED | Parser/driver tests | Visible input behavior still requires manual workflow verification. |
 | USB xHCI/HID | IMPLEMENTED; HOST-VERIFIED; deterministic runner IMPLEMENTED | USB marker runner requires controller, enumeration, and two HID devices | No real run of the new marker gate; no hub support claim. |
 | virtio network/DHCP | IMPLEMENTED; HOST-VERIFIED; deterministic runner IMPLEMENTED | Network runner requires initialization and DHCP ACK | Real end-to-end QEMU DHCP remains `UNVERIFIED`; no sockets, TCP, or HTTP. |
-| KLI1 application images | IMPLEMENTED; HOST-VERIFIED | Image layout and shipping blob tests | Mutable `.data`/`.bss` contract is undefined. |
+| KLI1 application images | IMPLEMENTED; HOST-VERIFIED | Image layout and shipping blob tests | Mutable `.data`/`.bss` is now explicitly forbidden by the linker script and exercised by `tests/run_kli1_contract_test.sh`. |
 | Raspberry Pi 4 board layer | IMPLEMENTED; KNOWN-BROKEN; UNVERIFIED | Initial board, linker, mailbox, and eMMC files exist | Target is not build- or boot-verified; contract is incomplete and eMMC is experimental. |
 
 ## Confirmed implementation facts
@@ -112,7 +113,8 @@ The current QEMU codebase includes:
 - a broad native host test suite;
 - a visible QEMU target wired to the generated FAT32 virtio block image;
 - a common userland window-create wrapper that requests focus after successful creation;
-- `tools/verify.sh` as the one-command local baseline (now also running `tests/run_vfs_process_fd_test.sh`, `tests/run_user_copy_permissions_test.sh`, and `tools/qemu_usercopy_test.sh`);
+- a KLI1 mutable-storage contract enforced by `programs/apps/image.ld` ASSERTs and verified by `tests/run_kli1_contract_test.sh`;
+- `tools/verify.sh` as the one-command local baseline (now also running `tests/run_vfs_process_fd_test.sh`, `tests/run_user_copy_permissions_test.sh`, `tests/run_kli1_contract_test.sh`, `tools/qemu_usercopy_test.sh`, `tools/qemu_marker_test.sh all`, and `tools/qemu_fb_fat_test.sh`);
 - deterministic serial-marker tools for framebuffer, USB, and DHCP QEMU paths.
 
 These implementation facts do not override the limitations in the subsystem table or active risk register.

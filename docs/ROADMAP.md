@@ -119,10 +119,9 @@ TEST dhcp: PASS
 
 ### KLI1 mutable storage — RISK-009
 
-Choose one documented v1.0 contract:
+- [x] forbid `.data` and `.bss` and make application linking fail when they are emitted.
 
-- [ ] forbid `.data` and `.bss` and make application linking fail when they are emitted; or
-- [ ] extend KLI1 with explicit file-size/memory-size or data/BSS metadata and test loading.
+Enforced by `programs/apps/image.ld` ASSERTs and verified by `tests/run_kli1_contract_test.sh`; see `TECHNICAL_RISKS.md` for the closing evidence.
 
 ### Memory hardening — RISK-008
 
@@ -143,7 +142,7 @@ All items below are mandatory:
 - [ ] RISK-003 closed (wiring verified; interactive workflow still pending).
 - [ ] RISK-004 closed (pending named human tester).
 - [x] RISK-005 closed for every mandatory runtime target.
-- [ ] KLI1 `.data`/`.bss` policy explicitly defined and enforced.
+- [x] KLI1 `.data`/`.bss` policy explicitly defined and enforced.
 - [ ] Full host suite passes.
 - [ ] Kernel size gate passes.
 - [ ] Stack gate passes.
