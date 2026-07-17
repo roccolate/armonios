@@ -54,9 +54,9 @@ These two items block v1.0 regardless of desktop polish because they affect kern
 
 ### Correct spawned-window focus — RISK-004
 
-- [ ] Define the focus policy for a newly created normal application window.
-- [ ] Ensure an editor spawned from `files` receives keyboard focus.
-- [ ] Add host coverage for the policy where practical.
+- [x] Define the focus policy for a newly created normal application window.
+- [x] Ensure an editor spawned from `files` receives keyboard focus (kernel-side `GUI: focus` marker proves the syscall path).
+- [x] Add host coverage for the policy (`tools/qemu_focus_test.sh` runs against the auto-launch path; the visible flow still needs a named tester).
 
 ### Manual FAT workflow
 
@@ -144,6 +144,7 @@ All items below are mandatory:
 - [x] RISK-005 closed for every mandatory runtime target.
 - [x] RISK-006 build-contract closed (RPi4 links clean; physical serial pending under RISK-007).
 - [x] KLI1 `.data`/`.bss` policy explicitly defined and enforced.
+- [x] RISK-004 wiring closed (focus syscall path proven end-to-end on the auto-launch path; visible interaction still pending).
 - [ ] Full host suite passes.
 - [ ] Kernel size gate passes.
 - [ ] Stack gate passes.

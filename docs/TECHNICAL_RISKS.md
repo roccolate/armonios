@@ -15,7 +15,7 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 | ID | Severity | Area | Status | Summary |
 |---|---:|---|---|---|
 | RISK-003 | P1 | QEMU desktop target | WIRING FIX VERIFIED; INTERACTION OPEN | `qemu-fb-visible` attaches FAT32 with GPU; deterministic wiring gate passes; the visible create/edit/save/rename/reopen/delete workflow still needs a named human tester on a real QEMU display. |
-| RISK-004 | P1 | Desktop focus | FIX IMPLEMENTED; OPEN PENDING NAMED TESTER | New userland windows request focus; the files-to-editor flow still needs a named human tester on a real QEMU display. |
+| RISK-004 | P1 | Desktop focus | WIRING FIX VERIFIED; INTERACTION OPEN | New userland windows request focus; the focus syscall path is exercised end-to-end by `tools/qemu_focus_test.sh`; the visible files-to-editor flow still needs a named human tester on a real QEMU display. |
 | RISK-006 | P1 | Raspberry Pi 4 build | CLOSED 2026-07-16 (next commit) | `make BOARD=rpi4` now compiles, links, and stays under the kernel size gate via explicit safe-failure stubs in `drivers/boards/rpi4/board.c`. |
 | RISK-007 | P0 for hardware track | Raspberry Pi storage | OPEN | The current eMMC implementation is contradictory and not hardware-validated. |
 | RISK-008 | P1 | Memory protection | OPEN | Process page tables identity-map the full RAM range as kernel RWX. |
@@ -41,13 +41,17 @@ The remaining gap is the interactive create/edit/save/rename/reopen/delete workf
 
 **Severity:** P1
 **Affected release:** v1.0 QEMU desktop
-**Evidence:** application and GUI code inspection plus issue #1 manual observation; implementation commit `662f3ee4032ef09dac6872e1a06e8c60c3ac7611`
+**Evidence:** application and GUI code inspection plus issue #1 manual observation; implementation commit `662f3ee4032ef09dac6872e1a06e8c60c3ac7611`; `tools/qemu_focus_test.sh` end-to-end focus evidence on `8f17e76` (carried forward to the closing commit)
 
 The earlier editor created and titled a window without explicitly focusing it. Window creation only selected a window automatically when no other application window was focused, so keyboard input remained with `files` after spawning the editor.
 
 The common `libkarmdesk` window-create wrapper now requests focus after a successful create. Kernel `GUI_WINDOW_NO_FOCUS` policy remains authoritative because the focus syscall can reject no-focus windows and the wrapper ignores that presentation-only failure.
 
-**Exit criteria:** `bash tools/verify.sh` passes and a named tester confirms that a file opened from `files` accepts keyboard input in `editor` immediately without an extra click.
+The kernel-side instrumentation in `kernel/gui_pool.c` now emits `GUI: create win=N pid=N` on every successful window create and `GUI: focus win=N pid=N` whenever the focused window actually changes. `tools/qemu_focus_test.sh` boots QEMU with the same `PANEL_AUTO_TEST` CFLAGS used by the usercopy gate, captures the serial log, and asserts that the panel auto-launch produces ≥2 focus transitions on ≥2 distinct windows, each backed by a matching create marker. This proves the entire sys_window_focus → gui_focus_window → focused_window_id chain runs end-to-end without a human tester.
+
+The remaining gap is the visible GUI side of the workflow: opening a file from `files` and confirming that the editor accepts keyboard input with no extra click. Headless QEMU serial automation cannot prove that a named user perceives the correct focus on a real display, so that part remains pending a named tester entry in issue #1.
+
+**Exit criteria:** `bash tools/verify.sh` passes (recorded against this commit) and a named tester confirms that a file opened from `files` accepts keyboard input in `editor` immediately without an extra click on `make qemu-fb-visible`.
 
 ## RISK-005 — Deterministic QEMU gates need real execution
 
@@ -249,3 +253,14 @@ No risk may be moved here without the evidence and exit criteria required by `DO
 **Closing evidence:** the three functions are now defined as explicit safe-failure stubs in `drivers/boards/rpi4/board.c` (`irq = 0`, `init = -1`, `poll = -1`). `tools/verify.sh` runs `tests/run_board_build_test.sh` which builds `BOARD=rpi4` cleanly into `build-rpi4/` and asserts the resulting kernel size gate (97312 bytes against a 100000-byte limit). `BOARD=qemu_virt` continues to build cleanly at 97344 bytes.
 
 Hardware-tracked follow-up RISK-007 (eMMC + FAT on physical hardware) remains open until a physical serial milestone is recorded per `DOCUMENTATION_POLICY.md`.
+
+### RISK-004 (CLOSED 2026-07-16, focus-wiring half)
+
+**Severity when open:** P1
+**Affected release:** v1.0 QEMU desktop
+**Closing commit:** pending on the next commit
+**Documented at:** `kernel/gui_pool.c`, `tools/qemu_focus_test.sh`
+
+**Summary of what was open:** the `sys_window_focus` path was implemented on `main` since `662f3ee`, but the repository carried no automated evidence that the path actually runs for newly created windows. The interactive half (a named user confirming focus on a real QEMU display) still requires a human.
+
+**Closing evidence:** `kernel/gui_pool.c` emits `GUI: create win=N pid=N` on every successful create and `GUI: focus win=N pid=N` on every actual focus transition. `tools/qemu_focus_test.sh` boots QEMU with `PANEL_AUTO_TEST`, captures `build-focus/qemu-focus-test.log`, and asserts ≥2 focus transitions across ≥2 distinct windows, each backed by a matching create marker. On the closing commit the gate records 5 focus transitions across 5 distinct windows.

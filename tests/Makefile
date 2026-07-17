@@ -42,7 +42,7 @@ SRCS=unity/unity.c main.c \
      ../kernel/gui_cursor.c \
      ../kernel/gui_events.c ../kernel/gui_input.c ../kernel/gui_pool.c \
      ../kernel/gui_compositor.c \
-     ../kernel/init_status.c \
+     ../kernel/init_status.c ../kernel/print.c \
      ../kernel/ipc.c ../kernel/irq.c ../kernel/process.c \
      ../kernel/sched/sched.c \
      ../kernel/tmpfs.c ../kernel/syscall_helpers.c ../kernel/kstring.c \

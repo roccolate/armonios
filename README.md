@@ -23,7 +23,7 @@ The current codebase includes:
 - QEMU virtio block, GPU, input, and network paths;
 - PCI/xHCI and basic USB HID support;
 - native host tests for core kernel, VFS, filesystem, driver-parser, GUI, and ABI logic;
-- an automated `tools/verify.sh` baseline that includes the EL0 user-copy permissions host and QEMU gates, the process-local VFS descriptor host gate, the KLI1 mutable-storage contract gate, and the BOARD=rpi4 build-contract gate.
+- an automated `tools/verify.sh` baseline that includes the EL0 user-copy permissions host and QEMU gates, the process-local VFS descriptor host gate, the KLI1 mutable-storage contract gate, the BOARD=rpi4 build-contract gate, and the GUI focus-syscall QEMU gate.
 
 Important limitations remain. In particular, the visible FAT/editor workflow has not been rerun on the current commit by a named tester, GitHub Actions is blocked before checkout, and Raspberry Pi support is not build- or hardware-verified.
 
@@ -63,7 +63,7 @@ cd armonios
 bash tools/verify.sh
 ```
 
-The script records the current commit, runs the kernel build, binary-size gate, the BOARD=rpi4 build-contract gate, native host tests, process-local VFS descriptor host gate, the standalone user-copy permissions host gate, the KLI1 mutable-storage contract gate, userland stack check, the FAT32 QEMU serial-marker storage smoke test, the EL0 user-copy permissions QEMU regression, the per-subsystem marker gates (framebuffer, USB, network) under `tools/qemu_marker_test.sh all`, and the visible-desktop FAT+GPU wiring gate. It stops on the first failure.
+The script records the current commit, runs the kernel build, binary-size gate, the BOARD=rpi4 build-contract gate, native host tests, process-local VFS descriptor host gate, the standalone user-copy permissions host gate, the KLI1 mutable-storage contract gate, userland stack check, the FAT32 QEMU serial-marker storage smoke test, the EL0 user-copy permissions QEMU regression, the GUI focus-syscall QEMU gate, the per-subsystem marker gates (framebuffer, USB, network) under `tools/qemu_marker_test.sh all`, and the visible-desktop FAT+GPU wiring gate. It stops on the first failure.
 
 Equivalent individual commands are:
 
@@ -78,6 +78,7 @@ bash tests/run_kli1_contract_test.sh
 make stack-check
 make qemu-fs-test
 bash tools/qemu_usercopy_test.sh
+bash tools/qemu_focus_test.sh
 bash tools/qemu_marker_test.sh all
 bash tools/qemu_fb_fat_test.sh
 ```
@@ -205,7 +206,7 @@ Both syscall-boundary P0 risks (`RISK-001` and `RISK-002`) are closed on `4494c5
 Major remaining blockers include:
 
 1. a named human tester records the visible create/edit/save/rename/reopen/delete FAT workflow (`RISK-003` interactive half);
-2. a named human tester confirms the files-to-editor focus behaviour (`RISK-004`);
+2. a named human tester confirms the visible files-to-editor focus behaviour (`RISK-004` interactive half);
 3. restoring GitHub Actions runner execution and logs (`RISK-011`).
 
 See [Roadmap](docs/ROADMAP.md).

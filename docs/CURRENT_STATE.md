@@ -63,6 +63,7 @@ The latest local verification recorded for the current `main` baseline at `4494c
 | `make stack-check` | HOST-VERIFIED | Maximum reported stack use: 368 bytes in `editor` with a 3072-byte limit. |
 | `make qemu-fs-test` | QEMU-VERIFIED | Fat32 storage smoke test still passes; result captured as part of `bash tools/verify.sh`. |
 | `bash tools/qemu_usercopy_test.sh` | QEMU-VERIFIED | New automated gate. On commit `4494c55` the captured `build-usercopy-test/qemu-usercopy-test.log` contains six `USERCOPY: RX output rejected` probes across distinct EL0 processes followed by `panel: ready` and `clock: starting`. |
+| `bash tools/qemu_focus_test.sh` | QEMU-VERIFIED | New automated gate. Captured `build-focus/qemu-focus-test.log` records 5 `GUI: focus` transitions across 5 distinct windows (panel auto-launches shell, editor, files, monitor, clock); every focused window has a matching `GUI: create` marker. |
 | `bash tools/verify_qemu.sh` | IMPLEMENTED; UNVERIFIED | Deterministic framebuffer, USB, and DHCP marker runners are in `main`; no real per-marker log has been recorded. |
 | `timeout 25s make qemu-fb` | UNVERIFIED | No current deterministic pass record in the repository. |
 | `timeout 25s make qemu-usb` | UNVERIFIED | No current deterministic pass record in the repository. |
@@ -83,7 +84,7 @@ The latest local verification recorded for the current `main` baseline at `4494c
 | Syscall ABI | IMPLEMENTED; HOST-VERIFIED | Frozen numbers and ABI tests | Output copies enforce per-page write permission via PTE checks; further hardening tracked under RISK-008. |
 | VFS | IMPLEMENTED; HOST-VERIFIED | Per-process descriptors, bootfs/tmpfs/FAT dispatch, and `process-fd-isolation` gate | Further hardening tracked under RISK-008. |
 | FAT32 | IMPLEMENTED; HOST-VERIFIED; QEMU-VERIFIED on storage smoke path | Root 8.3 create/read/write/rename/delete/list plus QEMU mount markers | No subdirectories, long names, general FAT compatibility, or completed visible workflow claim. |
-| GUI compositor | IMPLEMENTED; HOST-VERIFIED | Windows, ownership, focus, drag, backing buffers, damage, events, and a limited visible observation | New-window focus recovery is implemented but the visible files-to-editor flow is still `UNVERIFIED`. |
+| GUI compositor | IMPLEMENTED; HOST-VERIFIED; QEMU-VERIFIED on the focus path | Windows, ownership, focus, drag, backing buffers, damage, events, and a limited visible observation; `tools/qemu_focus_test.sh` proves the focus syscall path runs end-to-end | The visible files-to-editor workflow still needs a named human tester on a real QEMU display. |
 | Desktop apps | IMPLEMENTED; BUILD-VERIFIED on current baseline | Six apps built; panel survived the usercopy probe regression | The complete files/editor/FAT workflow is not verified after the recovery change. |
 | virtio block | IMPLEMENTED; QEMU-VERIFIED on storage smoke path | FAT storage smoke target and visible-target wiring | Visible desktop attachment is implemented but unverified end-to-end. |
 | virtio GPU | IMPLEMENTED; earlier MANUAL-VERIFIED; deterministic runner IMPLEMENTED | `tools/qemu_marker_test.sh fb` asserts GPU/window and panel-ready markers | No real run of the new marker gate is recorded. |
@@ -121,10 +122,10 @@ These implementation facts do not override the limitations in the subsystem tabl
 
 ## v1.0 blockers
 
-Both syscall-boundary P0 risks, the deterministic QEMU gate scaffold, and the visible-desktop FAT wiring are now closed. The remaining v1.0 work is human-driven verification and reproducibility:
+Both syscall-boundary P0 risks, the deterministic QEMU gate scaffold, the visible-desktop FAT wiring, and the focus syscall path are now closed. The remaining v1.0 work is human-driven verification and reproducibility:
 
 1. **RISK-003:** the visible create/edit/save/rename/reopen/delete FAT workflow must be recorded by a named human tester on `make qemu-fb-visible` against a current commit. The deterministic wiring gate (`tools/qemu_fb_fat_test.sh`) already proves the FAT + GPU + panel hot path boots together.
-2. **RISK-004:** the files-to-editor focus behaviour must be confirmed by a named human tester on `make qemu-fb-visible` against a current commit.
+2. **RISK-004:** the visible files-to-editor focus behaviour must be confirmed by a named human tester on `make qemu-fb-visible` against a current commit. The `tools/qemu_focus_test.sh` gate already proves the focus syscall path runs end-to-end for every non-panel app.
 3. Complete the visible create/edit/save/rename/reopen/delete FAT workflow (same as RISK-003).
 4. Resolve the GitHub Actions pre-step infrastructure failure tracked in issue #12.
 5. Reconcile release documentation after the verified blockers are closed.

@@ -1,9 +1,23 @@
 #include "kernel/gui_pool.h"
 
+#include <stdint.h>
+
 #include "fb/fb.h"
+#include "drivers/uart/pl011.h"
 #include "kernel/gui_backing.h"
 #include "kernel/gui_internal.h"
 #include "kernel/kernel_compiler.h"
+#include "kernel/print.h"
+
+static void focus_log(const char *label, uint32_t window_id, uint32_t owner_pid) {
+    uart_puts("GUI: ");
+    uart_puts(label);
+    uart_puts(" win=");
+    print_dec64((uint64_t)window_id);
+    uart_puts(" pid=");
+    print_dec64((uint64_t)owner_pid);
+    uart_puts("\n");
+}
 
 static int gui_str_eq(const char *a, const char *b) {
     uint32_t i = 0;
@@ -138,6 +152,10 @@ int gui_create_window_for_pid(gui_desktop_t *desktop, uint32_t owner_pid,
         gui_refresh_cursor_shape(desktop);
         gui_damage_add(desktop, (int32_t)x, (int32_t)y, (int32_t)w,
                        (int32_t)h);
+        focus_log("create", i, owner_pid);
+        if (desktop->focused_window_id == i) {
+            focus_log("focus", i, owner_pid);
+        }
         return 0;
     }
 
@@ -459,6 +477,9 @@ int gui_focus_window(gui_desktop_t *desktop, uint32_t window_id) {
     }
     gui_damage_add(desktop, (int32_t)window->x, (int32_t)window->y,
                    (int32_t)window->w, (int32_t)window->h);
+    if (prev != window_id) {
+        focus_log("focus", window_id, desktop->windows[window_id].owner_pid);
+    }
     return 0;
 }
 
