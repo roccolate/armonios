@@ -6,7 +6,7 @@ Status claims must follow `DOCUMENTATION_POLICY.md`. Active blockers and their e
 
 ## Current milestone: v1.0 QEMU desktop release candidate
 
-**Current state:** v0.9 QEMU desktop alpha  
+**Current state:** v1.0 QEMU desktop release candidate
 **Goal:** a repeatable QEMU desktop whose core process, file, GUI, and test contracts can be trusted.
 
 A v1.0 release candidate is not reached merely because the desktop appears. All P0 risks affecting QEMU v1.0 must be closed, mandatory runtime gates must assert success, the visible FAT workflow must have a dated manual result, and CI-hosted reproducibility must be recorded.
@@ -121,7 +121,7 @@ Required changes:
 - [x] the target exits non-zero if the marker is absent;
 - [x] timeout exit is not treated as success by itself;
 - [x] CI workflow is configured to run all non-visual mandatory gates through `bash tools/verify.sh`.
-- [ ] A GitHub-hosted CI run reaches checkout, passes the baseline, and preserves QEMU serial logs as artifacts (RISK-011).
+- [x] A GitHub-hosted CI run reaches checkout, passes the baseline, and preserves QEMU serial logs as artifacts (RISK-011).
 
 Suggested markers:
 
@@ -167,10 +167,10 @@ All items below are mandatory:
 - [x] Kernel size gate passes locally on 2026-07-17 (`kernel.bin: 106524 bytes`, limit 108000).
 - [x] Stack gate passes locally on 2026-07-17 (maximum 368 bytes, limit 3072).
 - [x] All deterministic QEMU gates pass locally on 2026-07-17.
-- [ ] GitHub Actions runs the baseline and preserves QEMU serial logs (RISK-011).
+- [x] GitHub Actions runs the baseline and preserves QEMU serial logs (RISK-011).
 - [x] Visible FAT workflow passes and is recorded.
-- [ ] `README.md`, `CURRENT_STATE.md`, `ARCHITECTURE.md`, `MEMORY_MAP.md`, `SYSCALLS.md`, and this roadmap agree.
-- [ ] Every remaining P1 risk is closed or has a written acceptance rationale.
+- [x] `README.md`, `CURRENT_STATE.md`, `ARCHITECTURE.md`, `MEMORY_MAP.md`, `SYSCALLS.md`, and this roadmap agree.
+- [x] Every remaining P1 risk is closed or has a written acceptance rationale.
 
 ## v1.1 desktop application polish
 

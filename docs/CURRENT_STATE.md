@@ -7,7 +7,7 @@
 
 ## Audit metadata
 
-- **Project state:** v0.9 QEMU desktop alpha
+- **Project state:** v1.0 QEMU desktop release candidate
 - **Release target:** v1.0 QEMU desktop release candidate
 - **Audit date:** 2026-07-17
 - **Code baseline synchronized:** working tree based on `8c8400bcddd754d879e6e21b787b8d028a6c6036`
@@ -29,12 +29,12 @@
 | `bash tools/qemu_focus_test.sh` | QEMU-VERIFIED | Six focus transitions across six distinct windows; every focused window has a matching `GUI: create` marker. Log: `build-focus/qemu-focus-test.log`. |
 | `bash tools/qemu_marker_test.sh all` | QEMU-VERIFIED | `qemu-fb` (`display: windows`, `panel: ready`), `qemu-usb` (`USB: controller initialized`, `USB: enumeration ok`, `USB HID: 2 devices`), `qemu-net` (`network: initialized`, `[net] DHCP ack: IP=10.0.2.15`). |
 | `bash tools/qemu_fb_fat_test.sh` | QEMU-VERIFIED | Visible-desktop wiring: `FAT32: mounted`, `FAT32 root: mounted`, `display: windows`, `panel: ready` in the same boot. |
-| `.github/workflows/tests.yml` | CONFIGURED; UNVERIFIED REMOTE | The workflow now emits a runner-bootstrap step before checkout, installs the cross-toolchain plus `qemu-system-arm`, runs `bash tools/verify.sh`, and uploads QEMU serial logs. No successful GitHub-hosted run is recorded in this audit. |
+| `.github/workflows/tests.yml` | CI-VERIFIED | GitHub Actions run `CI - Tests` #146 (`29600300946`) reached runner bootstrap and checkout, installed the cross-toolchain plus `qemu-system-arm`, ran `bash tools/verify.sh`, and uploaded `qemu-serial-logs` artifact `8414815367` (`sha256:318a289b6efa18ffd97d3a748afd05a9ef6720b7415ba8348cfd3b899e985c72`). |
 | `make qemu-fb-visible` interactive workflow | MANUAL-VERIFIED | rocco manually verified Files `/fat` listing, 8.3 create, Editor open/focus/type/Ctrl-S, close, rename, reopen with content intact, delete, refresh, and no stale titlebar artifacts on 2026-07-17. Editor appeared to show one visible text line; save/reopen persistence still passed. |
 | `make BOARD=rpi4` | BUILD-VERIFIED | `tests/run_board_build_test.sh` passes; `build-rpi4/kernel.bin` is 102428 bytes under the 108000-byte limit. |
 | Physical Raspberry Pi 4 boot | PLANNED | No hardware boot claim. |
 
-The v0.9 label means that a usable desktop path exists in QEMU. It does **not** mean the kernel is hardened, the visible FAT workflow is complete, or Raspberry Pi support exists.
+The v1.0 RC label means the QEMU desktop release gates have evidence on the current baseline. It does **not** mean production hardening, broad FAT32 compatibility, or Raspberry Pi hardware support.
 
 ## Evidence terminology
 
@@ -123,10 +123,7 @@ These implementation facts do not override the limitations in the subsystem tabl
 
 ## v1.0 blockers
 
-Both syscall-boundary P0 risks, the deterministic QEMU gate scaffold, the visible-desktop FAT workflow, and the focus path are now closed. The remaining v1.0 work is CI-hosted reproducibility:
-
-1. Run the updated GitHub Actions baseline on a hosted runner and record checkout logs plus QEMU serial-log artifacts for RISK-011.
-2. Reconcile release documentation after the remaining verified blocker is closed.
+Both syscall-boundary P0 risks, the deterministic QEMU gate scaffold, the visible-desktop FAT workflow, the focus path, and CI-hosted reproducibility are now closed for the v1.0 QEMU desktop RC baseline.
 
 ## Explicit non-claims
 

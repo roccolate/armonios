@@ -21,7 +21,7 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 | RISK-008 | P1 | Memory protection | CLOSED | W^X enforced: kernel text RX, data+bss+stack RW+NX, MMIO device+NX, remaining RAM RW+NX. Rodata still merged with data (shares a page). |
 | RISK-009 | P1 | KLI1 application format | CLOSED 2026-07-16 (next commit) | Mutable `.data`/`.bss` is now explicitly forbidden by `programs/apps/image.ld` and verified by `tests/run_kli1_contract_test.sh`. |
 | RISK-010 | P2 | Scheduling documentation | CLOSED 2026-07-16 (next commit) | EL0 processes are preemptive, EL1 helper threads are cooperative; the contract is documented in three independent places and the scheduler exposes the explicit `sched_yield` path that EL1 helpers must take. |
-| RISK-011 | P1 | Verification infrastructure | WORKFLOW UPDATED; REMOTE RUN OPEN | The workflow now has a runner-bootstrap step, installs QEMU, runs `bash tools/verify.sh`, and uploads QEMU logs. A successful GitHub-hosted run with checkout logs is still required. |
+| RISK-011 | P1 | Verification infrastructure | CLOSED 2026-07-17 | GitHub Actions reached bootstrap/checkout, ran `bash tools/verify.sh`, and uploaded QEMU serial-log artifact `8414815367` on run `CI - Tests` #146. |
 
 ## RISK-003 — Visible desktop FAT wiring requires verification
 
@@ -175,15 +175,21 @@ Timer IRQ preemption applies to EL0 process trap frames. EL1 helper threads chan
 
 **Severity:** P1
 **Affected release:** v1.0 reproducibility
-**Evidence:** repeated pull-request workflow runs for both the historical and replacement workflows; local workflow update on 2026-07-17
+**Evidence:** repeated pull-request workflow runs for both the historical and replacement workflows; local workflow update on 2026-07-17; GitHub Actions run `29600300946`
 
 GitHub creates the jobs, but they finish with failure before exposing any step or downloadable job log. The historical `CI - Tests` workflow and the new CI-only PR #11 show the same pattern, so no build or test failure can be inferred from those runs.
 
-The workflow file has been updated to emit a `Runner bootstrap` step before checkout, install `qemu-system-arm` alongside the AArch64 cross-toolchain, run the full local baseline through `bash tools/verify.sh`, and upload `build/qemu-*.log`, `build-focus/qemu-*.log`, and `build-usercopy-test/qemu-*.log` as artifacts. This is a repository-side CI configuration fix, not hosted evidence yet.
+The workflow file has been updated to emit a `Runner bootstrap` step before checkout, install `qemu-system-arm` alongside the AArch64 cross-toolchain, run the full local baseline through `bash tools/verify.sh`, and upload `build/qemu-*.log`, `build-focus/qemu-*.log`, and `build-usercopy-test/qemu-*.log` as artifacts.
 
-Issue #12 still tracks any repository/account-level investigation if the hosted runner fails before showing the bootstrap or checkout logs. Until a hosted runner reaches checkout and runs the baseline, local `bash tools/verify.sh` output is the only available automated release evidence; `tools/verify.sh` now covers build, size, board-rpi4, host tests, process-fd-isolation, usercopy-host, kli1-contract, stack-check, qemu-fs-test, usercopy-qemu, qemu-focus, qemu-markers, and qemu-fb-fat.
+Closing evidence on 2026-07-17:
 
-**Exit criteria:** a GitHub-hosted runner reaches checkout, logs are available, the local verification baseline runs in CI, and the FAT32 serial log is preserved as an artifact.
+- PR #23 commit `961b829b8aa2ee2986b44f18b54fb1957ff60dc1`.
+- `CI - Tests` run #146 (`29600300946`) completed successfully.
+- Job `build-and-test` (`87950529772`) reached `Runner bootstrap`, `Checkout`, `Install build dependencies`, `Verify release baseline`, and `Upload QEMU serial logs`, all with success.
+- Artifact `qemu-serial-logs` (`8414815367`) was uploaded, size 3351 bytes, digest `sha256:318a289b6efa18ffd97d3a748afd05a9ef6720b7415ba8348cfd3b899e985c72`.
+- Existing `Verify ArmoniOS` run #6 (`29600300705`) also completed successfully with checkout, build, size, host tests, stack, FAT32 QEMU smoke, and smoke-log upload.
+
+**Exit criteria:** satisfied on 2026-07-17 by GitHub-hosted checkout logs, a successful CI baseline run, and preserved QEMU serial-log artifact.
 
 ## Closed risks
 

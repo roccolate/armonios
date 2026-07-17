@@ -5,11 +5,11 @@
 [![License: GPL-2.0](https://img.shields.io/badge/License/GPL%202.0-blue.svg)](LICENSE)
 [![Architecture](https://img.shields.io/badge/arch/AArch64-green.svg)]()
 [![Language](https://img.shields.io/badge/lang/C%20%2B%20ASM-orange.svg)]()
-[![Status](https://img.shields.io/badge/status/QEMU%20desktop%20alpha-blue.svg)]()
+[![Status](https://img.shields.io/badge/status/QEMU%20desktop%20RC-blue.svg)]()
 
 ## Project status
 
-ArmoniOS is currently a **v0.9 QEMU desktop alpha**. It is a real bare-metal operating system, not a hosted application or Linux distribution, but it is not yet a stable v1.0 release candidate.
+ArmoniOS is currently a **v1.0 QEMU desktop release candidate**. It is a real bare-metal operating system, not a hosted application or Linux distribution. The release-candidate claim applies to the QEMU desktop baseline, not to Raspberry Pi hardware support or production hardening.
 
 The current codebase includes:
 
@@ -25,7 +25,7 @@ The current codebase includes:
 - native host tests for core kernel, VFS, filesystem, driver-parser, GUI, and ABI logic;
 - an automated `tools/verify.sh` baseline that includes the EL0 user-copy permissions host and QEMU gates, the process-local VFS descriptor host gate, the KLI1 mutable-storage contract gate, the BOARD=rpi4 build-contract gate, and the GUI focus-syscall QEMU gate.
 
-Important limitations remain. In particular, the updated GitHub Actions baseline still needs a successful hosted run with logs, Raspberry Pi support is not hardware-verified, and Editor currently appears to show one visible text line in the manual desktop workflow.
+Important limitations remain. In particular, Raspberry Pi support is not hardware-verified, FAT32 support is intentionally narrow, and Editor currently appears to show one visible text line in the manual desktop workflow.
 
 Read these before making or evaluating claims:
 
@@ -203,11 +203,11 @@ The repository does **not** claim that ArmoniOS boots on physical Raspberry Pi h
 
 ## Release direction
 
-The next release goal is a repeatable **v1.0 QEMU desktop release candidate**. The immediate work is correctness and reproducibility, not new multimedia or hardware scope.
+The current release milestone is a repeatable **v1.0 QEMU desktop release candidate**. The immediate follow-up work is release hygiene and small bug fixes, not new multimedia or hardware scope.
 
-Both syscall-boundary P0 risks (`RISK-001` and `RISK-002`) are closed; the deterministic QEMU gate scaffold (`RISK-005`) is covered by the current automated baseline; the visible-desktop FAT workflow and editor focus risks (`RISK-003` and `RISK-004`) are closed with manual evidence. See `docs/TECHNICAL_RISKS.md` for the recorded evidence.
+Both syscall-boundary P0 risks (`RISK-001` and `RISK-002`) are closed; the deterministic QEMU gate scaffold (`RISK-005`) is covered by the current automated baseline; the visible-desktop FAT workflow and editor focus risks (`RISK-003` and `RISK-004`) are closed with manual evidence; and GitHub Actions reproducibility (`RISK-011`) is closed with a hosted run and QEMU log artifact. See `docs/TECHNICAL_RISKS.md` for the recorded evidence.
 
-The remaining v1.0 blocker is recording a successful GitHub Actions run of the updated baseline with QEMU serial-log artifacts (`RISK-011`).
+No QEMU v1.0 release-candidate blocker is currently open. Hardware-track risks remain outside the QEMU RC scope.
 
 See [Roadmap](docs/ROADMAP.md).
 
