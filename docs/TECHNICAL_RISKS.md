@@ -20,7 +20,7 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 | RISK-007 | P0 for hardware track | Raspberry Pi storage | OPEN | The current eMMC implementation is contradictory and not hardware-validated. |
 | RISK-008 | P1 | Memory protection | OPEN | Process page tables identity-map the full RAM range as kernel RWX. |
 | RISK-009 | P1 | KLI1 application format | CLOSED 2026-07-16 (next commit) | Mutable `.data`/`.bss` is now explicitly forbidden by `programs/apps/image.ld` and verified by `tests/run_kli1_contract_test.sh`. |
-| RISK-010 | P2 | Scheduling documentation | OPEN | EL0 processes are preemptive, but EL1 kernel threads are cooperative. |
+| RISK-010 | P2 | Scheduling documentation | CLOSED 2026-07-16 (next commit) | EL0 processes are preemptive, EL1 helper threads are cooperative; the contract is documented in three independent places and the scheduler exposes the explicit `sched_yield` path that EL1 helpers must take. |
 | RISK-011 | P1 | Verification infrastructure | OPEN | GitHub Actions jobs fail before checkout and expose no step logs. Issue #12 tracks the repository/account-level investigation. |
 
 ## RISK-003 — Visible desktop FAT wiring requires verification
@@ -150,11 +150,18 @@ Applications that need mutable static state obtain it through `SYS_MMAP` at runt
 
 **Severity:** P2
 **Affected release:** documentation accuracy now; implementation only when needed
-**Evidence:** scheduler inspection
+**Evidence:** scheduler inspection (`kernel/sched/sched.c`); the explicit `sched_yield()` path; documentation in `docs/ARCHITECTURE.md`, `docs/CODEX_HANDOFF.md`, and `docs/CURRENT_STATE.md`.
 
-Timer IRQ preemption applies to EL0 process trap frames. EL1 helper threads change only through explicit yield/exit paths. Documentation must describe the system as preemptive for EL0 and cooperative for kernel threads.
+Timer IRQ preemption applies to EL0 process trap frames. EL1 helper threads change only through explicit `sched_yield()` / `sched_exit` paths. The repository must continue describing the system as preemptive for EL0 and cooperative for kernel threads, or implement a separately-designed EL1 preemption mechanism and test it.
 
-**Exit criteria:** documentation remains accurate, or a separately designed EL1 preemption mechanism is implemented and tested.
+**Closing evidence (recorded on the closing commit):**
+
+- `docs/ARCHITECTURE.md:90-109` carries a dedicated `### EL0 processes` / `### EL1 helper threads` pair with the one-line contract "preemptive EL0 processes with cooperative EL1 helper threads" and explicitly cites `RISK-010`.
+- `docs/CODEX_HANDOFF.md:89-90` repeats the contract in the agent hand-off summary.
+- `docs/CURRENT_STATE.md:104-105, 81-82, 107` repeats it in implementation facts, subsystem status, and the explicit-non-claims block.
+- `kernel/sched/sched.c` exposes the `sched_yield()` boundary that EL1 helpers must use.
+
+**Exit criteria:** documentation is accurate in three independent places and the scheduler exposes the explicit `sched_yield` boundary.
 
 ## RISK-011 — GitHub Actions does not reach checkout
 
@@ -264,3 +271,13 @@ Hardware-tracked follow-up RISK-007 (eMMC + FAT on physical hardware) remains op
 **Summary of what was open:** the `sys_window_focus` path was implemented on `main` since `662f3ee`, but the repository carried no automated evidence that the path actually runs for newly created windows. The interactive half (a named user confirming focus on a real QEMU display) still requires a human.
 
 **Closing evidence:** `kernel/gui_pool.c` emits `GUI: create win=N pid=N` on every successful create and `GUI: focus win=N pid=N` on every actual focus transition. `tools/qemu_focus_test.sh` boots QEMU with `PANEL_AUTO_TEST`, captures `build-focus/qemu-focus-test.log`, and asserts ≥2 focus transitions across ≥2 distinct windows, each backed by a matching create marker. On the closing commit the gate records 5 focus transitions across 5 distinct windows.
+
+### RISK-010 (CLOSED 2026-07-16, documentation accuracy)
+
+**Severity when open:** P2
+**Affected release:** documentation accuracy now
+**Closing commit:** pending on the next commit
+
+**Summary of what was open:** the preemptive EL0 / cooperative EL1 split needed to be documented cleanly so the kernel and any new contributor code does not accidentally rely on cooperative EL1 helpers running with timer preemption.
+
+**Closing evidence:** three independent documentation sites carry the same one-line contract: `docs/ARCHITECTURE.md` has the dedicated `### EL0 processes` / `### EL1 helper threads` sections, `docs/CODEX_HANDOFF.md` repeats it for incoming agents, and `docs/CURRENT_STATE.md` lists it under implementation facts and subsystem status. The scheduler boundary that EL1 helpers must use (`sched_yield`) is implemented in `kernel/sched/sched.c`.

@@ -102,7 +102,7 @@ The current QEMU codebase includes:
 - physical and virtual memory managers;
 - EL0 processes with private image, stack, anonymous mappings, and page-table roots;
 - preemptive EL0 dispatch on IRQ and voluntary yield;
-- cooperative EL1 helper threads;
+- cooperative EL1 helper threads; **`docs/ARCHITECTURE.md`, `docs/CODEX_HANDOFF.md`, and `docs/CURRENT_STATE.md` repeat the preemptive-EL0 / cooperative-EL1 contract**, and `kernel/sched/sched.c` exposes the explicit `sched_yield` boundary;
 - KLI1 freestanding application images;
 - a kernel-owned GUI compositor;
 - panel, shell, editor, files, monitor, and clock applications;

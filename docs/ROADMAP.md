@@ -145,6 +145,7 @@ All items below are mandatory:
 - [x] RISK-006 build-contract closed (RPi4 links clean; physical serial pending under RISK-007).
 - [x] KLI1 `.data`/`.bss` policy explicitly defined and enforced.
 - [x] RISK-004 wiring closed (focus syscall path proven end-to-end on the auto-launch path; visible interaction still pending).
+- [x] RISK-010 documentation accurate in three independent sites.
 - [ ] Full host suite passes.
 - [ ] Kernel size gate passes.
 - [ ] Stack gate passes.
