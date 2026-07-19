@@ -33,6 +33,10 @@ The implemented GUI/window range is `70..86`. IPC uses `60..61`; system informat
 
 Append new calls. Never renumber or reuse existing entries.
 
+The v1 application and widget roadmap should prefer `libkarmdesk` helpers on
+top of this range. Add GUI syscalls only when an operation cannot be expressed
+with the existing ownership model, and keep any new number append-only.
+
 ## Ownership
 
 Owner-only operations include:
@@ -58,6 +62,10 @@ Cross-process presentation operations are intentionally limited to:
 Ownerless windows use `GUI_NO_OWNER` and are skipped by process-window enumeration.
 
 Do not expand cross-process mutation casually. A new exception requires a documented desktop responsibility and ABI tests.
+
+Panel-driven v1 desktop behavior, such as task switching or restore/focus, must
+continue to use narrow presentation permissions. Do not give the panel broad
+ownership of application windows for convenience.
 
 ## Focus policy
 

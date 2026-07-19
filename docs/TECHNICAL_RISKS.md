@@ -25,8 +25,11 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 | RISK-009 | P1 | KLI1 application format | CLOSED | Mutable `.data`/`.bss` is forbidden by the linker script and tested. |
 | RISK-010 | P2 | Scheduling documentation | CLOSED | EL0 processes are preemptive; EL1 helper threads are cooperative. |
 | RISK-011 | P1 | Verification infrastructure | CLOSED | Local and hosted verification gates have evidence for the v0.1 baseline. |
+| RISK-012 | P1 for v0.2 | Syscall boundary | OPEN | Some syscall internals still rely on validated raw EL0 pointers and non-fault-contained byte copies. |
+| RISK-013 | P1 for v1 | Storage/VFS | OPEN | Current VFS/FAT path is too narrow for the v1 filesystem target. |
+| RISK-014 | P1 for v1 | Desktop apps | OPEN | Current apps are useful demos, not complete daily-use tools. |
 
-## Open risk
+## Open risks
 
 ### RISK-007 — Raspberry Pi eMMC driver is not a valid storage reference
 
@@ -39,6 +42,61 @@ The current eMMC implementation mixes register offsets and block-size constants,
 This file must be treated as experimental scaffolding, not a working driver.
 
 **Exit criteria:** rewrite or validate the controller sequence against BCM2711 documentation; add pure command/register tests where possible; confirm sector reads on physical hardware before enabling FAT writes.
+
+### RISK-012 — Syscall internals still need kernel-owned copy boundaries
+
+**Severity:** P1 for v0.2
+**Affected scope:** syscall implementation, VFS/storage cleanup, process isolation hardening
+**Evidence:** static syscall-boundary inspection
+
+The public helper layer now validates user ranges and output PTE write
+permissions, closing the v0.1 P0 permission bug. The remaining design debt is
+that several syscall paths can still validate an EL0 pointer and then let
+deeper code operate through ordinary kernel loads/stores. That keeps the copy
+path non-fault-contained and makes future VFS/storage refactors harder to
+reason about.
+
+**Exit criteria:** syscall entry points copy path strings, argv, IPC payloads,
+I/O buffers, and output structs into kernel-owned temporary buffers before
+calling lower layers; helper tests cover invalid, read-only, and boundary-crossing
+cases; `bash tools/verify.sh` still passes.
+
+### RISK-013 — Storage and VFS are too narrow for v1
+
+**Severity:** P1 for v1
+**Affected scope:** VFS, FAT, desktop persistence, Shell/Files behavior
+**Evidence:** static architecture inspection and current documented filesystem scope
+
+The current VFS is a fixed-table facade over bootfs, tmpfs, and dynamic FAT32
+root nodes. The FAT32 implementation is limited to root-directory 8.3 names and
+does not provide long names, subdirectories, partition discovery, a generic
+mount table, a common path resolver, structured directory entries, or ext2.
+
+This is acceptable for v0.1, but it cannot satisfy the v1 requirement that a
+user browse persistent storage, create folders, edit files in directories, and
+verify persistence after reboot.
+
+**Exit criteria:** the v0.3-v0.4 storage roadmap lands with block-device
+metadata, a mount table, common path resolution, filesystem-driver operations,
+real FAT long-name/directory support, host image tests, QEMU persistence tests,
+and updated syscall documentation.
+
+### RISK-014 — Desktop applications are not complete daily tools
+
+**Severity:** P1 for v1
+**Affected scope:** Files, Editor, Shell, Settings/Control, Monitor, Panel
+**Evidence:** static application inspection plus current visible workflow evidence
+
+The current applications are useful as desktop and syscall demos, but v1 needs
+normal workflows. Files is tied to the narrow `/fat` surface, Editor has a
+single-visible-line polish limitation in the recorded manual workflow, Shell
+lacks basic file-management commands, Settings persistence is narrow, and
+Monitor is informational rather than an operator tool.
+
+**Exit criteria:** the v0.5-v0.8 application roadmap lands with shared runtime
+helpers and widgets; Files, Editor, Shell, Settings, Monitor, Panel, and Clock
+support the v1 manual workflow; persistence survives a QEMU reboot; visible
+manual evidence is recorded.
 
 ## Closed v0.1 risks
 

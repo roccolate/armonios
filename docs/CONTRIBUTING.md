@@ -17,16 +17,25 @@ Read these documents in order:
 
 ## Current project rule
 
-The project is stabilizing the v0.1 QEMU desktop baseline. Correctness, deterministic verification, and small release hygiene fixes take priority over new features.
+The project has a v0.1 QEMU desktop baseline and is now moving toward a usable
+v1.0 QEMU mini desktop OS. The next work is still disciplined: v0.2 cleanup and
+hardening first, then the storage/VFS platform, real FAT support, userland
+runtime/widgets, useful apps, ext2 read-only support, and desktop polish.
 
 - do not broaden the kernel ABI for convenience;
 - do not begin multimedia or game-engine work in the kernel;
 - do not claim Raspberry Pi support;
 - do not treat a timeout-only QEMU launch as a passing test;
 - do not describe user pointers as writable unless permissions are enforced;
-- do not add more global process-visible resources.
+- do not add more global process-visible resources;
+- do not make filesystem claims beyond the narrow current FAT32 scope unless
+  they have host image tests and QEMU evidence;
+- do not add placeholder app controls. Visible controls should perform real
+  actions or stay out of the UI.
 
-The v0.1 QEMU blockers are closed on the documented baseline. Treat new correctness, ABI, or evidence regressions as release-critical until triaged in `TECHNICAL_RISKS.md`.
+The v0.1 QEMU blockers are closed on the documented baseline. Treat new
+correctness, ABI, evidence, storage, or v1 workflow regressions as
+release-critical until triaged in `TECHNICAL_RISKS.md`.
 
 ## Development setup
 
@@ -194,6 +203,11 @@ Any ABI change must update:
 - `SYSCALLS.md` or `GUI_ABI_NOTES.md`;
 - `CURRENT_STATE.md` if behavior or evidence changed.
 
+Planned filesystem calls such as `SYS_MKDIR`, `SYS_TRUNCATE`, `SYS_STATX`,
+`SYS_READDIRX`, and `SYS_FSINFO` are roadmap items, not current ABI. When they
+are implemented, assign new numbers append-only and land kernel code, wrappers,
+host tests, app updates, and `SYSCALLS.md` together.
+
 Do not silently change:
 
 - syscall numbers;
@@ -256,6 +270,7 @@ Keep commits focused. Documentation recovery and behavior changes may be separat
 - broad rewrites without staged tests;
 - hidden ABI breaks;
 - speculative POSIX/libc or large runtime additions;
+- filesystem or app claims that exceed current evidence;
 - temporary hacks without a tracked risk or issue.
 
 ## Communication

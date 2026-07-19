@@ -8,6 +8,11 @@ The latest automated baseline recorded in `CURRENT_STATE.md` passed `bash tools/
 
 The implementation remains userland-only. It does not add a syscall, renumber the ABI, or broaden an owner-only window permission.
 
+For v1, the panel is the desktop shell, not a decoration. It should keep the
+launcher, taskbar, restore/focus behavior, clock, and storage/session status
+reliable while the real Files, Editor, Shell, Settings, and Monitor workflows
+grow around it.
+
 ## Taskbar behavior
 
 The panel is a compact 40-pixel dock without a visible title bar. The kernel classifies the window named `panel` as:
@@ -116,6 +121,7 @@ The following still require separate review:
 - global shortcuts such as Super and Alt-Tab;
 - compositor-to-panel lifecycle events replacing polling;
 - pin reordering or persistent settings;
+- storage/session status once the v0.3-v0.4 storage platform exists;
 - richer icon artwork and color theme work;
 - tooltips and context menus.
 

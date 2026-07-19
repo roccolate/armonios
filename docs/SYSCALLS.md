@@ -122,7 +122,22 @@ FAT32 syscall scope:
 - root directory only;
 - short 8.3 names only;
 - create, read, write, seek, rename, delete, stat, and list;
-- no subdirectories or long-file-name ABI.
+- no subdirectories, long-file-name ABI, partition discovery, ext2 mount, or structured directory entries.
+
+## Planned filesystem ABI extensions
+
+These calls are part of the v1 storage roadmap and are **not implemented** in
+the current syscall table. Assign numbers only when the matching kernel,
+userland wrappers, tests, and documentation land together. Append new numbers;
+do not reuse existing syscall slots.
+
+| Planned name | Intended purpose |
+|---|---|
+| `SYS_MKDIR` | Create a directory on filesystems that support directories. |
+| `SYS_TRUNCATE` | Resize a file without rewriting it through root-only FAT behavior. |
+| `SYS_STATX` | Return structured metadata such as type, size, flags, and mount state. |
+| `SYS_READDIRX` | Return structured directory entries instead of newline-separated names. |
+| `SYS_FSINFO` | Report filesystem type, read-only state, and capacity when available. |
 
 ## IPC syscalls
 

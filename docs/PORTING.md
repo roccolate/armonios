@@ -4,6 +4,10 @@ ArmoniOS currently has one verified development platform: QEMU `virt`.
 
 The repository also contains experimental Raspberry Pi 4 files. They are build-verified scaffolding for future bring-up, not a working hardware port. Hardware claims must follow `DOCUMENTATION_POLICY.md`.
 
+The v1.0 roadmap is a QEMU desktop release line. Raspberry Pi work remains a
+separate hardware track until physical serial, memory/timer, and storage
+evidence exist.
+
 Active board risks:
 
 - `RISK-007` — experimental and contradictory eMMC implementation.
@@ -115,6 +119,7 @@ Known facts from static inspection:
 - the backend implements every function required by `drivers/board.h`;
 - unsupported display/input operations return explicit safe failures;
 - the eMMC code must not be treated as a functional driver;
+- storage should fail closed until the eMMC path is rewritten or hardware-validated;
 - there is no documented EL2-to-EL1 bring-up path for physical firmware entry;
 - there is no secondary-core parking milestone;
 - there is no validated framebuffer acquisition path;

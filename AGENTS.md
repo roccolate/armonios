@@ -4,12 +4,15 @@ This file is the live entry point for agents working in this repository.
 
 ## Current Status
 
-ArmoniOS is a v0.1 QEMU desktop baseline on the `main` baseline.
+ArmoniOS is a v0.1 QEMU desktop baseline on `main`. The roadmap target is a
+usable v1.0 QEMU mini desktop OS; storage, application usefulness, ext2, and
+desktop polish remain future work until implemented and verified.
 
 The latest automated baseline recorded in the documentation is:
 
 - command: `bash tools/verify.sh`
-- source tree: v0.1 pre-reset baseline
+- verification source tree: v0.1 pre-reset baseline
+- current public first commit: `78b9d45` (`v0.1`)
 - timestamp: `2026-07-19T01:05:06Z`
 - result: all automated baseline gates passed
 

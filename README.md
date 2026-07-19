@@ -7,6 +7,10 @@
 [![Language](https://img.shields.io/badge/lang/C%20%2B%20ASM-orange.svg)]()
 [![Status](https://img.shields.io/badge/status/v0.1%20QEMU%20desktop-blue.svg)]()
 
+## Preview
+
+![ArmoniOS QEMU desktop preview](docs/assets/qemu-desktop-preview.png)
+
 ## Project status
 
 ArmoniOS is currently a **v0.1 QEMU desktop baseline**. It is a real bare-metal operating system, not a hosted application or Linux distribution. The v0.1 claim applies to the QEMU desktop baseline, not to Raspberry Pi hardware support or production hardening.
@@ -26,6 +30,8 @@ The current codebase includes:
 - an automated `tools/verify.sh` baseline that includes the EL0 user-copy permissions host and QEMU gates, the process-local VFS descriptor host gate, the KLI1 mutable-storage contract gate, the BOARD=rpi4 build-contract gate, and the GUI focus-syscall QEMU gate.
 
 Important limitations remain. In particular, Raspberry Pi support is not hardware-verified, FAT32 support is intentionally narrow, and Editor currently appears to show one visible text line in the manual desktop workflow.
+
+The roadmap target is **v1.0: a usable QEMU mini desktop OS**. That is future work. Before v1, the project will focus on cleanup/hardening, a real storage/VFS platform, real FAT support, useful desktop apps, and an ext2 read-only path.
 
 Read these before making or evaluating claims:
 
@@ -129,8 +135,10 @@ At present these are runtime launch targets. Use `bash tools/qemu_marker_test.sh
 ## Current Verified Local Baseline
 
 The latest local automated verification was `bash tools/verify.sh`, run at
-`2026-07-19T00:26:05Z` on commit
-the v0.1 pre-reset source tree:
+`2026-07-19T01:05:06Z` on the v0.1 source tree before the public-history reset.
+The current public first commit is `78b9d45` (`v0.1`) and is intended to
+represent that baseline; rerun `bash tools/verify.sh` before promoting a newer
+baseline.
 
 ```text
 make                              passed
@@ -190,6 +198,11 @@ It does not claim long-file-name support, directories, partition discovery, cras
 
 Per-process VFS file descriptors are now isolated and reclaimed on exit/fault/kill.
 
+The v1 storage direction is different from the current implementation: `/fat`
+should become a real writable FAT volume with long names and directories, and
+`/ext` should mount an ext2 volume at least read-only. Neither claim is current
+behavior.
+
 ## Application format
 
 Shipping applications are linked as flat KLI1 images with a fixed header and entry table. The current format is tested for the seven included applications and explicitly forbids mutable static `.data` / `.bss`: `programs/apps/image.ld` `ASSERT`s both sections are empty, and `tests/run_kli1_contract_test.sh` confirms the seven shipping ELFs link clean and that a regression `.bss` source is rejected with a clear `KLI1 forbids .bss` message. Apps that need mutable state obtain it through `SYS_MMAP` at runtime.
@@ -204,7 +217,14 @@ The repository does **not** claim that ArmoniOS boots on physical Raspberry Pi h
 
 ## Release direction
 
-The current release milestone is a repeatable **v0.1 QEMU desktop baseline**. The immediate follow-up work is measured cleanup, small bug fixes, and application polish, not new multimedia or hardware scope.
+The current release milestone is a repeatable **v0.1 QEMU desktop baseline**.
+The next product milestone is **v1.0 usable QEMU desktop OS**, reached through
+the staged roadmap in `docs/ROADMAP.md`.
+
+Near-term work is cleanup and hardening first: syscall copy ownership, VFS/FAT
+decoupling, RPi storage fail-closed behavior, and small regressions. After that,
+storage and application work should make Files, Editor, Shell, Settings,
+Monitor, Panel, and Clock useful enough for a normal short desktop session.
 
 Both syscall-boundary P0 risks (`RISK-001` and `RISK-002`) are closed; the deterministic QEMU gate scaffold (`RISK-005`) is covered by the current automated baseline; the visible-desktop FAT workflow and editor focus risks (`RISK-003` and `RISK-004`) are closed with manual evidence; and GitHub Actions reproducibility (`RISK-011`) is closed with a hosted run and QEMU log artifact. See `docs/TECHNICAL_RISKS.md` for the recorded evidence.
 

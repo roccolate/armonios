@@ -8,10 +8,10 @@
 ## Audit metadata
 
 - **Project state:** v0.1 QEMU desktop baseline
-- **Release target:** v0.1 QEMU desktop baseline
+- **Roadmap target:** v1.0 usable QEMU desktop OS
 - **Audit date:** 2026-07-19
-- **Code baseline synchronized:** v0.1 pre-reset source tree
-- **Audit method:** repository-wide static inspection plus a local verification run of `bash tools/verify.sh` at `2026-07-19T01:05:06Z`, including `board-rpi4`, `process-fd-isolation`, `usercopy-host`, `kli1-contract`, `usercopy-qemu`, `qemu-focus`, `qemu-markers`, and `qemu-fb-fat` automated gates. Serial logs for the QEMU gates live under `build/qemu-*-test.log`, `build-focus/qemu-focus-test.log`, and `build-usercopy-test/qemu-usercopy-test.log`.
+- **Code baseline synchronized:** v0.1 source tree; current public first commit is `78b9d45` (`v0.1`)
+- **Audit method:** repository-wide static inspection plus a local verification run of `bash tools/verify.sh` at `2026-07-19T01:05:06Z` on the equivalent pre-reset source tree, including `board-rpi4`, `process-fd-isolation`, `usercopy-host`, `kli1-contract`, `usercopy-qemu`, `qemu-focus`, `qemu-markers`, and `qemu-fb-fat` automated gates. Serial logs for the QEMU gates live under `build/qemu-*-test.log`, `build-focus/qemu-focus-test.log`, and `build-usercopy-test/qemu-usercopy-test.log`.
 
 ## Verification record
 
@@ -52,27 +52,6 @@ This document uses the labels defined in `DOCUMENTATION_POLICY.md`:
 
 Code or test-tool presence is never upgraded to a runtime claim without matching evidence.
 
-## Current verification record
-
-The latest local automated verification recorded for the v0.1 pre-reset source tree was `bash tools/verify.sh` at `2026-07-19T01:05:06Z`:
-
-| Check | Status | Evidence |
-|---|---|---|
-| `make` | BUILD-VERIFIED | Clean `make BOARD=qemu_virt`. |
-| `make size` | BUILD-VERIFIED | `kernel.bin: 106524 bytes (limit: 108000)`. |
-| `make -C tests test` | HOST-VERIFIED | `ALL TESTS PASSED (0)`; Unity set now includes `test_syscall_helpers_user_buffers_validate_registered_ranges` and the standalone runner covers the mixed RW→RO atomicity path. |
-| `bash tests/run_vfs_process_fd_test.sh` | HOST-VERIFIED | `process-local VFS descriptors` and `process exit closes VFS descriptors` both pass. |
-| `bash tests/run_user_copy_permissions_test.sh` | HOST-VERIFIED | New standalone gate: writable copies succeed, read-only destinations yield `ERR_PERM`, mixed RW→RO range is rejected atomically, missing PTEs yield `ERR_INVAL`. |
-| `bash tests/run_kli1_contract_test.sh` | HOST-VERIFIED | Each of the seven shipping apps has no `.data`/`.bss` sections in the linked ELF, and a synthetic `.bss` source is rejected by the linker `ASSERT` with the KLI1 message. |
-| `make stack-check` | HOST-VERIFIED | Maximum reported stack use: 368 bytes in `editor` with a 3072-byte limit. |
-| `make qemu-fs-test` | QEMU-VERIFIED | Fat32 storage smoke test still passes; result captured as part of `bash tools/verify.sh`. |
-| `bash tools/qemu_usercopy_test.sh` | QEMU-VERIFIED | Captured `build-usercopy-test/qemu-usercopy-test.log` contains seven `USERCOPY: RX output rejected` probes across distinct EL0 processes followed by `panel: ready` and `clock: starting`. |
-| `bash tools/qemu_focus_test.sh` | QEMU-VERIFIED | Captured `build-focus/qemu-focus-test.log` records six focus transitions across six distinct windows; every focused window has a matching `GUI: create` marker. |
-| `bash tools/qemu_marker_test.sh all` | QEMU-VERIFIED | Framebuffer, USB, and DHCP marker runners pass with logs under `build/qemu-*-test.log`. |
-| `make qemu-fb-visible` | MANUAL-VERIFIED | Existing manual evidence only: the target attaches the FAT32 image and new userland windows request focus; rocco verified the create/edit/save/rename/reopen/delete workflow and editor focus without an extra click on 2026-07-17. |
-| `make BOARD=rpi4` | BUILD-VERIFIED | `tests/run_board_build_test.sh` (the `board-rpi4` gate inside `tools/verify.sh`) does a clean BOARD=rpi4 build into `build-rpi4/` and asserts the 108000-byte kernel size gate. The RPi4 backend exposes explicit safe-failure stubs for virtio-input; eMMC and physical serial are still pending. |
-| Physical Raspberry Pi 4 boot | PLANNED | No hardware boot claim. |
-
 ## Subsystem status
 
 | Subsystem | Status | Current evidence | Important limitation |
@@ -83,10 +62,10 @@ The latest local automated verification recorded for the v0.1 pre-reset source t
 | EL1 kernel threads | IMPLEMENTED | Cooperative scheduler code | Kernel threads are not timer-preempted. |
 | PMM/VMM/heap | IMPLEMENTED; HOST-VERIFIED | Allocation, mapping, rollback, cleanup, and heap tests | PMM manages at most 128 MiB; kernel RAM mappings are now W^X (RISK-008: text RX, rodata R/NX, data+bss+stack RW+NX, MMIO device+NX, remaining RAM RW+NX). |
 | Syscall ABI | IMPLEMENTED; HOST-VERIFIED | Frozen numbers and ABI tests | Output copies enforce per-page write permission via PTE checks; memory hardening implemented under RISK-008. |
-| VFS | IMPLEMENTED; HOST-VERIFIED | Per-process descriptors, bootfs/tmpfs/FAT dispatch, and `process-fd-isolation` gate | Memory hardening for VFS tracked under RISK-008 (now closed). |
-| FAT32 | IMPLEMENTED; HOST-VERIFIED; QEMU-VERIFIED on storage smoke path; MANUAL-VERIFIED on visible workflow | Root 8.3 create/read/write/rename/delete/list plus QEMU mount markers and the existing 2026-07-17 visible workflow | No subdirectories, long names, general FAT compatibility, or newer manual desktop evidence for the 2026-07-19 automated baseline. |
+| VFS | IMPLEMENTED; HOST-VERIFIED | Per-process descriptors, bootfs/tmpfs/FAT dispatch, and `process-fd-isolation` gate | Fixed-table facade only: no generic mount table, common path resolver, structured directory ABI, or filesystem driver boundary yet. |
+| FAT32 | IMPLEMENTED; HOST-VERIFIED; QEMU-VERIFIED on storage smoke path; MANUAL-VERIFIED on visible workflow | Root 8.3 create/read/write/rename/delete/list plus QEMU mount markers and the existing 2026-07-17 visible workflow | No subdirectories, long names, partition discovery, broad FAT compatibility, or newer manual desktop evidence for the 2026-07-19 automated baseline. |
 | GUI compositor | IMPLEMENTED; HOST-VERIFIED; QEMU-VERIFIED on the focus path; MANUAL-VERIFIED on visible workflow | Windows, ownership, focus, drag, backing buffers, damage, events, and a visible Files-to-Editor pass; `tools/qemu_focus_test.sh` proves the focus syscall path runs end-to-end | Broader visual polish remains future work. |
-| Desktop apps | IMPLEMENTED; BUILD-VERIFIED; QEMU-VERIFIED on launch/focus markers; MANUAL-VERIFIED on FAT workflow | Seven apps built: panel, shell, editor, files, monitor, control, and clock; panel survived the usercopy probe regression; focus gate covers six user-visible app windows; rocco verified the Files/Editor/FAT workflow | Editor appears to show one visible text line; treat as v0.3 polish unless it blocks a concrete workflow. |
+| Desktop apps | IMPLEMENTED; BUILD-VERIFIED; QEMU-VERIFIED on launch/focus markers; MANUAL-VERIFIED on FAT workflow | Seven apps built: panel, shell, editor, files, monitor, control, and clock; panel survived the usercopy probe regression; focus gate covers six user-visible app windows; rocco verified the Files/Editor/FAT workflow | Apps are useful demos, not complete daily tools. Files is limited to `/fat`, Editor appears to show one visible text line, Settings persistence is narrow, and v1 requires real Files/Editor/Shell/Settings/Monitor workflows. |
 | virtio block | IMPLEMENTED; QEMU-VERIFIED on storage smoke path; MANUAL-VERIFIED on visible workflow | FAT storage smoke target, visible-target wiring, and the existing 2026-07-17 visible workflow | Manual visible evidence is separate from automated QEMU marker evidence. |
 | virtio GPU | IMPLEMENTED; QEMU-VERIFIED on marker gate | `tools/qemu_marker_test.sh fb` asserts GPU/window and panel-ready markers | Visible manual workflow evidence is still separate. |
 | virtio input | IMPLEMENTED; HOST-VERIFIED | Parser/driver tests | Visible input behavior still requires manual workflow verification. |
@@ -122,9 +101,13 @@ The current QEMU codebase includes:
 
 These implementation facts do not override the limitations in the subsystem table or active risk register.
 
-## v0.1 blockers
+## v0.1 baseline status
 
 Both syscall-boundary P0 risks, the deterministic QEMU gate scaffold, the visible-desktop FAT workflow, the focus path, and CI-hosted reproducibility are now closed for the v0.1 QEMU desktop baseline.
+
+The v1.0 roadmap is intentionally broader than v0.1. Storage, application
+usefulness, ext2, and desktop polish remain future work until implemented and
+verified.
 
 ## Explicit non-claims
 
@@ -134,6 +117,10 @@ ArmoniOS does not currently claim:
 - general FAT32 compatibility;
 - USB hubs;
 - TCP, sockets, DNS queries, or HTTP applications;
+- ext2 support;
+- general writable FAT support with long names and subdirectories;
+- complete daily-use desktop applications;
+- a userland heap, widget toolkit, or libc-like runtime;
 - SMP or secondary-core startup;
 - audio or accelerated graphics;
 - Raspberry Pi 4 or Raspberry Pi 5 support;
@@ -148,7 +135,7 @@ The one-command local baseline is:
 bash tools/verify.sh
 ```
 
-It currently runs build, size, BOARD=rpi4 build-contract, host tests, process-local VFS FD isolation, the standalone user-copy permissions gate, the KLI1 mutable-storage contract gate, stack checking, the FAT32 storage smoke test, usercopy/focus QEMU gates, framebuffer/USB/network marker gates, and the visible-desktop FAT+GPU wiring gate. A clean run at `2026-07-19T01:05:06Z` captured commit/date output via the script's built-in header. QEMU serial logs are under `build/`, `build-focus/`, and `build-usercopy-test/`.
+It currently runs build, size, BOARD=rpi4 build-contract, host tests, process-local VFS FD isolation, the standalone user-copy permissions gate, the KLI1 mutable-storage contract gate, stack checking, the FAT32 storage smoke test, usercopy/focus QEMU gates, framebuffer/USB/network marker gates, and the visible-desktop FAT+GPU wiring gate. A clean run at `2026-07-19T01:05:06Z` was recorded on the equivalent v0.1 pre-reset source tree. QEMU serial logs are under `build/`, `build-focus/`, and `build-usercopy-test/`.
 
 The deterministic QEMU subsystem runner is:
 

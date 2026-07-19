@@ -88,7 +88,10 @@ The author of a behavior-changing change owns the matching documentation update.
 
 A risk may move to `CLOSED` only when its exit criteria are satisfied and the evidence is linked or copied into the risk entry. A comment such as “fixed” or “tests pass” is insufficient without the exact test scope.
 
-Closed risks remain in the file for traceability or are moved to a dated archive. They must not be silently deleted.
+Closed risks remain in the active risk register for traceability. Do not create
+dated archive or handoff files by default; if a historical record is ever
+needed, keep the current claim in the active document and link to the external
+record explicitly. Closed risks must not be silently deleted.
 
 ## Release claims
 

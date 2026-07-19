@@ -66,13 +66,13 @@ Current behavior:
 - TTBR1 is disabled;
 - changing process TTBR0 invalidates the complete EL1 TLB.
 
-This provides basic EL0 separation and kernel-page W^X, but it is not a hardened split-address-space design. The remaining TTBR1, ASID, and scoped-invalidation work is future v0.4 material.
+This provides basic EL0 separation and kernel-page W^X, but it is not a hardened split-address-space design. The remaining TTBR1, ASID, and scoped-invalidation work is future hardening material and is not part of the current v0.1 claim.
 
 ### Process user regions
 
 Each process records a fixed set of disjoint user virtual ranges. These records are used to decide whether a syscall pointer belongs to the current process.
 
-The syscall helper layer first checks the registered process range, then walks the process page table. Input buffers require valid user-readable leaves; output buffers also require writable leaves and return `ERR_PERM` on read-only pages before writing any byte. `RISK-001` is closed, but the helpers still do direct kernel copies rather than fault-contained copy routines.
+The syscall helper layer first checks the registered process range, then walks the process page table. Input buffers require valid user-readable leaves; output buffers also require writable leaves and return `ERR_PERM` on read-only pages before writing any byte. `RISK-001` is closed for permission-aware validation, but the helpers still do direct kernel copies rather than fault-contained copy routines. Some internal syscall paths still need cleanup so lower layers operate on kernel-owned buffers instead of validated raw EL0 pointers.
 
 ## Processes and scheduling
 
@@ -145,6 +145,11 @@ Current descriptor architecture:
 
 `RISK-002` is closed for process-owned descriptors. The VFS remains a fixed-table kernel facade, not a POSIX filesystem layer.
 
+The v1 roadmap requires this layer to become a real storage platform: a
+block-device abstraction, mount table, common path resolver, filesystem driver
+interface, and structured metadata/directory ABI. Those pieces are planned, not
+current architecture.
+
 ## Filesystems and storage
 
 ### bootfs
@@ -169,6 +174,10 @@ The current FAT32 bridge supports:
 It does not claim long-file-name support, subdirectories, arbitrary partition discovery, journaling, crash recovery, or broad compatibility testing.
 
 The QEMU block path is verified through `make qemu-fs-test`. The visible desktop target also attaches the generated FAT32 block image; `tools/qemu_fb_fat_test.sh` verifies the FAT + display + panel wiring. The visible create/edit/save/rename/reopen/delete workflow has existing manual evidence from rocco on 2026-07-17; newer automated baselines must not imply a newer manual desktop pass unless one is recorded.
+
+v1 storage direction is to replace this narrow bridge with real writable FAT
+behind the filesystem interface, then mount ext2 at `/ext` at least read-only.
+There is no current ext2 implementation.
 
 ## GUI architecture
 
@@ -238,6 +247,12 @@ KLI1 is a small flat-image format with a fixed header and entry offsets. The cur
 
 Mutable `.data` and `.bss` are forbidden for shipping app images. `programs/apps/image.ld` asserts that contract, and `tests/run_kli1_contract_test.sh` verifies both the seven shipping apps and a synthetic violation.
 
+The current applications demonstrate the desktop and persistence paths but are
+not yet complete daily-use tools. The v1 line needs shared `libkarm` runtime
+helpers, `libkarmdesk` widgets, a multi-line Editor, directory-aware Files,
+stronger Shell commands, observable Settings behavior, and a more useful
+Monitor while preserving the KLI1 storage contract.
+
 ## Testing architecture
 
 Native host tests exercise pure-C contracts and mocked driver paths. They provide good regression coverage for logic, but they cannot prove device MMIO or full exception-return behavior.
@@ -257,8 +272,9 @@ Release evidence must always state whether it came from:
 
 Near-term architectural priorities are:
 
-1. fault-contained user copies;
-2. shared TTBR1 kernel mappings, ASIDs, and scoped TLB invalidation;
-3. deeper board capability separation for network/display/storage;
-4. physical RPi4 serial and storage evidence;
-5. newer manual visible desktop workflow evidence whenever promoting a new manual baseline.
+1. v0.2 cleanup: kernel-owned syscall buffers, VFS/FAT decoupling, and fail-closed RPi storage behavior;
+2. v0.3 storage platform: block devices, mount table, path resolver, and filesystem driver interface;
+3. v0.4 real FAT: long names, directories, partition discovery, and persistence tests;
+4. v0.5-v0.6 userland runtime, widgets, and useful desktop applications;
+5. v0.7 ext2 read-only support;
+6. ongoing hardening: fault-contained copies, TTBR1 kernel mappings, ASIDs, scoped TLB invalidation, and physical RPi evidence when the hardware track resumes.
