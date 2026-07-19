@@ -7,6 +7,10 @@
 [![Language](https://img.shields.io/badge/lang/C%20%2B%20ASM-orange.svg)]()
 [![Status](https://img.shields.io/badge/status/v0.1%20QEMU%20desktop-blue.svg)]()
 
+<p align="center">
+  <img src="docs/assets/armin.png" alt="Armin, the ArmoniOS mascot" width="128">
+</p>
+
 ## Preview
 
 ![ArmoniOS QEMU desktop preview](docs/assets/qemu-desktop-preview.png)
