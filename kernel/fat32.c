@@ -17,13 +17,6 @@
 #define FAT32_CLUSTER_EOC    0x0ffffff8U
 #define FAT32_CLUSTER_BAD    0x0ffffff7U
 
-/*
- * Default filesystem handle for callers that don't go through a
- * mounted VFS node. Set by fat32_mount; used by vfs_unlink /
- * vfs_rename when they have to act on a path under "/fat/".
- */
-static fat32_fs_t *g_fat32_default_fs;
-
 static uint16_t le16(const uint8_t *p) {
     return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
 }
@@ -436,7 +429,6 @@ int fat32_mount(fat32_fs_t *fs, fat32_read_sector_fn_t read_sector_cb,
         return -1;
     }
 
-    g_fat32_default_fs = 0;
     fs->read_sector = read_sector_cb;
     fs->write_sector = 0;
     fs->context = context;
@@ -484,7 +476,6 @@ int fat32_mount(fat32_fs_t *fs, fat32_read_sector_fn_t read_sector_cb,
     fs->data_start_lba = data_start;
     fs->root_cluster = root_cluster;
     fs->mounted = 1;
-    g_fat32_default_fs = fs;
     return 0;
 }
 
@@ -493,10 +484,6 @@ void fat32_set_write_sector(fat32_fs_t *fs,
     if (fs != 0) {
         fs->write_sector = write_sector_cb;
     }
-}
-
-fat32_fs_t *fat32_default_fs(void) {
-    return g_fat32_default_fs;
 }
 
 int fat32_open_root(fat32_fs_t *fs, const char *name, fat32_file_t *file) {
@@ -866,7 +853,7 @@ int fat32_write(fat32_fs_t *fs, fat32_file_t *file, uint64_t offset,
  * we can use that slot directly without scanning further.
  */
 static int find_free_dir_entry(fat32_fs_t *fs, uint32_t *out_lba,
-                              uint32_t *out_offset) {
+                               uint32_t *out_offset) {
     uint32_t cluster = fs->root_cluster;
 
     while (cluster >= 2U && !cluster_is_eoc(cluster)) {
