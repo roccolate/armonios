@@ -49,9 +49,10 @@ static fat32_fs_t *fat32_vfs_fs(void *context) {
 
     if (fs == 0) {
         /*
-         * Transitional compatibility for callers that mount FAT32 before
-         * binding its VFS root. Production boot binds the explicit fs through
-         * fat32_mount_vfs_root().
+         * Compatibility path for tests that still mount a FAT image before
+         * explicitly binding /fat. Production boot calls
+         * fat32_mount_vfs_root(), so normal kernel dispatch does not depend on
+         * this fallback. Remove it when those tests bind the mount directly.
          */
         fs = fat32_default_fs();
     }
