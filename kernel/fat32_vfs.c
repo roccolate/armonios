@@ -20,6 +20,7 @@ static fat32_vfs_file_t g_fat32_vfs_files[FAT32_MAX_VFS_FILES];
 static vfs_node_t g_fat32_vfs_nodes[FAT32_MAX_VFS_FILES];
 static uint32_t g_fat32_vfs_count;
 static fat32_vfs_mount_t g_fat32_vfs_mount;
+static uint8_t g_fat32_vfs_registered;
 
 _Static_assert(FAT32_MAX_VFS_FILES <= VFS_MAX_NODES,
                "FAT32 VFS files must fit the VFS static node table");
@@ -194,12 +195,14 @@ void fat32_vfs_reset(void) {
     g_fat32_vfs_mount.fs = 0;
 
     /* FAT32 owns the current /fat policy; the generic VFS does not. */
-    (void)vfs_mount(FAT32_VFS_ROOT_PATH, &g_fat32_vfs_ops,
-                    &g_fat32_vfs_mount);
+    g_fat32_vfs_registered =
+        vfs_mount(FAT32_VFS_ROOT_PATH, &g_fat32_vfs_ops,
+                  &g_fat32_vfs_mount) == 0;
 }
 
 int fat32_mount_vfs_root(fat32_fs_t *fs, const char *path) {
-    if (fs == 0 || fs->mounted == 0 || path == 0 ||
+    if (g_fat32_vfs_registered == 0 || fs == 0 || fs->mounted == 0 ||
+        path == 0 ||
         !((path[0] == '/') && (path[1] == 'f') && (path[2] == 'a') &&
           (path[3] == 't') && (path[4] == '\0'))) {
         return -1;
