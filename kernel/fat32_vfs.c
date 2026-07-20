@@ -48,16 +48,6 @@ static fat32_fs_t *fat32_vfs_fs(void *context) {
     fat32_vfs_mount_t *mount = (fat32_vfs_mount_t *)context;
     fat32_fs_t *fs = mount != 0 ? mount->fs : 0;
 
-#ifdef ARMONIOS_TEST
-    if (fs == 0) {
-        /*
-         * Compatibility for older host tests. Production builds require the
-         * explicit fat32_mount_vfs_root() binding and never use this path.
-         */
-        fs = fat32_default_fs();
-    }
-#endif
-
     return fs != 0 && fs->mounted != 0 ? fs : 0;
 }
 
