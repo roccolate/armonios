@@ -22,6 +22,16 @@ static const vfs_mount_ops_t reject_ops = {
     .open = reject_open,
 };
 
+/*
+ * tests/main.c still carries the historical runner symbol. Keep the bridge in
+ * test code only; the FAT32 API and production objects no longer expose or use
+ * a default filesystem authority.
+ */
+void test_fat32_mount_state_is_instance_local(void);
+void test_fat32_default_fs_tracks_successful_mount_only(void) {
+    test_fat32_mount_state_is_instance_local();
+}
+
 static void test_fat_root_binding_requires_registered_mount(void) {
     fat32_fs_t fs = {
         .mounted = 1,
