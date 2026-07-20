@@ -2,33 +2,30 @@
 
 #include <stdint.h>
 
-#include "kernel/fat32.h"
-#include "kernel/process.h"
 #include "kernel/kstring.h"
+#include "kernel/process.h"
 
 /*
  * Small in-kernel virtual filesystem.
  *
- * Paths and open-file state remain kernel-owned. The global open-file array is
- * an internal handle pool; callers see descriptor numbers local to the current
- * process. PID 0 is reserved for kernel/host-test callers that do not have a
- * current EL0 process.
+ * Static nodes hold ordinary files. Mounts only route operations for paths
+ * that are not materialized yet, such as files discovered on a disk volume.
+ * The global open-file array is kernel-private; each process sees local fd
+ * numbers and owns its own offsets.
  */
 
 static vfs_node_t g_vfs_nodes[VFS_MAX_NODES];
 static char g_vfs_paths[VFS_MAX_NODES][VFS_MAX_PATH];
 static uint32_t g_vfs_node_count;
 
-#define VFS_MAX_LIST_MOUNTS 4U
-
 typedef struct {
     char path[VFS_MAX_PATH];
-    vfs_list_fn_t list;
+    vfs_mount_ops_t ops;
     void *context;
     uint8_t used;
-} vfs_list_mount_t;
+} vfs_mount_t;
 
-static vfs_list_mount_t g_list_mounts[VFS_MAX_LIST_MOUNTS];
+static vfs_mount_t g_mounts[VFS_MAX_MOUNTS];
 
 typedef struct {
     const vfs_node_t *node;
@@ -102,6 +99,22 @@ static void vfs_clear_node(uint32_t index) {
     for (uint32_t j = 0; j < VFS_MAX_PATH; j++) {
         g_vfs_paths[index][j] = '\0';
     }
+}
+
+static void vfs_clear_mount(vfs_mount_t *mount) {
+    if (mount == 0) {
+        return;
+    }
+
+    for (uint32_t i = 0; i < VFS_MAX_PATH; i++) {
+        mount->path[i] = '\0';
+    }
+    mount->ops.open = 0;
+    mount->ops.list = 0;
+    mount->ops.unlink = 0;
+    mount->ops.rename = 0;
+    mount->context = 0;
+    mount->used = 0;
 }
 
 static uint32_t vfs_free_node_count(void) {
@@ -222,21 +235,82 @@ static int vfs_path_is_mountable(const char *path) {
 static int vfs_copy_path(char dest[VFS_MAX_PATH], const char *path) {
     uint32_t i = 0;
 
-    if (dest == 0 || path == 0 || path[0] != '/') {
+    if (dest == 0 || !vfs_path_is_mountable(path)) {
         return -1;
     }
 
     while (path[i] != '\0') {
-        if (i + 1U >= VFS_MAX_PATH) {
-            return -1;
-        }
-
         dest[i] = path[i];
         i++;
     }
-
     dest[i] = '\0';
     return 0;
+}
+
+static uint32_t vfs_path_length(const char *path) {
+    uint32_t length = 0;
+
+    if (path == 0) {
+        return 0;
+    }
+    while (path[length] != '\0') {
+        length++;
+    }
+    return length;
+}
+
+static int vfs_path_is_mount_child(const char *path, const char *mount_path) {
+    uint32_t i = 0;
+
+    if (path == 0 || mount_path == 0 || path[0] != '/' ||
+        mount_path[0] != '/') {
+        return 0;
+    }
+
+    if (mount_path[0] == '/' && mount_path[1] == '\0') {
+        return path[1] != '\0';
+    }
+
+    while (mount_path[i] != '\0') {
+        if (path[i] != mount_path[i]) {
+            return 0;
+        }
+        i++;
+    }
+
+    return path[i] == '/' && path[i + 1U] != '\0';
+}
+
+static vfs_mount_t *vfs_find_mount_exact(const char *path) {
+    for (uint32_t i = 0; i < VFS_MAX_MOUNTS; i++) {
+        if (g_mounts[i].used != 0 && kstreq(g_mounts[i].path, path)) {
+            return &g_mounts[i];
+        }
+    }
+
+    return 0;
+}
+
+static vfs_mount_t *vfs_find_mount_for_path(const char *path) {
+    vfs_mount_t *best = 0;
+    uint32_t best_length = 0;
+
+    for (uint32_t i = 0; i < VFS_MAX_MOUNTS; i++) {
+        uint32_t length;
+
+        if (g_mounts[i].used == 0 ||
+            !vfs_path_is_mount_child(path, g_mounts[i].path)) {
+            continue;
+        }
+
+        length = vfs_path_length(g_mounts[i].path);
+        if (best == 0 || length > best_length) {
+            best = &g_mounts[i];
+            best_length = length;
+        }
+    }
+
+    return best;
 }
 
 static int vfs_node_size(const vfs_node_t *node, uint64_t *size) {
@@ -283,69 +357,12 @@ static uint32_t vfs_open_access_mode(uint32_t flags) {
 static int vfs_open_flags_valid(uint32_t flags) {
     uint32_t mode = vfs_open_access_mode(flags);
 
-    if ((flags & ~(VFS_O_ACCMODE | VFS_O_CREAT)) != 0) {
+    if ((flags & ~VFS_O_ALLOWED) != 0) {
         return 0;
     }
 
     return mode == VFS_O_RDONLY || mode == VFS_O_WRONLY ||
            mode == VFS_O_RDWR;
-}
-
-static int vfs_fat32_root_name(const char *path, char *out,
-                               uint64_t out_size) {
-    const char *suffix = vfs_strip_prefix(path, "/fat/");
-    uint64_t i;
-
-    if (suffix == 0 || out == 0 || out_size == 0) {
-        return -1;
-    }
-
-    for (i = 0; i + 1U < out_size; i++) {
-        char c = suffix[i];
-
-        if (c == '\0') {
-            break;
-        }
-        if (c == '/') {
-            return -1;
-        }
-        out[i] = c;
-    }
-
-    if (suffix[i] != '\0') {
-        return -1;
-    }
-    out[i] = '\0';
-    return i == 0 ? -1 : 0;
-}
-
-static const vfs_node_t *vfs_open_dynamic_fat32_node(const char *path,
-                                                     uint32_t flags) {
-    char name[VFS_MAX_PATH];
-    fat32_file_t file;
-    fat32_fs_t *fs;
-
-    if (vfs_fat32_root_name(path, name, sizeof(name)) != 0) {
-        return 0;
-    }
-
-    fs = fat32_default_fs();
-    if (fs == 0 || fs->mounted == 0) {
-        return 0;
-    }
-
-    if (fat32_open_root(fs, name, &file) != 0) {
-        if ((flags & VFS_O_CREAT) == 0 ||
-            fat32_create(fs, name, &file) != 0) {
-            return 0;
-        }
-    }
-
-    if (fat32_mount_vfs_file(fs, path, name) != 0) {
-        return 0;
-    }
-
-    return vfs_find(path);
 }
 
 void vfs_reset(void) {
@@ -355,13 +372,8 @@ void vfs_reset(void) {
     for (uint32_t i = 0; i < VFS_MAX_GLOBAL_OPEN_FILES; i++) {
         vfs_clear_open_file(&g_open_files[i]);
     }
-    for (uint32_t i = 0; i < VFS_MAX_LIST_MOUNTS; i++) {
-        g_list_mounts[i].list = 0;
-        g_list_mounts[i].context = 0;
-        g_list_mounts[i].used = 0;
-        for (uint32_t j = 0; j < VFS_MAX_PATH; j++) {
-            g_list_mounts[i].path[j] = '\0';
-        }
+    for (uint32_t i = 0; i < VFS_MAX_MOUNTS; i++) {
+        vfs_clear_mount(&g_mounts[i]);
     }
     g_vfs_node_count = 0;
 }
@@ -417,6 +429,7 @@ int vfs_unmount_static(const char *path) {
     for (uint32_t i = 0; i < g_vfs_node_count; i++) {
         if (kstreq(g_vfs_nodes[i].path, path)) {
             const vfs_node_t *node = &g_vfs_nodes[i];
+
             vfs_drop_open_files_for_node(node);
             vfs_clear_node(i);
             return 0;
@@ -426,31 +439,38 @@ int vfs_unmount_static(const char *path) {
     return -1;
 }
 
-int vfs_mount_list(const char *path, vfs_list_fn_t list, void *context) {
-    if (!vfs_path_is_mountable(path) || list == 0) {
+int vfs_mount(const char *path, const vfs_mount_ops_t *ops, void *context) {
+    if (!vfs_path_is_mountable(path) || ops == 0 ||
+        (ops->open == 0 && ops->list == 0 && ops->unlink == 0 &&
+         ops->rename == 0) ||
+        vfs_find_mount_exact(path) != 0) {
         return -1;
     }
 
-    for (uint32_t i = 0; i < VFS_MAX_LIST_MOUNTS; i++) {
-        if (g_list_mounts[i].used != 0 &&
-            kstreq(g_list_mounts[i].path, path)) {
-            return -1;
-        }
-    }
-
-    for (uint32_t i = 0; i < VFS_MAX_LIST_MOUNTS; i++) {
-        if (g_list_mounts[i].used == 0) {
-            if (vfs_copy_path(g_list_mounts[i].path, path) != 0) {
+    for (uint32_t i = 0; i < VFS_MAX_MOUNTS; i++) {
+        if (g_mounts[i].used == 0) {
+            if (vfs_copy_path(g_mounts[i].path, path) != 0) {
                 return -1;
             }
-            g_list_mounts[i].list = list;
-            g_list_mounts[i].context = context;
-            g_list_mounts[i].used = 1;
+            g_mounts[i].ops = *ops;
+            g_mounts[i].context = context;
+            g_mounts[i].used = 1;
             return 0;
         }
     }
 
     return -1;
+}
+
+int vfs_mount_list(const char *path, vfs_list_fn_t list, void *context) {
+    vfs_mount_ops_t ops = {
+        .list = list,
+    };
+
+    if (list == 0) {
+        return -1;
+    }
+    return vfs_mount(path, &ops, context);
 }
 
 const vfs_node_t *vfs_find(const char *path) {
@@ -546,6 +566,7 @@ int vfs_stat(const char *path, vfs_stat_t *stat) {
 
 int vfs_list(const char *path, uint8_t *buffer, uint64_t capacity,
              uint64_t *bytes_written) {
+    vfs_mount_t *mount;
     uint64_t out = 0;
 
     if (bytes_written != 0) {
@@ -557,12 +578,10 @@ int vfs_list(const char *path, uint8_t *buffer, uint64_t capacity,
         return -1;
     }
 
-    for (uint32_t i = 0; i < VFS_MAX_LIST_MOUNTS; i++) {
-        if (g_list_mounts[i].used != 0 &&
-            kstreq(g_list_mounts[i].path, path)) {
-            return g_list_mounts[i].list(g_list_mounts[i].context, buffer,
-                                         capacity, bytes_written);
-        }
+    mount = vfs_find_mount_exact(path);
+    if (mount != 0 && mount->ops.list != 0) {
+        return mount->ops.list(mount->context, buffer, capacity,
+                               bytes_written);
     }
 
     if (!kstreq(path, "/")) {
@@ -596,7 +615,8 @@ int vfs_list(const char *path, uint8_t *buffer, uint64_t capacity,
 }
 
 int vfs_open_flags(const char *path, uint32_t flags) {
-    const vfs_node_t *node = vfs_find(path);
+    const vfs_node_t *node;
+    vfs_mount_t *mount;
     uint32_t mode = vfs_open_access_mode(flags);
     uint32_t owner_pid;
     uint32_t local_fd;
@@ -606,8 +626,14 @@ int vfs_open_flags(const char *path, uint32_t flags) {
         return -1;
     }
 
+    node = vfs_find(path);
     if (node == 0) {
-        node = vfs_open_dynamic_fat32_node(path, flags);
+        mount = vfs_find_mount_for_path(path);
+        if (mount == 0 || mount->ops.open == 0 ||
+            mount->ops.open(mount->context, path, flags) != 0) {
+            return -1;
+        }
+        node = vfs_find(path);
     }
 
     if (node == 0 ||
@@ -748,17 +774,10 @@ uint32_t vfs_close_all_for_pid(uint32_t pid) {
 }
 
 int vfs_unlink(const char *path) {
-    char name[VFS_MAX_PATH];
-    fat32_fs_t *fs;
+    vfs_mount_t *mount = vfs_find_mount_for_path(path);
 
-    if (vfs_fat32_root_name(path, name, sizeof(name)) != 0) {
-        return -1;
-    }
-    fs = fat32_default_fs();
-    if (fs == 0 || fs->mounted == 0) {
-        return -1;
-    }
-    if (fat32_delete(fs, name) != 0) {
+    if (mount == 0 || mount->ops.unlink == 0 ||
+        mount->ops.unlink(mount->context, path) != 0) {
         return -1;
     }
 
@@ -767,19 +786,12 @@ int vfs_unlink(const char *path) {
 }
 
 int vfs_rename(const char *old_path, const char *new_path) {
-    char old_name[VFS_MAX_PATH];
-    char new_name[VFS_MAX_PATH];
-    fat32_fs_t *fs;
+    vfs_mount_t *old_mount = vfs_find_mount_for_path(old_path);
+    vfs_mount_t *new_mount = vfs_find_mount_for_path(new_path);
 
-    if (vfs_fat32_root_name(old_path, old_name, sizeof(old_name)) != 0 ||
-        vfs_fat32_root_name(new_path, new_name, sizeof(new_name)) != 0) {
-        return -1;
-    }
-    fs = fat32_default_fs();
-    if (fs == 0 || fs->mounted == 0) {
-        return -1;
-    }
-    if (fat32_rename(fs, old_name, new_name) != 0) {
+    if (old_mount == 0 || old_mount != new_mount ||
+        old_mount->ops.rename == 0 ||
+        old_mount->ops.rename(old_mount->context, old_path, new_path) != 0) {
         return -1;
     }
 
