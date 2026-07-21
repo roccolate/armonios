@@ -1,0 +1,31 @@
+name: Apply RPi4 FAT probe integration
+
+on:
+  push:
+    branches:
+      - agent/rpi4-emmc2-fat-layout-probe
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, '[apply-fat-probe]')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/rpi4-emmc2-fat-layout-probe
+
+      - name: Apply exact substitutions
+        run: python3 tools/apply_rpi4_fat_probe_patch.py
+
+      - name: Commit generated integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && { echo "no changes produced"; exit 1; }
+          git commit -m "Connect RPi4 probe to partitioned FAT32 discovery"
+          git push origin HEAD:agent/rpi4-emmc2-fat-layout-probe
