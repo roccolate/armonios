@@ -182,7 +182,7 @@ int board_display_redraw(board_display_draw_fn_t draw, void *context) {
     }
     status = virtio_gpu_draw(g_display_base, draw, context);
     if (status == 0) {
-        runtime_service_report_metric(RUNTIME_METRIC_REDRAW, 1U);
+        runtime_service_report_redraw();
     }
     return status;
 }
