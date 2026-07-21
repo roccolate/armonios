@@ -97,6 +97,9 @@ STORAGE_DEV := \
     $(BUILD_DIR)/drivers/firmware/rpi_mailbox.o
 ifeq ($(RPI4_EMMC2_PROBE),1)
 BOARD_CFLAGS += -DARMONIOS_RPI4_EMMC2_PROBE=1
+STORAGE_DEV += \
+    $(BUILD_DIR)/drivers/storage/block_view.o \
+    $(BUILD_DIR)/drivers/storage/mbr.o
 endif
 else
 STORAGE_DEV := $(BUILD_DIR)/drivers/storage/virtio_blk.o
