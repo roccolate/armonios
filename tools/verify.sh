@@ -31,6 +31,7 @@ run_gate stack-check make stack-check
 run_gate qemu-fs-test make qemu-fs-test
 run_gate usercopy-qemu bash tools/qemu_usercopy_test.sh
 run_gate qemu-focus bash tools/qemu_focus_test.sh
+run_gate qemu-el2-entry bash tools/qemu_el2_entry_test.sh
 run_gate qemu-markers bash tools/qemu_marker_test.sh all
 run_gate qemu-fb-fat bash tools/qemu_fb_fat_test.sh
 
