@@ -7,41 +7,16 @@
 #include "uart/pl011.h"
 
 #if defined(ARMONIOS_RPI4_EMMC2_PROBE)
+#include "boards/rpi4/emmc2_probe_diag.h"
 #include "storage/emmc.h"
 #endif
 
 static uint32_t g_emmc2_clock_hz;
 
 #if defined(ARMONIOS_RPI4_EMMC2_PROBE)
-#define RPI4_SDHCI_PRESENT_STATE 0x24U
-#define RPI4_SDHCI_CARD_PRESENT  0x00010000U
-#define RPI4_SDHCI_CARD_STABLE   0x00020000U
-
 static emmc_device_t g_emmc2_probe_device;
+static rpi4_emmc2_probe_diag_t g_emmc2_probe_diag;
 static uint8_t g_emmc2_sector0[EMMC_BLKSZ] __attribute__((aligned(16)));
-
-/*
- * Raspberry Pi 4 declares EMMC2 with `broken-cd`. Keep that quirk at the
- * board boundary: only the two card-detect bits are supplied here; command
- * inhibit, data inhibit, interrupts, responses, and data remain real MMIO.
- */
-static uint32_t rpi4_emmc2_probe_read32(void *context, uint32_t offset) {
-    uintptr_t base = (uintptr_t)context;
-    uint32_t value = *(volatile uint32_t *)(base + offset);
-
-    if (offset == RPI4_SDHCI_PRESENT_STATE) {
-        value |= RPI4_SDHCI_CARD_PRESENT | RPI4_SDHCI_CARD_STABLE;
-    }
-    return value;
-}
-
-static void rpi4_emmc2_probe_write32(void *context, uint32_t offset,
-                                     uint32_t value) {
-    uintptr_t base = (uintptr_t)context;
-
-    *(volatile uint32_t *)(base + offset) = value;
-    __asm__ volatile("dmb sy" ::: "memory");
-}
 
 static void rpi4_emmc2_probe_delay_us(void *context, uint32_t usec) {
     uint64_t frequency;
@@ -58,6 +33,74 @@ static void rpi4_emmc2_probe_delay_us(void *context, uint32_t usec) {
     } while (now - start < ticks);
 }
 
+static const char *rpi4_emmc2_probe_command_name(uint32_t command) {
+    switch (command) {
+    case 0U:
+        return "CMD0";
+    case 2U:
+        return "CMD2";
+    case 3U:
+        return "CMD3";
+    case 7U:
+        return "CMD7";
+    case 8U:
+        return "CMD8";
+    case 9U:
+        return "CMD9";
+    case 16U:
+        return "CMD16";
+    case 17U:
+        return "CMD17";
+    case 41U:
+        return "ACMD41";
+    case 55U:
+        return "CMD55";
+    default:
+        return "CMD?";
+    }
+}
+
+static void rpi4_emmc2_probe_print_diag(void) {
+    rpi4_emmc2_probe_diag_refresh(&g_emmc2_probe_diag);
+
+    uart_puts("EMMC2 probe: diag command ");
+    if (g_emmc2_probe_diag.last_command == RPI4_EMMC2_DIAG_NO_COMMAND) {
+        uart_puts("none");
+    } else {
+        uart_puts(rpi4_emmc2_probe_command_name(
+            g_emmc2_probe_diag.last_command));
+        uart_puts(" ");
+        print_dec64(g_emmc2_probe_diag.last_command);
+    }
+    uart_puts(" argument ");
+    print_hex64(g_emmc2_probe_diag.last_argument);
+    uart_puts("\n");
+
+    uart_puts("EMMC2 probe: diag read-offset ");
+    print_hex64(g_emmc2_probe_diag.last_read_offset);
+    uart_puts(" write-offset ");
+    print_hex64(g_emmc2_probe_diag.last_write_offset);
+    uart_puts(" write-value ");
+    print_hex64(g_emmc2_probe_diag.last_write_value);
+    uart_puts("\n");
+
+    uart_puts("EMMC2 probe: diag present ");
+    print_hex64(g_emmc2_probe_diag.present_state);
+    uart_puts(" clock-reset ");
+    print_hex64(g_emmc2_probe_diag.clock_reset);
+    uart_puts(" host-power ");
+    print_hex64(g_emmc2_probe_diag.host_power);
+    uart_puts(" actual-clock ");
+    print_dec64(g_emmc2_probe_device.actual_clock_hz);
+    uart_puts("\n");
+
+    uart_puts("EMMC2 probe: diag int-now ");
+    print_hex64(g_emmc2_probe_diag.interrupt_status);
+    uart_puts(" int-last ");
+    print_hex64(g_emmc2_probe_diag.last_nonzero_interrupt_status);
+    uart_puts("\n");
+}
+
 static void rpi4_emmc2_probe(void) {
     emmc_io_t io;
     int result;
@@ -67,10 +110,12 @@ static void rpi4_emmc2_probe(void) {
         return;
     }
 
-    io.read32 = rpi4_emmc2_probe_read32;
-    io.write32 = rpi4_emmc2_probe_write32;
+    rpi4_emmc2_probe_diag_init(&g_emmc2_probe_diag,
+                               (uintptr_t)RPI4_EMMC_BASE);
+    io.read32 = rpi4_emmc2_probe_diag_read32;
+    io.write32 = rpi4_emmc2_probe_diag_write32;
     io.delay_us = rpi4_emmc2_probe_delay_us;
-    io.context = (void *)(uintptr_t)RPI4_EMMC_BASE;
+    io.context = &g_emmc2_probe_diag;
 
     uart_puts("EMMC2 probe: begin\n");
     uart_puts("EMMC2 probe: broken-cd assume-present\n");
@@ -80,6 +125,7 @@ static void rpi4_emmc2_probe(void) {
     print_signed32(result);
     uart_puts("\n");
     if (result != EMMC_OK) {
+        rpi4_emmc2_probe_print_diag();
         return;
     }
 
@@ -89,6 +135,7 @@ static void rpi4_emmc2_probe(void) {
     print_signed32(result);
     uart_puts("\n");
     if (result != EMMC_OK) {
+        rpi4_emmc2_probe_print_diag();
         return;
     }
 
