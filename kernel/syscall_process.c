@@ -7,7 +7,6 @@
 #include "kernel/panel_boot_argv.h"
 #include "kernel/print.h"
 #include "kernel/sched/sched.h"
-#include "kernel/syscall_argv.h"
 #include "kernel/syscall_helpers.h"
 #include "kernel/user_exit.h"
 #include "kernel/user_vm.h"
