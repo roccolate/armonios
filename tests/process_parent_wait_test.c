@@ -43,6 +43,7 @@ static process_t *test_alloc_child(uint32_t pid, uint32_t parent_pid,
 static void child_zombie_survives_until_parent_waits(void) {
     process_t *parent;
     process_t *child;
+    process_t *foreign;
 
     process_table_init();
     parent = test_alloc_child(1U, 0U, "parent");
@@ -57,14 +58,15 @@ static void child_zombie_survives_until_parent_waits(void) {
     assert(process_find(2U) == child);
     assert(process_count() == 2U);
 
-    process_t *foreign = test_alloc_child(3U, 0U, "foreign");
+    foreign = test_alloc_child(3U, 0U, "foreign");
     assert(foreign != 0);
     assert(sys_wait(foreign, 2U) == ERR_PERM);
     assert(process_find(2U) == child);
     assert(sys_wait(parent, 2U) == 0x44);
     assert(process_find(2U) == 0);
-    assert(process_count() == 1U);
 
+    process_release(foreign);
+    assert(process_count() == 1U);
     process_release(parent);
 }
 
