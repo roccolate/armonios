@@ -15,19 +15,25 @@ The QEMU `virt` kernel, graphical desktop, narrow writable FAT32 workflow,
 freestanding EL0 applications, and automated verification matrix are real and
 reproducible. Most original v0.2 cleanup goals have landed.
 
-Runtime measurement Phase 1B is complete for all budget-relevant work currently
-observable on QEMU. Phase 2 has begun: post-EOI network receive is now
-independently pending and capped at 16 valid frames per runtime-service pass.
+Runtime measurement Phase 1B is complete. Phase 2 now has two enforced count
+budgets:
 
-The service is not fully bounded. Input consumption, USB polling, redraw/damage
-work, and total generic-counter time remain unlimited per pass. No sustained-load
-QEMU test proves EL0 progress under combined pressure.
+- shared input-queue consumption: at most 16 events per active post-EOI pass;
+- virtio-net RX consumption: at most 16 valid frames per active network pass.
+
+Input and network readiness are independently pending. Input requeues only when
+the queue still contains events. Network requeues conservatively whenever its cap
+is reached.
+
+The service is not fully bounded. Input producer/USB polling, redraw/damage work,
+and total generic-counter time remain unlimited per pass. No sustained-load QEMU
+test proves EL0 progress under combined pressure.
 
 ArmoniOS is accurately described as:
 
 > A compact AArch64 QEMU desktop alpha with freestanding EL0 applications, a
 > kernel compositor, a narrow writable FAT32 workflow, broad automated regression
-> coverage, and an initial bounded runtime work class.
+> coverage, and two bounded runtime work classes.
 
 It is not a production OS, general FAT implementation, POSIX system, or verified
 Raspberry Pi operating system.
@@ -37,30 +43,30 @@ Raspberry Pi operating system.
 - **Audit date:** 2026-07-21
 - **Primary verified platform:** QEMU `virt`, Cortex-A72 CPU model
 - **Tracking issue:** #43, v0.2 measure and bound deferred runtime service
-- **Phase 1B documentation merge:**
-  `7639176ceac95abe2f44fe8eecf30d33a67478d8`
-- **Network budget implementation merge:**
+- **Network budget merge:**
   `3797f7e7cf3dfb825d927e399aa4769b27020e29`
-- **Validated network-budget head:**
-  `e3765864e6719c0b6373a4c9b1b7db59dfaa0202`
+- **Input budget merge:**
+  `41f3e185ca1f75ed09416313d34279384f3d78a9`
+- **Latest validated implementation head:**
+  `ba8051cd8edbe6a66a843f80c54c96668d064a91`
 - **Hosted validation:**
-  - `Verify ArmoniOS` run `29849603386`: success
-  - `CI - Tests` run `29849603374`: success
-- **Loadable QEMU kernel size:** 107548 bytes
+  - `Verify ArmoniOS` run `29853659559`: success
+  - `CI - Tests` run `29853659491`: success
+- **Loadable QEMU kernel size:** 107802 bytes
 - **Kernel size limit:** 108000 bytes
-- **Remaining margin:** 452 bytes
+- **Remaining margin:** 198 bytes
 
-Those runs validate the implementation, deterministic network-budget regression,
-strict runtime-service short-workflow gate, QEMU behavior, and all pre-existing
-subsystem gates. The merge commit is not a separately executed workflow unless a
-run targets that exact SHA.
+Those runs validate the input and network budgets, deterministic continuation
+contracts, strict runtime-service short-workflow gate, QEMU behavior, and all
+pre-existing subsystem gates. The merge commit is not a separately executed
+workflow unless a run targets that exact SHA.
 
 ## Release phases
 
 | Phase | State | Real interpretation |
 |---|---|---|
 | v0.1 QEMU baseline | COMPLETE | Boot, desktop, narrow FAT workflow, deterministic QEMU gates, CI, and dated manual evidence exist. |
-| v0.2 cleanup/hardening | IN PROGRESS / CANDIDATE | Observable work is measured and post-EOI network RX is bounded. Input, USB, redraw, global time, and stress proof remain. |
+| v0.2 cleanup/hardening | IN PROGRESS / CANDIDATE | Observable work is measured; input consumption and network RX are bounded. USB producers, redraw, global time, and stress proof remain. |
 | v0.3 storage/VFS platform | NEXT AFTER v0.2 | No common path resolver, rich block metadata, or structured filesystem ABI. |
 | v0.4 real FAT | PLANNED | Current FAT remains root-only 8.3 FAT32. |
 | v0.5 userland runtime/widgets | PLANNED | No reusable heap, dynamic containers, or shared widget toolkit. |
@@ -74,10 +80,10 @@ run targets that exact SHA.
 
 | Check | Evidence class | Result and scope |
 |---|---|---|
-| QEMU build and size | BUILD-VERIFIED | `.data == 0`; loadable kernel 107548 bytes under the 108000-byte ceiling. |
+| QEMU build and size | BUILD-VERIFIED | `.data == 0`; loadable kernel 107802 bytes under the 108000-byte ceiling. |
 | RPi4 build/probe gates | BUILD/HOST-VERIFIED | Normal and diagnostic images build; unsupported normal capabilities fail closed. |
 | Native host suite | HOST-VERIFIED | Kernel, memory, VFS, FAT32, GUI, parser, driver, and ABI tests pass. |
-| Runtime service regression | HOST-VERIFIED | Timing, EOI order, coalescing, reset, all class metrics, 16-frame cap, conservative follow-up, 17-frame continuation, and outside-service network behavior pass. |
+| Runtime service regression | HOST-VERIFIED | Timing, EOI order, coalescing, reset, all class metrics, 16-event input cap, 17-event continuation, 16-frame network cap, conservative network follow-up, and outside-service behavior pass. |
 | Runtime short-workflow gate | CI-VERIFIED | Runs with strict `pipefail`; diagnostic output is retained as `runtime-service-test-log`. |
 | Input queue telemetry | HOST-VERIFIED | Zero state, 64-entry high-water, full-queue overflow, draining, and reset. |
 | Process/VFS/user-copy/KLI1 | HOST-VERIFIED | Parent/wait, local FDs, permission-aware copy, and mutable-storage contracts. |
@@ -96,13 +102,15 @@ runtime service is a third execution mode:
 
 ```text
 timer callback
-  -> fixed account/rearm/publish periodic + network readiness
+  -> fixed account/rearm/publish PERIODIC | INPUT | NETWORK
   -> board_irq_end()
   -> measured runtime pass
-       -> periodic input/USB/GUI phase
-       -> independently pending network phase
+       -> periodic producer work with INPUT phase active
+            -> consume at most 16 queue events
+            -> requeue only if queue work remains
+       -> independently pending NETWORK phase
             -> consume at most 16 valid RX frames
-            -> republish network readiness when the cap is reached
+            -> conservatively requeue at the cap
   -> process dispatch
   -> eret
 ```
@@ -111,8 +119,8 @@ EOI does not leave the exception. During the pass execution remains in EL1, the
 288-byte exception frame remains on the EL1 stack, nested IRQ helpers restore the
 vector's prior masked state, and EL0 remains paused.
 
-The timer callback is bounded. Network RX has a count bound. The complete pass
-still has no global duration bound.
+The timer callback is bounded. Input consumption and network RX have count bounds.
+The complete pass still has no global duration bound.
 
 ## Runtime telemetry and budget state
 
@@ -126,31 +134,40 @@ The kernel-internal snapshot records:
 - USB HID polls reaching xHCI;
 - valid virtio-net RX frames consumed;
 - redraw submissions, partial-damage rectangles, and full redraws;
-- network-budget exhaustion;
+- input- and network-budget exhaustion;
 - pending and last-consumed work bits.
 
 Pending readiness currently includes:
 
 ```text
 RUNTIME_WORK_PERIODIC
+RUNTIME_WORK_INPUT
 RUNTIME_WORK_NETWORK
 ```
 
-The network phase accepts at most `RUNTIME_NETWORK_FRAME_BUDGET == 16` valid
-frames. Reaching the cap conservatively republishes `RUNTIME_WORK_NETWORK`.
-Therefore:
+### Input budget
 
-- a seventeenth queued frame is processed on a later pass;
+`RUNTIME_INPUT_EVENT_BUDGET == 16` is one quarter of the fixed 64-event queue.
+At the cap, the wrapper queries queue depth without consuming:
+
+- exactly 16 events and an empty queue finish without requeue;
+- a seventeenth event keeps `RUNTIME_WORK_INPUT` pending;
+- exhaustion means the cap was reached while queue work remained.
+
+Console-thread and other queue consumers outside the active runtime service pass
+through without this budget. Queue overflow is counted but not prevented.
+
+### Network budget
+
+`RUNTIME_NETWORK_FRAME_BUDGET == 16` matches the current RX descriptor count.
+Reaching the cap conservatively republishes `RUNTIME_WORK_NETWORK`:
+
+- a seventeenth queued frame is processed later;
 - exactly sixteen frames may produce one empty follow-up pass;
-- exhaustion means the cap was reached, not that additional device work was
-  positively observed.
+- exhaustion means the cap was reached, not that more device work was observed.
 
 Cooperative network polling outside the active runtime service remains unbudgeted.
-It is outside the post-EOI class guarantee and is intentionally called out as a
-remaining execution-model limitation.
-
-The current virtio-net interface has no trustworthy device-drop or RX-ring
-overflow counter. Consumed frames are not proof of loss-free delivery.
+The current interface has no trustworthy device-drop or RX-ring overflow counter.
 
 No syscall exposes the telemetry layout. Pending state and counters assume one
 CPU and one consumer; they are not SMP-safe synchronization.
@@ -164,8 +181,9 @@ CPU and one consumer; they are not SMP-safe synchronization.
 | VFS | 24 nodes, four mounts, eight FDs/process, 64-byte paths |
 | FAT32 | Root 8.3 files only |
 | GUI | 16 windows; 32 queued events/window; 32 damage rectangles |
-| Input | Shared 64-event queue; overflow counted but not prevented |
-| Network RX | 16 virtio descriptors; post-EOI valid RX capped at 16/pass; device drops unavailable |
+| Input | Shared 64-event queue; post-EOI consumption capped at 16/pass; overflow counted |
+| Network RX | 16 descriptors; post-EOI valid RX capped at 16/pass; device drops unavailable |
+| Kernel size | 107802 / 108000 bytes; 198 bytes remain |
 | Editor | 512-byte buffer; caret-line viewport |
 | Files | `/fat` only; eight displayed root entries |
 | Network API | No sockets, TCP, DNS API, or HTTP |
@@ -177,11 +195,12 @@ CPU and one consumer; they are not SMP-safe synchronization.
 
 ### Blocks formal v0.2
 
-- **RISK-017:** network RX is bounded, but the complete runtime service is not.
-- Input queue draining remains unlimited per pass.
-- USB HID polling has no per-pass operation limit.
+- **RISK-017:** input consumption and network RX are bounded, but the complete
+  runtime service is not.
+- Input producer and USB HID polling have no per-pass operation limit.
 - Redraw/damage work has no per-pass limit.
 - No global generic-counter deadline exists.
+- Only 198 bytes remain under the kernel ceiling; the next cut needs compaction.
 - No sustained-load QEMU heartbeat proves EL0 progress or no silent loss.
 - No formal v0.2 tag/evidence record exists.
 
@@ -211,8 +230,8 @@ make qemu-fb-visible   # separate manual evidence
 
 ## Next sequence
 
-1. Split and bound input queue consumption.
-2. Bound USB HID/device polling.
+1. Compact runtime state while preserving the current contracts and size ceiling.
+2. Split and bound USB HID/device polling.
 3. Bound redraw/damage work.
 4. Enforce a global generic-counter deadline and preserve every exhausted class.
 5. Add sustained-load QEMU heartbeat and explicit loss accounting.
