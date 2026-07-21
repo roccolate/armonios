@@ -29,6 +29,7 @@ git -C "$ROOT_DIR" rev-parse HEAD > "$PACKAGE_DIR/COMMIT"
 (
     cd "$PACKAGE_DIR"
     sha256sum kernel8.img config.txt README.md COMMIT > SHA256SUMS
+    sha256sum -c SHA256SUMS
 )
 
 printf 'RPi4 EMMC2 probe package: %s\n' "$PACKAGE_DIR"
