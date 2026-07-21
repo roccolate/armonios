@@ -89,7 +89,9 @@ ifeq ($(BOARD),rpi4)
 LOAD_ADDR := 0x80000
 LOAD_ADDR_HEX := 80000
 KERNEL_LINKER_SCRIPT := linker/linker_rpi4.ld
-STORAGE_DEV := $(BUILD_DIR)/drivers/storage/emmc.o
+STORAGE_DEV := \
+    $(BUILD_DIR)/drivers/storage/emmc.o \
+    $(BUILD_DIR)/drivers/firmware/rpi_mailbox.o
 else
 STORAGE_DEV := $(BUILD_DIR)/drivers/storage/virtio_blk.o
 endif
