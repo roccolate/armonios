@@ -23,33 +23,32 @@ ArmoniOS is a **real bare-metal AArch64 operating system** with a verified QEMU
 
 - **public baseline:** v0.1 QEMU desktop;
 - **engineering phase:** v0.2 cleanup and runtime hardening;
-- **next release blocker:** remaining runtime budgets and sustained-load proof;
+- **next release blocker:** USB/redraw/global-time bounds and sustained-load proof;
 - **product target:** v1.0 usable QEMU mini desktop;
 - **hardware:** Raspberry Pi scaffolding only, not hardware-supported.
 
 Runtime measurement Phase 1B is complete for the work classes observable on
-QEMU. The kernel records:
+QEMU. The kernel records service duration, queue pressure, input production and
+consumption, USB HID polls, valid network frames, redraw submissions, damage
+batches, requests, coalescing, requeues, and exhaustion counters.
 
-- requests, coalescing, requeue, and non-empty/empty passes;
-- last, maximum, and cumulative generic-counter duration;
-- passes exceeding one timer interval;
-- input events produced and consumed;
-- shared input queue depth, high-water, and overflow;
-- USB HID polls that reach xHCI;
-- valid virtio-net RX frames consumed;
-- successful redraw submissions;
-- partial-damage rectangle counts and full-redraw fallbacks.
+Phase 2 now has two enforced count budgets:
 
-Phase 2 has begun. Network readiness now has an independent pending bit, and the
-post-EOI network phase consumes at most 16 valid virtio-net RX frames per pass.
-Reaching that cap conservatively republishes network work and increments an
-exhaustion counter. A workload containing exactly 16 frames may therefore cause
-one empty follow-up network pass.
+- post-EOI input consumption is capped at **16 queue events per pass**;
+- post-EOI virtio-net receive is capped at **16 valid frames per pass**.
 
-This is not complete runtime bounding. Input consumption, USB polling,
-redraw/damage work, and total service time remain unbounded, and no sustained-load
+Input readiness and network readiness have independent pending bits. Input only
+requeues when the shared queue still contains work. Network uses a conservative
+requeue rule, so exactly 16 frames may schedule one empty follow-up pass.
+
+This is not complete runtime bounding. Input producer and USB polling work,
+redraw/damage work, and total service time remain unbounded. No sustained-load
 QEMU test yet proves EL0 progress. `RISK-017` remains open and v0.2 is not
 promoted.
+
+The validated input-budget kernel is **107802 bytes** against the strict
+**108000-byte** ceiling, leaving only **198 bytes**. Further runtime state should
+be compacted or redesigned rather than increasing the limit.
 
 The virtio-net path exposes no trustworthy device-drop or ring-overflow counter.
 Consumed-frame counts are not proof that no packet was lost before software
@@ -74,7 +73,7 @@ The QEMU codebase includes:
 - PCI/xHCI and directly attached boot-protocol USB HID;
 - Ethernet, ARP, IPv4, UDP, and DHCP for a QEMU user-network lease;
 - one post-EOI deferred runtime service with aggregate and per-class telemetry;
-- an enforced 16-frame post-EOI network RX budget with conservative continuation;
+- enforced 16-event input and 16-frame network post-EOI budgets;
 - deterministic host, QEMU, size, stack, ABI, storage, GUI, USB, network, and
   board-build gates.
 
@@ -90,12 +89,13 @@ The QEMU codebase includes:
 | Editor | 512-byte buffer; only the caret line is rendered. |
 | Files | `/fat` only; at most eight displayed root entries. |
 | GUI | 16 windows, 32 events/window, 32 damage rectangles. |
-| Input | Shared 64-event queue; overflow is counted but not prevented. |
-| Network RX | Post-EOI work is capped at 16 valid frames/pass and conservatively requeued; device drops remain unavailable. |
+| Input | Shared 64-event queue; post-EOI consumption capped at 16/pass; overflow counted but not prevented. |
+| Network RX | Post-EOI valid RX capped at 16/pass and conservatively requeued; device drops unavailable. |
 | Networking API | No socket ABI, TCP, DNS API, or HTTP. |
 | USB | Direct keyboard/mouse HID, at most four registered devices, no hubs. |
 | Scheduling | EL0 preemptive; EL1 helper threads cooperative. |
-| Runtime service | Runs after EOI but before `eret`; network RX is count-bounded, other classes and total time are not. |
+| Runtime service | Runs after EOI but before `eret`; input consumption and network RX are count-bounded, producers/redraw/time are not. |
+| Kernel size | 107802 / 108000 bytes; 198 bytes remain. |
 | User copy | Permission checked, but final copies are not fault-recoverable. |
 | Raspberry Pi | Build/host scaffolding only; no physical boot or storage claim. |
 
@@ -131,10 +131,10 @@ The gate covers:
 - `.data == 0` and the 108000-byte kernel limit;
 - RPi4 diagnostic, MBR, and partition-view tests;
 - native kernel/VFS/FAT/GUI/driver/ABI tests;
-- runtime timing, EOI order, coalescing, requeue, reset, and every current work
-  metric;
-- the 16-frame network cap, conservative follow-up, and 17-frame continuation;
-- direct partial/full redraw-helper coverage and static runtime wiring;
+- runtime timing, EOI order, coalescing, requeue, reset, and all current metrics;
+- exactly 16 input events without requeue and 17-event continuation;
+- the 16-frame network cap and conservative follow-up;
+- partial/full redraw-helper coverage and static runtime wiring;
 - input queue depth/high-water/overflow;
 - parent/wait, process-local FDs, user-copy, and KLI1;
 - userland stack usage;
@@ -143,7 +143,7 @@ The gate covers:
 - framebuffer, USB, and DHCP markers;
 - visible-target FAT + GPU wiring.
 
-The shorter hosted workflow also runs the deferred-runtime regression with strict
+The shorter hosted workflow runs the deferred-runtime regression with strict
 pipeline failure handling and retains a `runtime-service-test-log` artifact.
 
 Useful commands:
@@ -189,28 +189,31 @@ automated serial markers.
 
 ```text
 physical timer IRQ
-  -> fixed account/rearm/publish periodic + network readiness
+  -> fixed account/rearm/publish PERIODIC | INPUT | NETWORK
   -> EOI
   -> measured post-EOI runtime pass
-       -> periodic input/USB/GUI phase
-       -> independently pending network phase
+       -> periodic producers plus INPUT phase
+            -> at most 16 shared-queue events
+            -> requeue only when events remain
+       -> NETWORK phase
             -> at most 16 valid RX frames
-            -> conservative requeue when cap is reached
+            -> conservative requeue at the cap
   -> process dispatch
   -> eret
 ```
 
 EOI completes the interrupt-controller transaction but does not leave the CPU
-exception. EL0 remains paused during the pass. The timer callback and post-EOI
-network frame count are bounded; the complete pass is not yet globally bounded.
+exception. EL0 remains paused during the pass. The timer callback, input queue
+consumption, and network frame count are bounded; the complete pass is not yet
+globally bounded.
 
-The first network-budget implementation is validated on head
-`e3765864e6719c0b6373a4c9b1b7db59dfaa0202` and merged as
-`3797f7e7cf3dfb825d927e399aa4769b27020e29`:
+The input-budget implementation is validated on head
+`ba8051cd8edbe6a66a843f80c54c96668d064a91` and merged as
+`41f3e185ca1f75ed09416313d34279384f3d78a9`:
 
-- `Verify ArmoniOS` run `29849603386`: success;
-- `CI - Tests` run `29849603374`: success;
-- loadable kernel: 107548 bytes against the 108000-byte limit.
+- `Verify ArmoniOS` run `29853659559`: success;
+- `CI - Tests` run `29853659491`: success;
+- loadable kernel: 107802 bytes against the 108000-byte limit.
 
 See [Deferred Runtime Service](docs/RUNTIME_SERVICE.md).
 
@@ -255,13 +258,12 @@ input, or an installable Raspberry Pi desktop image.
 
 ## Road to v1.0
 
-1. Bound input, USB, redraw, and total runtime work, then prove EL0 progress under
-   sustained load.
-2. Promote v0.2 with dated automated and visible evidence.
-3. Build v0.3 block/VFS/path infrastructure.
-4. Add real FAT support.
-5. Add shared userland runtime/widgets.
-6. Complete v0.6 Files, Editor, Shell, Settings, Monitor, Panel, and Clock.
+1. Compact runtime state, then bound USB polling, redraw/damage, and total time.
+2. Add sustained-load EL0 heartbeat and explicit loss accounting.
+3. Promote v0.2 with dated automated and visible evidence.
+4. Build v0.3 block/VFS/path infrastructure.
+5. Add real FAT support.
+6. Add shared userland runtime/widgets and useful applications.
 7. Mount ext2 read-only.
 8. Stabilize, fuzz, document, and record the final workflow.
 
