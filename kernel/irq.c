@@ -139,8 +139,7 @@ int runtime_service_virtio_net_recv(virtio_net_device_t *device, void *data,
             return 0;
         }
         if (g_runtime_network_frames >= RUNTIME_NETWORK_FRAME_BUDGET) {
-            if (virtio_net_poll(device) > 0 &&
-                g_runtime_network_budget_exhausted == 0U) {
+            if (g_runtime_network_budget_exhausted == 0U) {
                 g_runtime_network_budget_exhausted = 1U;
                 g_runtime_stats.network_budget_exhaustion_count++;
                 runtime_service_request(RUNTIME_WORK_NETWORK);
