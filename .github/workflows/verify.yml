@@ -63,7 +63,16 @@ jobs:
         run: make -C tests test
 
       - name: Test deferred runtime service
-        run: bash tests/run_runtime_service_test.sh
+        run: bash tests/run_runtime_service_test.sh 2>&1 | tee runtime-service-test.log
+
+      - name: Upload runtime-service log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-service-test-log
+          path: runtime-service-test.log
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Enforce userland stack limit
         run: make stack-check
