@@ -20,10 +20,26 @@ jobs:
           fetch-depth: 0
 
       - name: Compact lifecycle implementation
-        run: python3 .github/scripts/compact_process_lifecycle.py
+        shell: bash
+        run: |
+          set +e
+          python3 .github/scripts/compact_process_lifecycle.py \
+            > .github/process-lifecycle-compact.log 2>&1
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            cat .github/process-lifecycle-compact.log
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/process-lifecycle-compact.log
+            git commit -m "Capture lifecycle compaction failure"
+            git push origin HEAD:agent/process-parent-wait-lifecycle
+            exit "$status"
+          fi
 
       - name: Remove temporary helper and publish
         run: |
+          rm -f .github/process-lifecycle-compact.log
           rm -f .github/scripts/compact_process_lifecycle.py
           rm -f .github/workflows/compact-process-lifecycle.yml
           git config user.name "github-actions[bot]"
