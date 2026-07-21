@@ -12,6 +12,14 @@
  */
 void kernel_io_poll_input_sources(uint8_t include_uart);
 
+/*
+ * Kernel orchestration routes network polls through the runtime wrapper. The
+ * DHCP implementation itself does not include this header, so its real
+ * `net_poll` symbol remains available behind the wrapper.
+ */
+void runtime_service_net_poll(void);
+#define net_poll runtime_service_net_poll
+
 /* Poll the network only on boards that declare BOARD_CAP_NET. */
 void kernel_io_poll_network(void);
 
