@@ -1,0 +1,97 @@
+name: RPi4 probe build edit helper
+
+on:
+  push:
+    branches:
+      - agent/rpi4-emmc2-sector0-probe
+
+permissions:
+  contents: write
+
+jobs:
+  edit-makefile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/rpi4-emmc2-sector0-probe
+      - name: Add opt-in RPi4 probe build
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('Makefile')
+          text = path.read_text()
+
+          old = 'BUILD_DIR ?= build\nBOARD ?= qemu_virt\nBOARD_DIR := drivers/boards/$(BOARD)\n'
+          new = ('BUILD_DIR ?= build\n'
+                 'BOARD ?= qemu_virt\n'
+                 'RPI4_EMMC2_PROBE ?= 0\n'
+                 'RPI4_PROBE_BUILD_DIR ?= build-rpi4-emmc2-probe\n'
+                 'BOARD_CFLAGS :=\n'
+                 'BOARD_DIR := drivers/boards/$(BOARD)\n')
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('build variable anchor not found')
+
+          old = ('STORAGE_DEV := \\\n'
+                 '    $(BUILD_DIR)/drivers/storage/emmc.o \\\n'
+                 '    $(BUILD_DIR)/drivers/firmware/rpi_mailbox.o\n'
+                 'else\n')
+          new = ('STORAGE_DEV := \\\n'
+                 '    $(BUILD_DIR)/drivers/storage/emmc.o \\\n'
+                 '    $(BUILD_DIR)/drivers/firmware/rpi_mailbox.o\n'
+                 'ifeq ($(RPI4_EMMC2_PROBE),1)\n'
+                 'BOARD_CFLAGS += -DARMONIOS_RPI4_EMMC2_PROBE=1\n'
+                 'endif\n'
+                 'else\n')
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('RPi storage anchor not found')
+
+          old = '           -mcpu=cortex-a72 -std=c11 -Os -g -I . -I drivers\n'
+          new = '           -mcpu=cortex-a72 -std=c11 -Os -g -I . -I drivers $(BOARD_CFLAGS)\n'
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('CFLAGS anchor not found')
+
+          old = '.PHONY: all help toolchain-check qemu-check qemu qemu-blk qemu-fs-test qemu-fb qemu-fb-visible qemu-debug qemu-net qemu-usb entry-check size clean apps libkarm stack-check\n'
+          new = '.PHONY: all help toolchain-check qemu-check qemu qemu-blk qemu-fs-test qemu-fb qemu-fb-visible qemu-debug qemu-net qemu-usb rpi4-emmc2-probe entry-check size clean apps libkarm stack-check\n'
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('PHONY anchor not found')
+
+          old = 'all: toolchain-check $(KERNEL_ELF) $(KERNEL_BIN)\n\nhelp:\n'
+          new = ('all: toolchain-check $(KERNEL_ELF) $(KERNEL_BIN)\n\n'
+                 'rpi4-emmc2-probe:\n'
+                 '\t@$(MAKE) --no-print-directory BOARD=rpi4 \\\n'
+                 '\t    BUILD_DIR=$(RPI4_PROBE_BUILD_DIR) RPI4_EMMC2_PROBE=1 all\n'
+                 '\t@cp $(RPI4_PROBE_BUILD_DIR)/kernel.bin \\\n'
+                 '\t    $(RPI4_PROBE_BUILD_DIR)/kernel8.img\n'
+                 '\t@printf "RPi4 EMMC2 probe image: %s\\n" \\\n'
+                 '\t    "$(RPI4_PROBE_BUILD_DIR)/kernel8.img"\n\n'
+                 'help:\n')
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('all target anchor not found')
+
+          old = '\t@printf "  %-18s %s\\n" "qemu-usb" "run QEMU with xHCI USB keyboard and mouse"\n'
+          new = (old + '\t@printf "  %-18s %s\\n" "rpi4-emmc2-probe" "build opt-in read-only RPi4 sector probe"\n')
+          if old in text and '"rpi4-emmc2-probe" "build opt-in' not in text:
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Makefile
+          git commit -m "Add the opt-in RPi4 EMMC2 probe build"
+          git push origin HEAD:agent/rpi4-emmc2-sector0-probe
