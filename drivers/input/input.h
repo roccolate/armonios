@@ -23,7 +23,7 @@ typedef enum {
     INPUT_EVENT_MOUSE_BUTTON,
 } input_event_type_t;
 
-typedef struct {
+typedef struct input_event {
     input_event_type_t type;
     uint64_t timestamp;
     union {

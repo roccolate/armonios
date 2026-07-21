@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "board.h"
+#include "input/input.h"
 #include "kernel/gui_compositor.h"
 #include "net/virtio_net.h"
 #include "kernel/net/dhcp.h"
@@ -22,6 +23,7 @@ static volatile uint32_t g_runtime_work_pending;
 static runtime_service_stats_t g_runtime_stats;
 static uint32_t g_runtime_network_frames;
 static uint8_t g_runtime_service_active;
+static uint8_t g_runtime_input_phase_active;
 static uint8_t g_runtime_network_phase_active;
 static uint8_t g_runtime_network_budget_exhausted;
 
@@ -42,6 +44,7 @@ void runtime_service_reset(void) {
     g_runtime_work_pending = 0;
     g_runtime_network_frames = 0;
     g_runtime_service_active = 0;
+    g_runtime_input_phase_active = 0;
     g_runtime_network_phase_active = 0;
     g_runtime_network_budget_exhausted = 0;
     g_runtime_stats = (runtime_service_stats_t){0};
@@ -122,6 +125,25 @@ void runtime_service_request(uint32_t work) {
     g_runtime_work_pending |= accepted;
 }
 
+int runtime_service_input_poll(struct input_event *event) {
+    if (g_runtime_service_active != 0U) {
+        if (g_runtime_input_phase_active == 0U) {
+            return -1;
+        }
+        if (g_runtime_stats.metric_last[RUNTIME_METRIC_INPUT_CONSUMED] >=
+            RUNTIME_INPUT_EVENT_BUDGET) {
+            if (input_queue_available() > 0 &&
+                (g_runtime_work_pending & RUNTIME_WORK_INPUT) == 0U) {
+                g_runtime_stats.input_budget_exhaustion_count++;
+                runtime_service_request(RUNTIME_WORK_INPUT);
+            }
+            return -1;
+        }
+    }
+
+    return input_queue_poll((input_event_t *)event);
+}
+
 void runtime_service_net_poll(void) {
     if (g_runtime_service_active != 0U &&
         g_runtime_network_phase_active == 0U) {
@@ -164,6 +186,7 @@ uint32_t runtime_service_run_pending(void) {
     g_runtime_work_pending = 0;
     g_runtime_stats.last_work = work;
     g_runtime_network_frames = 0;
+    g_runtime_input_phase_active = 0;
     g_runtime_network_phase_active = 0;
     g_runtime_network_budget_exhausted = 0;
     for (uint32_t i = 0; i < RUNTIME_METRIC_COUNT; i++) {
@@ -178,7 +201,15 @@ uint32_t runtime_service_run_pending(void) {
     started = runtime_service_counter_now();
     g_runtime_service_active = 1U;
     if ((work & RUNTIME_WORK_PERIODIC) != 0U) {
+        if ((work & RUNTIME_WORK_INPUT) != 0U) {
+            g_runtime_input_phase_active = 1U;
+        }
         kernel_on_timer_tick();
+        g_runtime_input_phase_active = 0U;
+    } else if ((work & RUNTIME_WORK_INPUT) != 0U) {
+        g_runtime_input_phase_active = 1U;
+        kernel_on_timer_tick();
+        g_runtime_input_phase_active = 0U;
     }
     if ((work & RUNTIME_WORK_NETWORK) != 0U) {
         g_runtime_network_phase_active = 1U;
