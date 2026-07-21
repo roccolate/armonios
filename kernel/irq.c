@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "board.h"
+#include "kernel/gui_compositor.h"
 #include "kernel/process.h"
 #include "kernel/runtime_service.h"
 #include "uart/pl011.h"
@@ -56,6 +57,21 @@ void runtime_service_report_metric(uint32_t metric, uint32_t value) {
     g_runtime_stats.metric_total[metric] += value;
     if (current > g_runtime_stats.metric_max[metric]) {
         g_runtime_stats.metric_max[metric] = current;
+    }
+}
+
+void runtime_service_report_redraw(void) {
+    gui_desktop_t *desktop = gui_desktop();
+
+    runtime_service_report_metric(RUNTIME_METRIC_REDRAW, 1U);
+    if (desktop == 0) {
+        return;
+    }
+    if (desktop->damage_full != 0U) {
+        runtime_service_report_metric(RUNTIME_METRIC_FULL_REDRAWS, 1U);
+    } else {
+        runtime_service_report_metric(RUNTIME_METRIC_DAMAGE_ITEMS,
+                                      desktop->damage_count);
     }
 }
 
