@@ -28,6 +28,8 @@ jobs:
             printf 'kernel.bin bytes: '
             wc -c < build/kernel.bin
             aarch64-linux-gnu-size build/kernel.elf
+            printf '\nInitialized writable data symbols:\n'
+            aarch64-linux-gnu-nm -S --size-sort --radix=d build/kernel.elf | awk '$3 == "D" || $3 == "d"'
             printf '\nLargest text/data symbols:\n'
             aarch64-linux-gnu-nm -S --size-sort --radix=d build/kernel.elf | tail -40
           } > .github/kernel-size-diagnostic.txt
@@ -36,5 +38,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/kernel-size-diagnostic.txt
-          git commit -m "Capture kernel size diagnostic"
+          git commit -m "Capture initialized kernel data symbols"
           git push origin HEAD:agent/process-parent-wait-lifecycle
