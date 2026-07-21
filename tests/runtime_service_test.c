@@ -9,6 +9,8 @@
 static uint32_t g_eoi_seen;
 static uint32_t g_backend_calls;
 static uint32_t g_requeue_once;
+static uint64_t g_counter_now;
+static uint64_t g_counter_step;
 
 uint32_t board_irq_ack(void) {
     return 5U;
@@ -49,6 +51,13 @@ int process_dispatch_next(process_t *current, exception_frame_t *frame,
     return 0;
 }
 
+uint64_t runtime_service_counter_now(void) {
+    uint64_t value = g_counter_now;
+
+    g_counter_now += g_counter_step;
+    return value;
+}
+
 void kernel_on_timer_tick(void) {
     assert(g_eoi_seen != 0U);
     g_backend_calls++;
@@ -58,48 +67,147 @@ void kernel_on_timer_tick(void) {
     }
 }
 
-static void repeated_ticks_coalesce(void) {
+static runtime_service_stats_t stats_snapshot(void) {
+    runtime_service_stats_t stats;
+
+    runtime_service_get_stats(&stats);
+    return stats;
+}
+
+static void prepare_service(uint64_t counter_step) {
+    runtime_service_configure_timing(1000U, 10U);
     runtime_service_reset();
     g_eoi_seen = 1U;
     g_backend_calls = 0U;
+    g_requeue_once = 0U;
+    g_counter_now = 100U;
+    g_counter_step = counter_step;
+}
+
+static void repeated_ticks_coalesce_and_are_measured(void) {
+    runtime_service_stats_t stats;
+
+    prepare_service(7U);
 
     runtime_service_request(RUNTIME_WORK_PERIODIC);
     runtime_service_request(RUNTIME_WORK_PERIODIC);
 
     assert(runtime_service_run_pending() == RUNTIME_WORK_PERIODIC);
     assert(g_backend_calls == 1U);
+
+    stats = stats_snapshot();
+    assert(stats.request_count == 2U);
+    assert(stats.coalesced_request_count == 1U);
+    assert(stats.run_count == 1U);
+    assert(stats.empty_run_count == 0U);
+    assert(stats.requeue_count == 0U);
+    assert(stats.last_duration_ticks == 7U);
+    assert(stats.max_duration_ticks == 7U);
+    assert(stats.total_duration_ticks == 7U);
+    assert(stats.over_budget_count == 0U);
+    assert(stats.counter_frequency_hz == 1000U);
+    assert(stats.budget_ticks == 10U);
+    assert(stats.pending_work == 0U);
+    assert(stats.last_work == RUNTIME_WORK_PERIODIC);
+
     assert(runtime_service_run_pending() == 0U);
+    stats = stats_snapshot();
+    assert(stats.empty_run_count == 1U);
+    assert(stats.run_count == 1U);
+    assert(stats.last_work == 0U);
 }
 
-static void backend_requeue_survives_current_pass(void) {
-    runtime_service_reset();
-    g_eoi_seen = 1U;
-    g_backend_calls = 0U;
+static void maximum_and_over_budget_counts_track(void) {
+    runtime_service_stats_t stats;
+
+    prepare_service(7U);
+    runtime_service_request(RUNTIME_WORK_PERIODIC);
+    assert(runtime_service_run_pending() == RUNTIME_WORK_PERIODIC);
+
+    g_counter_step = 15U;
+    runtime_service_request(RUNTIME_WORK_PERIODIC);
+    assert(runtime_service_run_pending() == RUNTIME_WORK_PERIODIC);
+
+    stats = stats_snapshot();
+    assert(stats.request_count == 2U);
+    assert(stats.run_count == 2U);
+    assert(stats.last_duration_ticks == 15U);
+    assert(stats.max_duration_ticks == 15U);
+    assert(stats.total_duration_ticks == 22U);
+    assert(stats.over_budget_count == 1U);
+}
+
+static void backend_requeue_survives_and_is_counted(void) {
+    runtime_service_stats_t stats;
+
+    prepare_service(4U);
     g_requeue_once = 1U;
 
     runtime_service_request(RUNTIME_WORK_PERIODIC);
     assert(runtime_service_run_pending() == RUNTIME_WORK_PERIODIC);
     assert(g_backend_calls == 1U);
+
+    stats = stats_snapshot();
+    assert(stats.request_count == 2U);
+    assert(stats.coalesced_request_count == 0U);
+    assert(stats.run_count == 1U);
+    assert(stats.requeue_count == 1U);
+    assert(stats.pending_work == RUNTIME_WORK_PERIODIC);
+
     assert(runtime_service_run_pending() == RUNTIME_WORK_PERIODIC);
     assert(g_backend_calls == 2U);
+
+    stats = stats_snapshot();
+    assert(stats.run_count == 2U);
+    assert(stats.requeue_count == 1U);
+    assert(stats.total_duration_ticks == 8U);
+    assert(stats.pending_work == 0U);
+}
+
+static void reset_clears_telemetry_but_preserves_timing(void) {
+    runtime_service_stats_t stats;
+
+    prepare_service(12U);
+    runtime_service_request(RUNTIME_WORK_PERIODIC);
+    assert(runtime_service_run_pending() == RUNTIME_WORK_PERIODIC);
+
+    runtime_service_reset();
+    runtime_service_get_stats(0);
+    stats = stats_snapshot();
+
+    assert(stats.request_count == 0U);
+    assert(stats.coalesced_request_count == 0U);
+    assert(stats.run_count == 0U);
+    assert(stats.empty_run_count == 0U);
+    assert(stats.requeue_count == 0U);
+    assert(stats.last_duration_ticks == 0U);
+    assert(stats.max_duration_ticks == 0U);
+    assert(stats.total_duration_ticks == 0U);
+    assert(stats.over_budget_count == 0U);
+    assert(stats.counter_frequency_hz == 1000U);
+    assert(stats.budget_ticks == 10U);
+    assert(stats.pending_work == 0U);
+    assert(stats.last_work == 0U);
 }
 
 static void irq_closes_before_deferred_work(void) {
-    runtime_service_reset();
+    prepare_service(3U);
     g_eoi_seen = 0U;
-    g_backend_calls = 0U;
 
     runtime_service_request(RUNTIME_WORK_PERIODIC);
     irq_handler();
 
     assert(g_eoi_seen == 1U);
     assert(g_backend_calls == 1U);
+    assert(stats_snapshot().last_duration_ticks == 3U);
 }
 
 int main(void) {
-    repeated_ticks_coalesce();
-    backend_requeue_survives_current_pass();
+    repeated_ticks_coalesce_and_are_measured();
+    maximum_and_over_budget_counts_track();
+    backend_requeue_survives_and_is_counted();
+    reset_clears_telemetry_but_preserves_timing();
     irq_closes_before_deferred_work();
-    puts("deferred runtime service: ok");
+    puts("deferred runtime service telemetry: ok");
     return 0;
 }
