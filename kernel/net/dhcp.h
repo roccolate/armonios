@@ -47,9 +47,8 @@ typedef struct {
     uint8_t  discovered;
 } net_info_t;
 
-int net_init(void);
-/* Drain all currently available receive frames and return the number drained. */
-uint32_t net_poll(void);
-int net_is_link_up(void);
+int  net_init(void);
+void net_poll(void);
+int  net_is_link_up(void);
 
 #endif
