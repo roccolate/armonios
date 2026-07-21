@@ -125,6 +125,8 @@ static void work_metrics(void) {
     g_metrics[RUNTIME_METRIC_REDRAW] = 1U;
     g_metrics[RUNTIME_METRIC_NETWORK_FRAMES] = 3U;
     g_metrics[RUNTIME_METRIC_DEVICE_POLLS] = 2U;
+    g_metrics[RUNTIME_METRIC_DAMAGE_ITEMS] = 4U;
+    g_metrics[RUNTIME_METRIC_FULL_REDRAWS] = 0U;
     g_queue_depth = 6U;
     g_queue_high_water = 7U;
     g_queue_overflow = 2U;
@@ -137,21 +139,27 @@ static void work_metrics(void) {
     assert(stats.metric_last[RUNTIME_METRIC_REDRAW] == 1U);
     assert(stats.metric_last[RUNTIME_METRIC_NETWORK_FRAMES] == 3U);
     assert(stats.metric_last[RUNTIME_METRIC_DEVICE_POLLS] == 2U);
+    assert(stats.metric_last[RUNTIME_METRIC_DAMAGE_ITEMS] == 4U);
+    assert(stats.metric_last[RUNTIME_METRIC_FULL_REDRAWS] == 0U);
     assert(stats.metric_total[RUNTIME_METRIC_INPUT_PRODUCED] == 5U);
     assert(stats.metric_total[RUNTIME_METRIC_NETWORK_FRAMES] == 3U);
     assert(stats.metric_total[RUNTIME_METRIC_DEVICE_POLLS] == 2U);
+    assert(stats.metric_total[RUNTIME_METRIC_DAMAGE_ITEMS] == 4U);
     assert(stats.metric_max[RUNTIME_METRIC_INPUT_CONSUMED] == 4U);
     assert(stats.metric_max[RUNTIME_METRIC_NETWORK_FRAMES] == 3U);
     assert(stats.metric_max[RUNTIME_METRIC_DEVICE_POLLS] == 2U);
+    assert(stats.metric_max[RUNTIME_METRIC_DAMAGE_ITEMS] == 4U);
     assert(stats.max_input_queue_depth == 6U);
     assert(stats.input_queue_high_water == 7U);
     assert(stats.input_queue_overflow_count == 2U);
 
     g_metrics[RUNTIME_METRIC_INPUT_PRODUCED] = 2U;
     g_metrics[RUNTIME_METRIC_INPUT_CONSUMED] = 6U;
-    g_metrics[RUNTIME_METRIC_REDRAW] = 0U;
+    g_metrics[RUNTIME_METRIC_REDRAW] = 1U;
     g_metrics[RUNTIME_METRIC_NETWORK_FRAMES] = 7U;
     g_metrics[RUNTIME_METRIC_DEVICE_POLLS] = 5U;
+    g_metrics[RUNTIME_METRIC_DAMAGE_ITEMS] = 0U;
+    g_metrics[RUNTIME_METRIC_FULL_REDRAWS] = 1U;
     g_queue_depth = 3U;
     g_queue_overflow = 4U;
     runtime_service_request(RUNTIME_WORK_PERIODIC);
@@ -164,14 +172,20 @@ static void work_metrics(void) {
     assert(stats.metric_last[RUNTIME_METRIC_INPUT_CONSUMED] == 6U);
     assert(stats.metric_total[RUNTIME_METRIC_INPUT_CONSUMED] == 10U);
     assert(stats.metric_max[RUNTIME_METRIC_INPUT_CONSUMED] == 6U);
-    assert(stats.metric_last[RUNTIME_METRIC_REDRAW] == 0U);
-    assert(stats.metric_total[RUNTIME_METRIC_REDRAW] == 1U);
+    assert(stats.metric_last[RUNTIME_METRIC_REDRAW] == 1U);
+    assert(stats.metric_total[RUNTIME_METRIC_REDRAW] == 2U);
     assert(stats.metric_last[RUNTIME_METRIC_NETWORK_FRAMES] == 7U);
     assert(stats.metric_total[RUNTIME_METRIC_NETWORK_FRAMES] == 10U);
     assert(stats.metric_max[RUNTIME_METRIC_NETWORK_FRAMES] == 7U);
     assert(stats.metric_last[RUNTIME_METRIC_DEVICE_POLLS] == 5U);
     assert(stats.metric_total[RUNTIME_METRIC_DEVICE_POLLS] == 7U);
     assert(stats.metric_max[RUNTIME_METRIC_DEVICE_POLLS] == 5U);
+    assert(stats.metric_last[RUNTIME_METRIC_DAMAGE_ITEMS] == 0U);
+    assert(stats.metric_total[RUNTIME_METRIC_DAMAGE_ITEMS] == 4U);
+    assert(stats.metric_max[RUNTIME_METRIC_DAMAGE_ITEMS] == 4U);
+    assert(stats.metric_last[RUNTIME_METRIC_FULL_REDRAWS] == 1U);
+    assert(stats.metric_total[RUNTIME_METRIC_FULL_REDRAWS] == 1U);
+    assert(stats.metric_max[RUNTIME_METRIC_FULL_REDRAWS] == 1U);
     assert(stats.max_input_queue_depth == 6U);
     assert(stats.input_queue_overflow_count == 4U);
 }
@@ -196,6 +210,8 @@ static void requeue_and_reset(void) {
     assert(stats.metric_total[RUNTIME_METRIC_INPUT_CONSUMED] == 0U);
     assert(stats.metric_total[RUNTIME_METRIC_NETWORK_FRAMES] == 0U);
     assert(stats.metric_total[RUNTIME_METRIC_DEVICE_POLLS] == 0U);
+    assert(stats.metric_total[RUNTIME_METRIC_DAMAGE_ITEMS] == 0U);
+    assert(stats.metric_total[RUNTIME_METRIC_FULL_REDRAWS] == 0U);
     assert(stats.counter_frequency_hz == 1000U);
     assert(stats.budget_ticks == 10U);
 }
@@ -216,6 +232,6 @@ int main(void) {
     work_metrics();
     requeue_and_reset();
     eoi_order();
-    puts("deferred runtime service device/network telemetry: ok");
+    puts("deferred runtime service damage telemetry: ok");
     return 0;
 }
