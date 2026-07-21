@@ -71,9 +71,12 @@ int64_t sys_proclist(process_t *process, uint64_t entries_ptr,
             entry.name[j] = '\0';
         }
 
-        sys_copy_to_user_validated(
-            entries_ptr + written * sizeof(syscall_proc_entry_t),
+        status = sys_copy_to_user(
+            process, entries_ptr + written * sizeof(syscall_proc_entry_t),
             &entry, sizeof(entry));
+        if (status != 0) {
+            return status;
+        }
         written++;
     }
 
