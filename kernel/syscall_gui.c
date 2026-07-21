@@ -312,7 +312,8 @@ int64_t sys_window_get_bounds(process_t *process, uint64_t window_id,
     out[1] = window->y;
     out[2] = window->w;
     out[3] = window->h;
-    return sys_copy_to_user(process, out_ptr, out, sizeof(out));
+    sys_copy_to_user_validated(out_ptr, out, sizeof(out));
+    return 0;
 }
 
 int64_t sys_window_set_bounds(process_t *process, uint64_t window_id,
@@ -401,13 +402,13 @@ int64_t sys_window_state(process_t *process, uint64_t window_id,
         (window->flags & GUI_WINDOW_NO_FOCUS) == 0U) {
         state |= 0x2U;
     }
-    return sys_copy_to_user(process, out_ptr, &state, sizeof(state));
+    sys_copy_to_user_validated(out_ptr, &state, sizeof(state));
+    return 0;
 }
 
 int64_t sys_window_event(process_t *process, uint64_t window_id,
                          uint64_t buf_ptr, uint64_t buf_count) {
     gui_window_t *window;
-    uint32_t out[64U * 3U];
     uint64_t n = 0;
     int64_t status;
 
@@ -430,16 +431,17 @@ int64_t sys_window_event(process_t *process, uint64_t window_id,
 
     while (n < buf_count && window->event_count > 0) {
         gui_event_t ev;
+        uint32_t out[3];
+
         if (gui_window_pop_event(window, &ev) != 0) {
             break;
         }
-        out[n * 3U + 0U] = ev.type;
-        out[n * 3U + 1U] = (uint32_t)ev.data1;
-        out[n * 3U + 2U] = (uint32_t)ev.data2;
+        out[0] = ev.type;
+        out[1] = (uint32_t)ev.data1;
+        out[2] = (uint32_t)ev.data2;
+        sys_copy_to_user_validated(buf_ptr + n * sizeof(out),
+                                   out, sizeof(out));
         n++;
     }
-
-    status = sys_copy_to_user(process, buf_ptr, out,
-                              n * 3U * sizeof(uint32_t));
-    return status == 0 ? (int64_t)n : status;
+    return (int64_t)n;
 }
