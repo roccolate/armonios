@@ -30,7 +30,7 @@ typedef struct heap_block {
 static heap_block_t *g_heap_head;
 static heap_block_t *g_heap_tail;
 static uint64_t g_heap_total_bytes;
-static uint64_t g_next_arena_id = 1;
+static uint64_t g_next_arena_id;
 
 static uint64_t align_up(uint64_t value) {
     return (value + KHEAP_ALIGN - 1ULL) & ~(KHEAP_ALIGN - 1ULL);
@@ -158,6 +158,7 @@ void kheap_init(void) {
         return;
     }
 
+    g_next_arena_id = 1;
     (void)extend_heap(1);
 }
 

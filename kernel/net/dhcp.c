@@ -29,7 +29,7 @@ static net_info_t g_net_info;
 static virtio_net_device_t g_net_dev;
 static uint8_t g_net_inited = 0;
 static uint8_t g_net_polling = 0;
-static uint32_t g_dhcp_xid = 0x12345678;
+static uint32_t g_dhcp_xid;
 static uint8_t g_net_rx_frame[NET_FRAME_MAX] KERNEL_ALIGNED(8);
 static uint8_t g_net_tx_frame[NET_FRAME_MAX] KERNEL_ALIGNED(8);
 

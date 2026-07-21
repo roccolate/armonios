@@ -4,12 +4,13 @@
 /*
  * Process-control block API.
  *
- * PIDs are non-zero and unique inside the fixed process table. User regions
- * are half-open virtual ranges [start, end); entries with OWNED_PAGES carry
- * PMM-backed pages that process_free_resources/process_release must return.
- * Region helpers reject zero-length and overflowing ranges, while
- * process_user_range_contains treats a zero-length query as vacuously valid for
- * a non-null process.
+ * PIDs are non-zero and unique inside the fixed process table. Spawned
+ * processes record their parent PID so only the parent can reap a child exit.
+ * User regions are half-open virtual ranges [start, end); entries with
+ * OWNED_PAGES carry PMM-backed pages that
+ * process_free_resources/process_release must return. Region helpers reject
+ * zero-length and overflowing ranges, while process_user_range_contains treats
+ * a zero-length query as vacuously valid for a non-null process.
  */
 
 #include <stdint.h>
@@ -45,6 +46,7 @@ typedef struct {
 
 typedef struct process {
     uint32_t pid;
+    uint32_t parent_pid;
     const char *name;
     char name_storage[PROCESS_NAME_LEN];
     uint64_t regs[31];

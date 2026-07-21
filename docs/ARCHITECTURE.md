@@ -58,6 +58,7 @@ Current behavior:
 
 - the early kernel builds an identity map of the detected RAM range;
 - kernel text is mapped RX, rodata R/NX, data+bss+stack RW/NX, and remaining RAM RW/NX;
+- mutable kernel globals use zero-initialized BSS and subsystem init functions establish non-zero defaults, keeping the loadable `.data` section empty while preserving the page-aligned W^X boundary;
 - board MMIO is identity-mapped as device memory;
 - each EL0 process has a separate TTBR0 root;
 - every process TTBR0 also contains the full kernel/RAM identity map needed while handling exceptions;
@@ -79,13 +80,13 @@ The syscall helper layer first checks the registered process range, then walks t
 `kernel/process.{c,h}` owns:
 
 - fixed process slots;
-- PID and state;
+- PID, parent PID, and state;
 - saved EL0 registers, PC, SP, and PSTATE;
 - per-process TTBR0 root;
 - registered user regions and owned physical pages;
 - zombie state and cleanup.
 
-EL0 dispatch uses `process_dispatch_next()` and a round-robin scan of ready slots.
+EL0 dispatch uses `process_dispatch_next()` and a round-robin scan of ready slots. Spawn records the current process as parent. A child zombie remains in the fixed table until that parent calls `sys_wait`; automatic reclamation is limited to kernel-owned or orphaned zombies, so later spawns cannot erase an observable exit status.
 
 ### EL0 processes
 
