@@ -6,7 +6,54 @@
 #include "kernel/print.h"
 #include "uart/pl011.h"
 
+#if defined(ARMONIOS_RPI4_EMMC2_PROBE)
+#include "storage/emmc.h"
+#endif
+
 static uint32_t g_emmc2_clock_hz;
+
+#if defined(ARMONIOS_RPI4_EMMC2_PROBE)
+static emmc_device_t g_emmc2_probe_device;
+static uint8_t g_emmc2_sector0[EMMC_BLKSZ] __attribute__((aligned(16)));
+
+static void rpi4_emmc2_probe(void) {
+    int result;
+
+    if (g_emmc2_clock_hz == 0U) {
+        uart_puts("EMMC2 probe: clock unavailable\n");
+        return;
+    }
+
+    uart_puts("EMMC2 probe: begin\n");
+    result = emmc_init(&g_emmc2_probe_device, RPI4_EMMC_BASE,
+                       g_emmc2_clock_hz);
+    uart_puts("EMMC2 probe: init ");
+    print_signed32(result);
+    uart_puts("\n");
+    if (result != EMMC_OK) {
+        return;
+    }
+
+    result = emmc_read_sector(&g_emmc2_probe_device, 0U, 1U,
+                              g_emmc2_sector0);
+    uart_puts("EMMC2 probe: read0 ");
+    print_signed32(result);
+    uart_puts("\n");
+    if (result != EMMC_OK) {
+        return;
+    }
+
+    uart_puts("EMMC2 probe: first16 ");
+    for (uint32_t i = 0; i < 16U; i++) {
+        print_hex8(g_emmc2_sector0[i]);
+    }
+    uart_puts("\n");
+    uart_puts("EMMC2 probe: signature ");
+    print_hex8(g_emmc2_sector0[510]);
+    print_hex8(g_emmc2_sector0[511]);
+    uart_puts("\n");
+}
+#endif
 
 const char *board_name(void) {
     return "rpi4-bcm2711";
@@ -15,8 +62,8 @@ const char *board_name(void) {
 uint32_t board_capabilities(void) {
     /*
      * The RPi4 backend remains a serial-only build target until physical
-     * hardware evidence exists. The EMMC2 controller core is host-tested, but
-     * storage must not be advertised before repeatable card reads on hardware.
+     * hardware evidence exists. The opt-in probe never advertises storage to
+     * generic kernel code.
      */
     return 0U;
 }
@@ -34,6 +81,10 @@ void board_early_init(void) {
         g_emmc2_clock_hz = 0U;
         uart_puts("EMMC2 clock: unavailable\n");
     }
+
+#if defined(ARMONIOS_RPI4_EMMC2_PROBE)
+    rpi4_emmc2_probe();
+#endif
 }
 
 void board_irq_init(void) {
@@ -101,9 +152,9 @@ int board_map_mmio(uint64_t *pgd) {
 }
 
 /*
- * Storage intentionally fails closed. The clock query is diagnostic only;
- * EMMC2 MMIO is not mapped and the generic storage path cannot invoke the
- * host-tested controller until physical read evidence exists.
+ * Storage intentionally fails closed. Even the opt-in sector probe runs only
+ * during early board diagnostics and never exposes the device through these
+ * generic entry points.
  */
 int board_emmc_read(uint32_t lba, uint32_t count, void *buffer) {
     (void)lba;
