@@ -211,6 +211,7 @@ int usb_hid_poll_device(usb_hid_device_t *dev) {
     if (ctrl == 0) {
         return -1;
     }
+    runtime_service_report_metric(RUNTIME_METRIC_DEVICE_POLLS, 1U);
     if (dev->protocol == 0x01U) {
         hid_boot_keyboard_report_t report;
         int n;
