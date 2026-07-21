@@ -40,6 +40,20 @@ __attribute__((weak)) uint64_t runtime_service_counter_now(void) {
     return 0;
 }
 
+static void runtime_service_clear_last_work_metrics(void) {
+    g_runtime_stats.last_board_input_events = 0;
+    g_runtime_stats.last_usb_input_events = 0;
+    g_runtime_stats.last_input_events_consumed = 0;
+    g_runtime_stats.last_redraw_count = 0;
+    g_runtime_stats.last_network_frames = 0;
+}
+
+static void update_max_u32(uint32_t value, uint32_t *maximum) {
+    if (maximum != 0 && value > *maximum) {
+        *maximum = value;
+    }
+}
+
 void runtime_service_reset(void) {
     uint64_t counter_frequency_hz = g_runtime_stats.counter_frequency_hz;
     uint64_t budget_ticks = g_runtime_stats.budget_ticks;
@@ -54,6 +68,46 @@ void runtime_service_configure_timing(uint64_t counter_frequency_hz,
                                       uint64_t budget_ticks) {
     g_runtime_stats.counter_frequency_hz = counter_frequency_hz;
     g_runtime_stats.budget_ticks = budget_ticks;
+}
+
+void runtime_service_report_work(const runtime_service_work_report_t *report) {
+    if (report == 0) {
+        return;
+    }
+
+    g_runtime_stats.last_board_input_events += report->board_input_events;
+    g_runtime_stats.total_board_input_events += report->board_input_events;
+    update_max_u32(g_runtime_stats.last_board_input_events,
+                   &g_runtime_stats.max_board_input_events);
+
+    g_runtime_stats.last_usb_input_events += report->usb_input_events;
+    g_runtime_stats.total_usb_input_events += report->usb_input_events;
+    update_max_u32(g_runtime_stats.last_usb_input_events,
+                   &g_runtime_stats.max_usb_input_events);
+
+    g_runtime_stats.last_input_events_consumed +=
+        report->input_events_consumed;
+    g_runtime_stats.total_input_events_consumed +=
+        report->input_events_consumed;
+    update_max_u32(g_runtime_stats.last_input_events_consumed,
+                   &g_runtime_stats.max_input_events_consumed);
+
+    update_max_u32(report->input_queue_depth_after_producers,
+                   &g_runtime_stats.max_input_queue_depth);
+    update_max_u32(report->input_queue_high_water,
+                   &g_runtime_stats.input_queue_high_water);
+    g_runtime_stats.input_queue_overflow_count +=
+        report->input_queue_overflow_delta;
+
+    g_runtime_stats.last_redraw_count += report->redraw_count;
+    g_runtime_stats.total_redraw_count += report->redraw_count;
+    update_max_u32(g_runtime_stats.last_redraw_count,
+                   &g_runtime_stats.max_redraw_count);
+
+    g_runtime_stats.last_network_frames += report->network_frames;
+    g_runtime_stats.total_network_frames += report->network_frames;
+    update_max_u32(g_runtime_stats.last_network_frames,
+                   &g_runtime_stats.max_network_frames);
 }
 
 void runtime_service_get_stats(runtime_service_stats_t *stats) {
@@ -92,6 +146,7 @@ uint32_t runtime_service_run_pending(void) {
      * the current single-core runtime. */
     g_runtime_work_pending = 0;
     g_runtime_stats.last_work = work;
+    runtime_service_clear_last_work_metrics();
 
     if (work == 0U) {
         g_runtime_stats.empty_run_count++;
