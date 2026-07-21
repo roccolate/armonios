@@ -52,6 +52,7 @@ void runtime_service_reset(void);
 void runtime_service_configure_timing(uint64_t counter_frequency_hz,
                                       uint64_t budget_ticks);
 void runtime_service_report_metric(uint32_t metric, uint32_t value);
+void runtime_service_report_redraw(void);
 void runtime_service_report_input_queue(uint32_t depth, uint32_t high_water,
                                         uint64_t overflow_count);
 void runtime_service_get_stats(runtime_service_stats_t *stats);
