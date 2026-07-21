@@ -39,16 +39,24 @@ if grep -Eq 'uart_pump_input|kernel_on_timer_tick|kernel_io_poll_|board_input_po
     exit 1
 fi
 
+if grep -Eq 'g_runtime_(service_active|input_phase_active|network_phase_active|network_budget_exhausted|network_frames)' "${runtime_source}"; then
+    echo "runtime compaction reintroduced duplicate phase or budget state" >&2
+    exit 1
+fi
+
 grep -Fq 'RUNTIME_WORK_PERIODIC | RUNTIME_WORK_INPUT' "${timer_source}"
 grep -Fq 'RUNTIME_WORK_NETWORK' "${timer_source}"
 grep -Fq '#define input_queue_poll runtime_service_input_poll' "${io_service_source}"
-grep -Fq 'runtime_service_request(RUNTIME_WORK_INPUT)' "${runtime_source}"
+grep -Fq 'runtime_service_requeue_budget(' "${runtime_source}"
+grep -Fq 'RUNTIME_WORK_INPUT,' "${runtime_source}"
+grep -Fq '&g_runtime_stats.input_budget_exhaustion_count' "${runtime_source}"
 grep -Fq 'RUNTIME_INPUT_EVENT_BUDGET' "${runtime_source}"
-grep -Fq 'runtime_service_request(RUNTIME_WORK_NETWORK)' "${runtime_source}"
+grep -Fq 'RUNTIME_WORK_NETWORK,' "${runtime_source}"
+grep -Fq '&g_runtime_stats.network_budget_exhaustion_count' "${runtime_source}"
 grep -Fq 'RUNTIME_NETWORK_FRAME_BUDGET' "${runtime_source}"
 grep -Fq 'runtime_service_report_metric(RUNTIME_METRIC_NETWORK_FRAMES, 1U)' "${network_source}"
 grep -Fq 'runtime_service_report_metric(RUNTIME_METRIC_DEVICE_POLLS, 1U)' "${usb_hid_source}"
 grep -Fq 'runtime_service_report_redraw()' "${display_source}"
 grep -Fq 'RUNTIME_METRIC_DAMAGE_ITEMS' "${runtime_source}"
 grep -Fq 'RUNTIME_METRIC_FULL_REDRAWS' "${runtime_source}"
-echo "timer IRQ boundary, input/network budgets, and runtime metric wiring: ok"
+echo "timer IRQ boundary, compact input/network budgets, and runtime metric wiring: ok"
