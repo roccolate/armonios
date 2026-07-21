@@ -7,12 +7,9 @@
 /*
  * Tests for the kernel-wide HID state: reset and poll-all.
  *
- * The poll loop iterates every registered device and calls
- * usb_hid_poll_device, which in turn calls into the bus driver.
- * The bus driver cannot be exercised from host tests, so we only
- * verify the loop bookkeeping: reset clears the count, poll-all
- * does not crash on an empty state, and the state survives a
- * reset+init round trip.
+ * The poll loop iterates registered devices and calls usb_hid_poll_device,
+ * which in turn calls into the bus driver. Host tests use empty endpoint
+ * records, but still verify reset bookkeeping and the fixed scan bound.
  */
 
 void test_hid_state_reset_clears_count(void) {
@@ -39,6 +36,15 @@ void test_hid_poll_all_returns_zero_on_empty_state(void) {
     usb_hid_state_reset();
     int n = usb_hid_poll_all();
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)n);
+    TEST_ASSERT_EQUAL_UINT64(0, usb_hid_test_poll_iterations());
+
+    /* A corrupted public count must not scan beyond the fixed device array. */
+    g_usb_hid_state.count = UINT8_MAX;
+    n = usb_hid_poll_all();
+    TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)n);
+    TEST_ASSERT_EQUAL_UINT64(USB_HID_POLL_BUDGET,
+                             usb_hid_test_poll_iterations());
+    usb_hid_state_reset();
 }
 
 void test_hid_state_count_field_is_accessible(void) {
@@ -51,6 +57,6 @@ void test_hid_state_count_field_is_accessible(void) {
 }
 
 void test_hid_max_devices_constant_is_sane(void) {
-    /* The state holds 4 devices; we should never go beyond. */
     TEST_ASSERT_EQUAL_UINT64(4, USB_HID_MAX_DEVICES);
+    TEST_ASSERT_EQUAL_UINT64(USB_HID_MAX_DEVICES, USB_HID_POLL_BUDGET);
 }
