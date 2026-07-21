@@ -25,7 +25,6 @@ typedef struct {
 } irq_handler_entry_t;
 
 static irq_handler_entry_t g_irq_handlers[IRQ_HANDLER_SLOTS];
-static volatile uint32_t g_runtime_work_pending;
 static runtime_service_stats_t g_runtime_stats;
 static uint8_t g_runtime_phase;
 
@@ -43,7 +42,6 @@ void runtime_service_reset(void) {
     uint64_t frequency = g_runtime_stats.counter_frequency_hz;
     uint64_t budget = g_runtime_stats.budget_ticks;
 
-    g_runtime_work_pending = 0;
     g_runtime_phase = 0;
     g_runtime_stats = (runtime_service_stats_t){0};
     g_runtime_stats.counter_frequency_hz = frequency;
@@ -106,25 +104,26 @@ void runtime_service_report_input_queue(uint32_t depth, uint32_t high_water,
 void runtime_service_get_stats(runtime_service_stats_t *stats) {
     if (stats != 0) {
         *stats = g_runtime_stats;
-        stats->pending_work = g_runtime_work_pending;
     }
 }
 
 void runtime_service_request(uint32_t work) {
     uint32_t accepted = work & RUNTIME_WORK_ALL;
+    uint32_t pending;
 
     if (accepted == 0U) {
         return;
     }
+    pending = g_runtime_stats.pending_work;
     g_runtime_stats.request_count++;
-    if ((g_runtime_work_pending & accepted) != 0U) {
+    if ((pending & accepted) != 0U) {
         g_runtime_stats.coalesced_request_count++;
     }
-    g_runtime_work_pending |= accepted;
+    g_runtime_stats.pending_work = pending | accepted;
 }
 
 static void runtime_service_requeue_budget(uint32_t work, uint64_t *counter) {
-    if ((g_runtime_work_pending & work) == 0U) {
+    if ((g_runtime_stats.pending_work & work) == 0U) {
         (*counter)++;
         runtime_service_request(work);
     }
@@ -175,11 +174,11 @@ int runtime_service_virtio_net_recv(virtio_net_device_t *device, void *data,
 }
 
 uint32_t runtime_service_run_pending(void) {
-    uint32_t work = g_runtime_work_pending;
+    uint32_t work = g_runtime_stats.pending_work;
     uint64_t started;
     uint64_t duration;
 
-    g_runtime_work_pending = 0;
+    g_runtime_stats.pending_work = 0;
     g_runtime_stats.last_work = work;
     g_runtime_phase = 0;
     for (uint32_t i = 0; i < RUNTIME_METRIC_COUNT; i++) {
@@ -192,11 +191,9 @@ uint32_t runtime_service_run_pending(void) {
     }
 
     started = runtime_service_counter_now();
-    g_runtime_phase = RUNTIME_PHASE_ACTIVE;
     if ((work & (RUNTIME_WORK_PERIODIC | RUNTIME_WORK_INPUT)) != 0U) {
-        if ((work & RUNTIME_WORK_INPUT) != 0U) {
-            g_runtime_phase |= RUNTIME_PHASE_INPUT;
-        }
+        g_runtime_phase = RUNTIME_PHASE_ACTIVE |
+                          (work & RUNTIME_WORK_INPUT);
         kernel_on_timer_tick();
     }
     if ((work & RUNTIME_WORK_NETWORK) != 0U) {
@@ -216,7 +213,7 @@ uint32_t runtime_service_run_pending(void) {
         duration > g_runtime_stats.budget_ticks) {
         g_runtime_stats.over_budget_count++;
     }
-    if (g_runtime_work_pending != 0U) {
+    if (g_runtime_stats.pending_work != 0U) {
         g_runtime_stats.requeue_count++;
     }
     return work;
