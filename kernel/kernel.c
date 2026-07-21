@@ -17,6 +17,7 @@
 #include "kernel/fat32.h"
 #include "kernel/gui.h"
 #include "kernel/init_status.h"
+#include "kernel/io_service.h"
 #include "kernel/ipc.h"
 #include "kernel/irq.h"
 #include "kernel/kernel_compiler.h"
@@ -45,6 +46,14 @@ void kernel_main(uint64_t dtb_addr);
 
 static fat32_fs_t g_fat32_fs;
 
+void kernel_io_poll_input_sources(uint8_t include_uart) {
+    if (include_uart != 0) {
+        input_uart_poll();
+    }
+    board_input_poll();
+    usb_hid_poll_all();
+}
+
 static int desktop_has_keyboard_focus(void) {
     gui_desktop_t *desktop = gui_desktop();
 
@@ -61,9 +70,7 @@ static void console_input_thread(void *arg) {
     (void)arg;
 
     for (;;) {
-        input_uart_poll();
-        board_input_poll();
-        usb_hid_poll_all();
+        kernel_io_poll_input_sources(1);
 
         input_event_t event;
         while (!desktop_has_keyboard_focus() &&
@@ -327,8 +334,7 @@ static void poll_input_events(void) {
 
 /* Timer IRQ work that must happen even when no userspace thread is running. */
 void kernel_on_timer_tick(void) {
-    board_input_poll();
-    usb_hid_poll_all();
+    kernel_io_poll_input_sources(0);
     poll_input_events();
     net_poll();
 }
@@ -350,7 +356,7 @@ static int enable_identity_mmu(const dtb_memory_t *memory, uint64_t dtb_addr) {
      * that user data and PMM allocations are never executable.
      */
     if (vmm_map_kernel_identity(kernel_pgd, memory->base, memory->size,
-                                 board_map_mmio) != 0) {
+                                board_map_mmio) != 0) {
         uart_puts("VMM map: failed\n");
         return -1;
     }
