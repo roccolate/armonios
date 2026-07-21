@@ -38,7 +38,7 @@
 #define VIRTIO_STATUS_FAILED            128U
 #define VIRTQ_DESC_F_NEXT               1U
 #define VIRTQ_DESC_F_WRITE              2U
-#define VIRTIO_INPUT_QUEUE_SIZE         16U
+#define VIRTIO_INPUT_QUEUE_SIZE         VIRTIO_INPUT_POLL_BUDGET
 
 #define VIRTIO_INPUT_EVENTQ             0
 
@@ -354,12 +354,21 @@ int virtio_input_has_events(virtio_input_device_t *device) {
 }
 
 int virtio_input_poll(virtio_input_device_t *device) {
-    if (device == 0 || !device->ready) {
+    uint32_t produced = 0;
+
+    if (device == 0 || !device->ready || device->queue_size == 0U ||
+        device->queue_size > VIRTIO_INPUT_QUEUE_SIZE) {
         return -1;
     }
 
-    while (device->last_used_idx != g_used.idx) {
+    for (uint32_t processed = 0;
+         processed < device->queue_size &&
+         processed < VIRTIO_INPUT_POLL_BUDGET;
+         processed++) {
         mb();
+        if (device->last_used_idx == g_used.idx) {
+            break;
+        }
 
         uint16_t used_slot = device->last_used_idx % device->queue_size;
         uint32_t desc_id = g_used.ring[used_slot].id;
@@ -387,7 +396,9 @@ int virtio_input_poll(virtio_input_device_t *device) {
                 event.data.mouse_button.button =
                     (uint32_t)(ev->code - VIRTIO_INPUT_BTN_LEFT);
                 event.data.mouse_button.pressed = (ev->value != 0) ? 1U : 0U;
-                input_queue_push(&event);
+                if (input_queue_push(&event) == 0) {
+                    produced++;
+                }
                 break;
             }
             {
@@ -422,7 +433,9 @@ int virtio_input_poll(virtio_input_device_t *device) {
                 }
                 if (key != 0) {
                     event.data.key.key = key;
-                    input_queue_push(&event);
+                    if (input_queue_push(&event) == 0) {
+                        produced++;
+                    }
                 }
             }
             break;
@@ -436,7 +449,9 @@ int virtio_input_poll(virtio_input_device_t *device) {
                     event.data.mouse_move.dx = 0;
                     event.data.mouse_move.dy = ev->value;
                 }
-                input_queue_push(&event);
+                if (input_queue_push(&event) == 0) {
+                    produced++;
+                }
             }
             break;
         case VIRTIO_INPUT_EV_ABS:
@@ -456,5 +471,23 @@ int virtio_input_poll(virtio_input_device_t *device) {
         virtio_write32(device->base, VIRTIO_MMIO_QUEUE_NOTIFY, VIRTIO_INPUT_EVENTQ);
     }
 
-    return 0;
+    return (int)produced;
 }
+
+#ifdef ARMONIOS_TEST
+void virtio_input_test_set_used_idx(uint16_t used_idx) {
+    g_used.idx = used_idx;
+}
+
+void virtio_input_test_set_event(uint16_t used_slot, uint32_t desc_id,
+                                 uint16_t type, uint16_t code, int32_t value) {
+    if (used_slot >= VIRTIO_INPUT_QUEUE_SIZE ||
+        desc_id >= VIRTIO_INPUT_QUEUE_SIZE) {
+        return;
+    }
+    g_used.ring[used_slot].id = desc_id;
+    g_events[desc_id].type = type;
+    g_events[desc_id].code = code;
+    g_events[desc_id].value = value;
+}
+#endif
