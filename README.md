@@ -1,11 +1,12 @@
 # ArmoniOS
 
-> A small freestanding AArch64 operating system with a graphical QEMU desktop, inspired by KolibriOS and MenuetOS.
+> A small freestanding AArch64 operating system with a graphical QEMU desktop,
+> inspired by the compact, direct design of KolibriOS and MenuetOS.
 
-[![License: GPL-2.0](https://img.shields.io/badge/License/GPL%202.0-blue.svg)](LICENSE)
-[![Architecture](https://img.shields.io/badge/arch/AArch64-green.svg)]()
-[![Language](https://img.shields.io/badge/lang/C%20%2B%20ASM-orange.svg)]()
-[![Status](https://img.shields.io/badge/status/v0.1%20QEMU%20desktop-blue.svg)]()
+[![License: GPL-2.0](https://img.shields.io/badge/License-GPL--2.0-blue.svg)](LICENSE)
+[![Architecture](https://img.shields.io/badge/arch-AArch64-green.svg)]()
+[![Language](https://img.shields.io/badge/lang-C%20%2B%20ASM-orange.svg)]()
+[![Status](https://img.shields.io/badge/status-v0.1%20QEMU%20baseline-blue.svg)]()
 
 <p align="center">
   <img src="docs/assets/armin.png" alt="Armin, the ArmoniOS mascot" width="128">
@@ -15,41 +16,77 @@
 
 ![ArmoniOS QEMU desktop preview](docs/assets/qemu-desktop-preview.png)
 
-## Project status
+## Current status
 
-ArmoniOS is currently a **v0.1 QEMU desktop baseline**. It is a real bare-metal operating system, not a hosted application or Linux distribution. The v0.1 claim applies to the QEMU desktop baseline, not to Raspberry Pi hardware support or production hardening.
+ArmoniOS is a **real bare-metal AArch64 operating system** with a verified QEMU
+`virt` desktop baseline. It is not a hosted Linux application and it is not a
+Linux distribution.
 
-The current codebase includes:
+The honest release classification is:
 
-- an AArch64 EL1 kernel and freestanding EL0 applications;
-- per-process page tables, process dispatch, syscalls, IPC, and anonymous mappings;
-- permission-aware kernel-to-user copy helpers with per-page PTE write checks;
-- per-process VFS file descriptors with central cleanup on exit, fault, and kill;
-- a kernel-owned window compositor with input, dragging, focus, backing buffers, and damage tracking;
-- `panel`, `shell`, `editor`, `files`, `monitor`, `control`, and `clock` applications;
-- bootfs, tmpfs, and a small FAT32 root-filesystem implementation;
+- **current public baseline:** v0.1 QEMU desktop;
+- **current engineering phase:** v0.2 cleanup and runtime hardening;
+- **product target:** v1.0 usable QEMU mini desktop;
+- **hardware status:** Raspberry Pi scaffolding only, not hardware-supported.
+
+The validated runtime tree from PR #41 was merged into `main` by `ea13f0e`.
+GitHub Actions validated the exact PR head `fedb070` before merge:
+
+- `Verify ArmoniOS` run `29824050151`: success;
+- `CI - Tests` run `29824050165`: success.
+
+The merge commit did not receive a separate workflow run. The evidence therefore
+applies to the merged code tree, not to an independently rerun merge commit.
+
+## What works now
+
+The current QEMU codebase includes:
+
+- AArch64 EL1 boot with DTB handoff;
+- physical memory, page tables, heap allocation, and kernel W^X mappings;
+- preemptive freestanding EL0 processes with private image, stack, anonymous
+  mappings, saved trap frames, parent PID, wait, kill, and zombie cleanup;
+- a small non-POSIX syscall ABI with permission-aware user-pointer validation;
+- process-local VFS descriptors with cleanup on exit, fault, and kill;
+- bootfs, tmpfs, and a writable root-only FAT32 bridge;
+- a kernel-owned window compositor with focus, dragging, minimize/restore,
+  backing buffers, damage tracking, input routing, and per-window event queues;
+- `panel`, `shell`, `editor`, `files`, `monitor`, `control`, and `clock` EL0
+  applications;
 - QEMU virtio block, GPU, input, and network paths;
-- PCI/xHCI and basic USB HID support;
-- native host tests for core kernel, VFS, filesystem, driver-parser, GUI, and ABI logic;
-- an automated `tools/verify.sh` baseline that includes the EL0 user-copy permissions host and QEMU gates, the process-local VFS descriptor host gate, the KLI1 mutable-storage contract gate, the BOARD=rpi4 build-contract gate, and the GUI focus-syscall QEMU gate.
+- PCI/xHCI enumeration and directly attached boot-protocol USB HID devices;
+- Ethernet, ARP, IPv4, UDP, and DHCP sufficient for a QEMU user-network lease;
+- one post-EOI deferred runtime service for timer-originated input, GUI, device,
+  and network work;
+- deterministic host, QEMU, size, stack, ABI, storage, GUI, USB, network, and
+  board-build gates under `tools/verify.sh`.
 
-Important limitations remain. In particular, Raspberry Pi support is not hardware-verified, FAT32 support is intentionally narrow, and Editor currently appears to show one visible text line in the manual desktop workflow.
+## Important limits
 
-The roadmap target is **v1.0: a usable QEMU mini desktop OS**. That is future work. Before v1, the project will focus on cleanup/hardening, a real storage/VFS platform, real FAT support, useful desktop apps, and an ext2 read-only path.
+ArmoniOS is an alpha-quality educational desktop kernel, not a production OS.
+The most important current limits are:
 
-Read these before making or evaluating claims:
+| Area | Current limit |
+|---|---|
+| Runtime platform | QEMU `virt` is the only verified runtime target. |
+| Physical memory | PMM manages at most 128 MiB. |
+| Processes | Fixed table of 16 process slots. |
+| User regions | Eight tracked regions per process. |
+| VFS | 24 nodes, four mounts, eight descriptors per process, 64-byte paths. |
+| FAT32 | Root directory only, short 8.3 names, no subdirectories or LFN. |
+| Editor | 512-byte buffer and only the caret line is rendered. |
+| Files | `/fat` only, at most eight displayed root entries. |
+| GUI | 16 windows, 32 queued events per window, no shared widget toolkit. |
+| Networking | No socket ABI, TCP, DNS API, or HTTP client. |
+| USB | Direct keyboard/mouse HID only; no hub support claim. |
+| Scheduling | EL0 is preemptive; EL1 helper threads are cooperative. |
+| Runtime service | Runs after EOI but before exception return, with IRQs masked and no per-pass budget yet. |
+| User copy | Permission checked, but final copies are not fault-recoverable. |
+| Raspberry Pi | Build/host verified scaffolding; no physical boot or storage claim. |
 
-- [Current State](docs/CURRENT_STATE.md) - audited operational truth and verification evidence
-- [Technical Risks](docs/TECHNICAL_RISKS.md) - active blockers and correctness risks
-- [Documentation Policy](docs/DOCUMENTATION_POLICY.md) - evidence and maintenance rules
-- [Study Guide](docs/STUDY_GUIDE.md) - suggested reading path for the educational core
-- [Roadmap](docs/ROADMAP.md) - ordered release work
-
-## What ArmoniOS is
-
-ArmoniOS is a compact monolithic ARM64 kernel intended to remain understandable and direct. It does not provide libc, POSIX compatibility, dynamic linking, or a hosted runtime. Applications are freestanding KLI1 images that invoke a small syscall ABI through `svc #0`.
-
-The primary supported development target is currently **QEMU `virt` with a Cortex-A72 CPU model**.
+See [Current State](docs/CURRENT_STATE.md) and
+[Technical Risks](docs/TECHNICAL_RISKS.md) for the exact evidence and exit
+criteria.
 
 ## Quick start
 
@@ -66,7 +103,7 @@ sudo apt update && sudo apt install -y \
   make
 ```
 
-### Build and run the automated baseline
+### Build and run the verified baseline
 
 ```bash
 git clone https://github.com/roccolate/armonios
@@ -74,15 +111,29 @@ cd armonios
 bash tools/verify.sh
 ```
 
-The script records the current commit, runs the kernel build, binary-size gate, the BOARD=rpi4 build-contract gate, native host tests, process-local VFS descriptor host gate, the standalone user-copy permissions host gate, the KLI1 mutable-storage contract gate, userland stack check, the FAT32 QEMU serial-marker storage smoke test, the EL0 user-copy permissions QEMU regression, the GUI focus-syscall QEMU gate, the per-subsystem marker gates (framebuffer, USB, network) under `tools/qemu_marker_test.sh all`, and the visible-desktop FAT+GPU wiring gate. It stops on the first failure.
+`tools/verify.sh` stops on the first failure and covers:
 
-Equivalent individual commands are:
+- QEMU and RPi4 build contracts;
+- `.data == 0` and the 108000-byte kernel limit;
+- RPi4 EMMC2 diagnostic, MBR, and partition-view host tests;
+- the native host suite;
+- deferred runtime-service coalescing, requeue, and EOI ordering;
+- parent/wait lifecycle, process-local FDs, user-copy permissions, and KLI1;
+- userland stack usage;
+- FAT32 QEMU smoke;
+- usercopy and focus QEMU regressions;
+- framebuffer, USB, and DHCP marker gates;
+- visible-target FAT + GPU wiring.
+
+Useful individual commands:
 
 ```bash
 make BOARD=qemu_virt
 make BOARD=qemu_virt size
 bash tests/run_board_build_test.sh
 make -C tests test
+bash tests/run_runtime_service_test.sh
+bash tests/run_process_parent_wait_test.sh
 bash tests/run_vfs_process_fd_test.sh
 bash tests/run_user_copy_permissions_test.sh
 bash tests/run_kli1_contract_test.sh
@@ -108,160 +159,135 @@ Exit QEMU with `Ctrl+A`, then `X`.
 make qemu-fb-visible
 ```
 
-This target builds and attaches the generated FAT32 virtio block image together with GPU, USB keyboard, and mouse devices. Existing manual evidence: rocco verified the complete create/edit/save/rename/reopen/delete workflow on 2026-07-17. No newer manual desktop check is recorded for the latest automated baseline.
-
-### Run the storage smoke test
-
-```bash
-make qemu-fs-test
-```
-
-This is the strongest current QEMU integration test because it captures guest serial output and checks explicit storage/FAT markers.
-
-### Run the user-copy permissions regression
-
-```bash
-bash tools/qemu_usercopy_test.sh
-```
-
-This QEMU gate boots a kernel whose EL0 crt0 probes a read-only image address through `sys_user_buf_out`, requires at least two `USERCOPY: RX output rejected` markers, and asserts that `panel: ready` and `clock: starting` still appear, proving the kernel rejected the invalid output buffer without halting. The serial log is written to `build-usercopy-test/qemu-usercopy-test.log`.
-
-Other QEMU launch targets exist:
-
-```bash
-make qemu-fb
-make qemu-usb
-make qemu-net
-```
-
-At present these are runtime launch targets. Use `bash tools/qemu_marker_test.sh all` or `bash tools/verify.sh` when you need deterministic pass/fail evidence and captured serial logs.
-
-## Current Verified Local Baseline
-
-The latest local automated verification was `bash tools/verify.sh`, run at
-`2026-07-19T01:05:06Z` on the v0.1 source tree before the public-history reset.
-The current public first commit is `78b9d45` (`v0.1`) and is intended to
-represent that baseline; rerun `bash tools/verify.sh` before promoting a newer
-baseline.
-
-```text
-make                              passed
-make size                         kernel.bin: 106524 bytes, limit 108000
-make -C tests test                ALL TESTS PASSED (0)
-tests/run_vfs_process_fd_test.sh  process-local VFS descriptors + exit cleanup PASS
-tests/run_user_copy_permissions_test.sh  writable / ERR_PERM / mixed atomicity PASS
-make stack-check                  maximum 368 bytes, limit 3072
-make qemu-fs-test                 storage: initialized + FAT32: mounted + /fat mounted
-tools/qemu_usercopy_test.sh       7 EL0 probes rejected, panel: ready + clock: starting
-tools/qemu_focus_test.sh          6 focus transitions across 6 distinct windows
-tools/qemu_marker_test.sh all     fb (VIRTIO gpu + panel: ready)
-                                  usb (controller + enumeration + 2 HID devices)
-                                  net (network: initialized + DHCP ack)
-tools/qemu_fb_fat_test.sh         FAT32 + GPU + panel: ready in one boot
-```
-
-Record the exact commit and serial log when promoting a newer baseline. The
-visible Files/Editor/FAT workflow has existing manual evidence from 2026-07-17,
-with a known Editor single-visible-line polish note. See `docs/CURRENT_STATE.md`
-for the per-subsystem evidence and scope.
+The target attaches the generated FAT32 image with GPU, USB keyboard, and mouse.
+The latest recorded manual workflow is from 2026-07-17: Files listed `/fat`,
+created an 8.3 file, opened Editor, typed and saved content, closed, renamed,
+reopened with content intact, deleted, and refreshed without stale title-bar
+artifacts. That evidence is intentionally separate from automated serial-marker
+checks.
 
 ## Architecture summary
 
 ```text
 boot/start.S
-  -> early stack, exception vectors, BSS clear
+  -> early stack, vectors, BSS clear
   -> kernel_main
        -> board/UART and DTB memory discovery
        -> PMM, heap, VMM/MMU
        -> VFS, bootfs, tmpfs
-       -> IRQ, timer, process dispatch
-       -> optional storage, display, network, input, USB
+       -> timer, IRQ, process dispatch, runtime-service state
+       -> optional storage, display, network, input, PCI, USB
        -> launch panel in EL0
        -> cooperative EL1 helper scheduler
+
+physical timer IRQ
+  -> account and rearm
+  -> publish coalescible periodic work
+  -> scheduler accounting
+  -> EOI
+  -> non-preemptible runtime-service pass
+  -> EL0 dispatch
+  -> exception return
 ```
 
-EL0 processes are preempted through IRQ trap frames. EL1 helper threads are currently cooperative.
+EOI releases the interrupt controller, but the runtime service still executes in
+EL1 exception context. IRQs remain masked and EL0 remains paused until that pass,
+process dispatch, and `eret` complete. This distinction is tracked by
+`RISK-017`.
 
-Each process has its own TTBR0 root, image, stack, and anonymous mappings. The current process tables also identity-map the detected RAM range for EL1 with kernel W^X permissions: text RX, rodata R/NX, data+bss+stack RW/NX, MMIO device+NX, and remaining RAM RW/NX. Future hardening should move shared kernel mappings to TTBR1, add ASIDs, and use scoped TLB invalidation.
+## Storage and applications
 
-Output-producing syscalls route user-pointer writes through `kernel/syscall_helpers.c`, which validates every covered page of the destination against the process's own L3 page table and rejects non-writable ranges with `ERR_PERM` before any byte is copied. The VFS layer records an `owner_pid` per open file and routes every fd operation through that owner check; descriptors are reclaimed through `process_mark_exited`.
+The current FAT32 path supports 512-byte sectors, root-directory 8.3 files,
+cluster-chain growth, create/read/write/list/rename/delete, and dynamic
+`/fat/<name>` VFS nodes. It is deliberately not described as general FAT.
 
-See [Architecture](docs/ARCHITECTURE.md), [Memory Map](docs/MEMORY_MAP.md), and [Syscalls](docs/SYSCALLS.md).
+The applications are useful demonstrations, not complete daily tools:
 
-## Filesystem scope
+- **Files:** root-only `/fat` browser and 8.3 create/rename/delete/open flow;
+- **Editor:** small text buffer with caret movement and save, but only one line is
+  rendered at a time;
+- **Shell:** history, scrollback, `pwd`, `cd`, `ls`, `cat`, `run`, `kill`, `mem`,
+  `ps`, and `ticks`;
+- **Panel:** launcher, taskbar, focus, minimize, and restore integration;
+- **Monitor, Control, Clock:** compact system and desktop demonstrations.
 
-The current FAT32 implementation supports:
-
-- 512-byte sectors;
-- short 8.3 names;
-- root-directory files;
-- create, read, write, rename, delete, and list;
-- dynamic `/fat/<name>` VFS nodes.
-
-It does not claim long-file-name support, directories, partition discovery, crash consistency, or broad FAT32 interoperability.
-
-Per-process VFS file descriptors are now isolated and reclaimed on exit/fault/kill.
-
-The v1 storage direction is different from the current implementation: `/fat`
-should become a real writable FAT volume with long names and directories, and
-`/ext` should mount an ext2 volume at least read-only. Neither claim is current
-behavior.
-
-## Application format
-
-Shipping applications are linked as flat KLI1 images with a fixed header and entry table. The current format is tested for the seven included applications and explicitly forbids mutable static `.data` / `.bss`: `programs/apps/image.ld` `ASSERT`s both sections are empty, and `tests/run_kli1_contract_test.sh` confirms the seven shipping ELFs link clean and that a regression `.bss` source is rejected with a clear `KLI1 forbids .bss` message. Apps that need mutable state obtain it through `SYS_MMAP` at runtime.
+The v1 path requires a real storage platform, long names, directories, ext2
+read-only support, shared userland helpers/widgets, and substantially more useful
+applications.
 
 ## Raspberry Pi status
 
-Raspberry Pi 4 and 5 are planned targets only.
+The `rpi4` backend and an opt-in read-only EMMC2 diagnostic image build and pass
+host tests. The normal board advertises no storage, display, or input capability
+that has not been proven on hardware.
 
-The `rpi4` board backend now compiles and links cleanly under the v0.1 size gate via `tests/run_board_build_test.sh` (the `board-rpi4` gate in `tools/verify.sh`). virtio-input is wired with explicit safe-failure stubs because the hardware-track bring-up does not expose a virtio-input device yet; the kernel still works with serial input alone.
+ArmoniOS does **not** currently claim:
 
-The repository does **not** claim that ArmoniOS boots on physical Raspberry Pi hardware. The eMMC driver remains experimental scaffolding and the storage milestone (RISK-007) still requires a physical serial capture and sector read on real hardware per `docs/DOCUMENTATION_POLICY.md` and `docs/PORTING.md`. Do not describe ArmoniOS as running on Raspberry Pi until those hardware criteria are satisfied.
+- physical Raspberry Pi 4 or Raspberry Pi 5 boot support;
+- working SD/eMMC reads or writes on real hardware;
+- Raspberry Pi framebuffer or input support;
+- an installable Raspberry Pi desktop image.
 
-## Release direction
+Physical evidence must follow [Porting](docs/PORTING.md) and the
+[Documentation Policy](docs/DOCUMENTATION_POLICY.md).
 
-The current release milestone is a repeatable **v0.1 QEMU desktop baseline**.
-The next product milestone is **v1.0 usable QEMU desktop OS**, reached through
-the staged roadmap in `docs/ROADMAP.md`.
+## Documentation map
 
-Near-term work is cleanup and hardening first: syscall copy ownership, VFS/FAT
-decoupling, RPi storage fail-closed behavior, and small regressions. After that,
-storage and application work should make Files, Editor, Shell, Settings,
-Monitor, Panel, and Clock useful enough for a normal short desktop session.
+- [Current State](docs/CURRENT_STATE.md) — operational truth and verification record
+- [Technical Risks](docs/TECHNICAL_RISKS.md) — active risks and exit criteria
+- [Roadmap](docs/ROADMAP.md) — ordered work toward v1.0
+- [Architecture](docs/ARCHITECTURE.md) — implemented kernel structure
+- [Deferred Runtime Service](docs/RUNTIME_SERVICE.md) — timer/bottom-half contract
+- [Memory Map](docs/MEMORY_MAP.md) — mappings and address-space policy
+- [Syscalls](docs/SYSCALLS.md) — current non-POSIX ABI
+- [GUI ABI Notes](docs/GUI_ABI_NOTES.md) — windows, events, and ownership
+- [Documentation Policy](docs/DOCUMENTATION_POLICY.md) — evidence terminology
+- [Study Guide](docs/STUDY_GUIDE.md) — educational reading path
+- [Contributing](docs/CONTRIBUTING.md) — development workflow
+- [Porting](docs/PORTING.md) — board-boundary and hardware evidence rules
 
-Both syscall-boundary P0 risks (`RISK-001` and `RISK-002`) are closed; the deterministic QEMU gate scaffold (`RISK-005`) is covered by the current automated baseline; the visible-desktop FAT workflow and editor focus risks (`RISK-003` and `RISK-004`) are closed with manual evidence; and GitHub Actions reproducibility (`RISK-011`) is closed with a hosted run and QEMU log artifact. See `docs/TECHNICAL_RISKS.md` for the recorded evidence.
+## Road to v1.0
 
-No QEMU v0.1 blocker is currently open. Hardware-track risks remain outside the QEMU baseline scope.
+The next sequence is deliberate:
 
-See [Roadmap](docs/ROADMAP.md).
+1. bound and instrument the deferred runtime service;
+2. complete v0.2 promotion evidence;
+3. build the v0.3 block/VFS/path platform;
+4. replace the root-only bridge with real FAT support;
+5. add a shared userland runtime and widgets;
+6. make Files, Editor, Shell, Settings, Monitor, Panel, and Clock useful;
+7. mount ext2 read-only;
+8. stabilize, fuzz, document, and record a final manual workflow.
+
+See [Roadmap](docs/ROADMAP.md) for milestone gates and dependencies.
 
 ## Project structure
 
 ```text
 boot/                 AArch64 entry and early setup
-kernel/               kernel core, memory, processes, syscalls, VFS, GUI
-kernel/mm/            PMM, VMM, heap
+kernel/               kernel core, exceptions, processes, syscalls, VFS, GUI
+kernel/mm/            PMM, VMM, and heap
 kernel/sched/         cooperative EL1 helper-thread scheduler
 drivers/              board boundary and device drivers
-drivers/boards/       QEMU reference board and experimental board ports
-programs/apps/         freestanding desktop applications
-programs/libkarm/      syscall and small userland runtime helpers
+drivers/boards/       QEMU reference backend and experimental board ports
+programs/apps/         freestanding KLI1 desktop applications
+programs/libkarm/      syscall and small userland helpers
 programs/libkarmdesk/  GUI wrappers
-tests/                native host test suite
-tools/                host build and verification utilities
+tests/                native host and contract tests
+tools/                build, QEMU, and verification utilities
 linker/               kernel linker scripts
-docs/                 architecture, ABI, status, risks, and maintenance policy
+docs/                 architecture, ABI, status, risks, and policy
 ```
 
 ## Design principles
 
-- Keep the kernel small and readable.
-- Prefer explicit C and narrow AArch64 assembly boundaries.
+- Keep the kernel small, explicit, and readable.
+- Prefer direct C and narrow AArch64 assembly boundaries.
 - Treat QEMU as the regression platform until hardware is proven.
-- Do not confuse implemented code with verified behavior.
-- Add tests and update documentation in the same change as public behavior.
-- Port ideas from classic small operating systems, not architecture-specific source code.
+- Separate implemented code from verified runtime behavior.
+- Keep hard IRQ callbacks bounded.
+- Add tests and documentation in the same change as public behavior.
+- Port design ideas from classic small operating systems, not architecture-specific source code.
 
 ## License
 
