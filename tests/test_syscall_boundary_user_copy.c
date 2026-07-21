@@ -37,13 +37,6 @@ static int text_equals(const char *actual, const char *expected) {
     }
 }
 
-static int pointer_in_range(uint64_t pointer, const void *start,
-                            uint64_t size) {
-    uint64_t first = (uint64_t)(uintptr_t)start;
-
-    return pointer >= first && pointer < first + size;
-}
-
 static void store_u64(uint8_t *dst, uint64_t value) {
     for (uint32_t i = 0; i < sizeof(uint64_t); i++) {
         dst[i] = (uint8_t)(value >> (i * 8U));
@@ -56,7 +49,7 @@ static void test_syscall_boundary_copies(void) {
     uint8_t *user_ro = 0;
     uint64_t *pgd;
     process_t process;
-    syscall_kernel_argv_t kernel_argv;
+    panel_boot_argv_t kernel_argv;
     uint64_t rw_base;
     uint64_t ro_base;
     static const char arg0[] = "editor";
@@ -99,16 +92,11 @@ static void test_syscall_boundary_copies(void) {
 
     CHECK_EQ(0, sys_copy_argv_from_user(&process, rw_base + 128U, 2U,
                                         &kernel_argv));
-    CHECK_TRUE(pointer_in_range(kernel_argv.pointers[0], kernel_argv.bytes,
-                                sizeof(kernel_argv.bytes)));
-    CHECK_TRUE(pointer_in_range(kernel_argv.pointers[1], kernel_argv.bytes,
-                                sizeof(kernel_argv.bytes)));
-    CHECK_TRUE(!pointer_in_range(kernel_argv.pointers[0], user_rw, PAGE_SIZE));
-    CHECK_TRUE(!pointer_in_range(kernel_argv.pointers[1], user_rw, PAGE_SIZE));
-    CHECK_TRUE(text_equals((const char *)(uintptr_t)kernel_argv.pointers[0],
-                           arg0));
-    CHECK_TRUE(text_equals((const char *)(uintptr_t)kernel_argv.pointers[1],
-                           arg1));
+    CHECK_EQ(0U, kernel_argv.offsets[0]);
+    CHECK_EQ(sizeof(arg0), kernel_argv.offsets[1]);
+    CHECK_EQ(sizeof(arg0) + sizeof(arg1), kernel_argv.bytes_used);
+    CHECK_TRUE(text_equals(&kernel_argv.bytes[kernel_argv.offsets[0]], arg0));
+    CHECK_TRUE(text_equals(&kernel_argv.bytes[kernel_argv.offsets[1]], arg1));
     CHECK_EQ(ERR_INVAL,
              sys_copy_argv_from_user(&process, rw_base + 128U,
                                      PANEL_BOOT_ARGV_MAX_STRINGS + 1U,
