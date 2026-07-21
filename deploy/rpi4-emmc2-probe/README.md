@@ -45,6 +45,10 @@ cd build-rpi4-emmc2-probe/package
 sha256sum -c SHA256SUMS
 ```
 
+The packaging command rejects an image larger than 108000 bytes before copying
+or hashing it. Override `KERNEL_SIZE_LIMIT` only for an intentional size-policy
+experiment, not for a normal probe build.
+
 ## Download the CI package
 
 The `Verify ArmoniOS` workflow publishes an artifact named:
@@ -113,31 +117,38 @@ actual bytes and does not treat a different value as a driver failure.
 
 ## Failure telemetry
 
-When `init` or `read0` returns a negative result, the probe prints four bounded
-diagnostic lines:
+When `init` or `read0` returns a negative result, the probe prints one bounded
+line:
 
 ```text
-EMMC2 probe: diag command <name-or-none> <index> argument <hex>
-EMMC2 probe: diag read-offset <hex> write-offset <hex> write-value <hex>
-EMMC2 probe: diag present <hex> clock-reset <hex> host-power <hex> actual-clock <hz>
-EMMC2 probe: diag int-now <hex> int-last <hex>
+EMMC2 diag c <command|-1> a <argument> r <read-offset> p <present> k <clock-reset> h <host-power> i <last-interrupt> f <actual-clock-hz>
 ```
 
-The adapter observes the real 32-bit MMIO accesses. It does not synthesize a
-command response or interrupt. The only synthetic values remain the two
-`broken-cd` presence bits returned from reads of offset `0x24`; the raw register
-value is retained in `diag present`.
+The fields are deliberately compact to keep `kernel8.img` under the 108000-byte
+limit:
 
-Useful offset interpretations:
+- `c`: last SD command index; `-1` means no command reached the controller;
+- `a`: last command argument;
+- `r`: last MMIO offset read by the SDHCI driver;
+- `p`: raw `PRESENT_STATE` before the two `broken-cd` bits are supplied;
+- `k`: current clock/reset register;
+- `h`: current host-control/power register pair;
+- `i`: last non-zero `INT_STATUS`, retained after acknowledgement;
+- `f`: actual card clock selected by the driver.
 
-- `read-offset 0x24` before any command: card-detect or command/data-inhibit wait;
-- `read-offset 0x2c` before any command: controller reset or clock stabilization;
-- `read-offset 0x30` after a command: response, data-ready, or data-end interrupt;
-- `write-offset 0x0c`: the encoded transfer-mode and command write;
-- command `CMD17`: the sector-zero read reached the data path.
+The adapter observes real 32-bit MMIO accesses. It does not synthesize a command
+response or interrupt. The only synthetic values remain the two `broken-cd`
+presence bits returned from reads of offset `0x24`; the raw value is reported in
+`p`.
 
-`int-last` preserves the last non-zero interrupt status even if the driver
-acknowledges it before printing. Relevant SDHCI error bits are:
+Useful interpretations:
+
+- `c -1` and `r 0x2c`: controller reset or clock stabilization;
+- `c -1` and `r 0x24`: card-detect or command/data-inhibit wait before CMD0;
+- `r 0x30` after a command: response, data-ready, or data-end interrupt wait;
+- `c 17`: the sector-zero read reached CMD17.
+
+Relevant `i` error bits are:
 
 - `0x00010000`: command timeout;
 - `0x00020000`: command CRC;
@@ -159,9 +170,9 @@ Failure localization is explicit:
 - absence of `EMMC2 probe: broken-cd assume-present` means the expected opt-in
   probe image was not reached;
 - `EMMC2 probe: init <negative>` means SDHCI/card initialization failed and is
-  followed by diagnostic lines;
+  followed by `EMMC2 diag`;
 - `EMMC2 probe: read0 <negative>` means initialization succeeded but sector-0
-  transfer failed and is followed by diagnostic lines.
+  transfer failed and is followed by `EMMC2 diag`.
 
 ## Evidence to record
 
