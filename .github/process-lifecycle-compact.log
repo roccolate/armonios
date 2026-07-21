@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/home/runner/work/armonios/armonios/.github/scripts/compact_process_lifecycle.py", line 185, in <module>
+    replace_once(
+  File "/home/runner/work/armonios/armonios/.github/scripts/compact_process_lifecycle.py", line 18, in replace_once
+    raise RuntimeError(f"{path}: expected one match, got {count}: {old!r}")
+RuntimeError: tests/run_process_parent_wait_test.sh: expected one match, got 0: '    "${repo_root}/kernel/process.c" \\\n    "${repo_root}/kernel/process_lifecycle.c" \\\n    -o "${binary}"\n'
