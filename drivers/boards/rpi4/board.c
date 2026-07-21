@@ -8,7 +8,10 @@
 
 #if defined(ARMONIOS_RPI4_EMMC2_PROBE)
 #include "boards/rpi4/emmc2_probe_diag.h"
+#include "kernel/fat32.h"
+#include "storage/block_view.h"
 #include "storage/emmc.h"
+#include "storage/mbr.h"
 #endif
 
 static uint32_t g_emmc2_clock_hz;
@@ -16,6 +19,8 @@ static uint32_t g_emmc2_clock_hz;
 #if defined(ARMONIOS_RPI4_EMMC2_PROBE)
 static emmc_device_t g_emmc2_probe_device;
 static rpi4_emmc2_probe_diag_t g_emmc2_probe_diag;
+static fat32_fs_t g_emmc2_probe_fat32;
+static block_view_t g_emmc2_probe_view;
 static uint8_t g_emmc2_sector0[EMMC_BLKSZ] __attribute__((aligned(16)));
 
 static void rpi4_emmc2_probe_delay_us(void *context, uint32_t usec) {
@@ -31,6 +36,67 @@ static void rpi4_emmc2_probe_delay_us(void *context, uint32_t usec) {
     do {
         __asm__ volatile("mrs %0, cntpct_el0" : "=r"(now));
     } while (now - start < ticks);
+}
+
+static int rpi4_emmc2_probe_read_sector(void *context, uint32_t lba,
+                                                uint8_t *buffer) {
+    return emmc_read_sector((emmc_device_t *)context, lba, 1U, buffer);
+}
+
+static int rpi4_emmc2_probe_mount_fat32(uint32_t base_lba,
+                                         uint32_t sector_count) {
+    if (block_view_init(&g_emmc2_probe_view,
+                        rpi4_emmc2_probe_read_sector, 0,
+                        &g_emmc2_probe_device, base_lba,
+                        sector_count) != 0 ||
+        fat32_mount(&g_emmc2_probe_fat32,
+                    block_view_read_sector,
+                    &g_emmc2_probe_view) != 0 ||
+        g_emmc2_probe_fat32.total_sectors > sector_count) {
+        g_emmc2_probe_fat32.mounted = 0U;
+        return -1;
+    }
+    return 0;
+}
+
+static void rpi4_emmc2_probe_print_fat32(void) {
+    mbr_partition_t partition;
+    uint32_t layout = 0U;
+    uint32_t base_lba = 0U;
+    uint8_t type = 0U;
+
+    if (rpi4_emmc2_probe_mount_fat32(0U, UINT32_MAX) != 0) {
+        if (mbr_find_fat32_partition(g_emmc2_sector0, &partition) != 0) {
+            uart_puts("EMMC2 fat none\n");
+            return;
+        }
+        layout = 1U;
+        base_lba = partition.start_lba;
+        type = partition.type;
+        if (rpi4_emmc2_probe_mount_fat32(partition.start_lba,
+                                          partition.sector_count) != 0) {
+            uart_puts("EMMC2 fat bad ");
+            print_dec64(base_lba);
+            uart_puts("\n");
+            return;
+        }
+    }
+
+    uart_puts("EMMC2 fat ");
+    print_dec64(layout);
+    uart_puts(" ");
+    print_hex8(type);
+    uart_puts(" ");
+    print_dec64(base_lba);
+    uart_puts(" ");
+    print_dec64(g_emmc2_probe_fat32.sectors_per_cluster);
+    uart_puts(" ");
+    print_dec64(g_emmc2_probe_fat32.sectors_per_fat);
+    uart_puts(" ");
+    print_dec64(g_emmc2_probe_fat32.root_cluster);
+    uart_puts(" ");
+    print_dec64(g_emmc2_probe_fat32.total_sectors);
+    uart_puts("\n");
 }
 
 static void rpi4_emmc2_probe_print_diag(void) {
@@ -93,15 +159,15 @@ static void rpi4_emmc2_probe(void) {
         return;
     }
 
-    uart_puts("EMMC2 probe: first16 ");
+    uart_puts("EMMC2 s0 ");
     for (uint32_t i = 0; i < 16U; i++) {
         print_hex8(g_emmc2_sector0[i]);
     }
-    uart_puts("\n");
-    uart_puts("EMMC2 probe: signature ");
+    uart_puts(" ");
     print_hex8(g_emmc2_sector0[510]);
     print_hex8(g_emmc2_sector0[511]);
     uart_puts("\n");
+    rpi4_emmc2_probe_print_fat32();
 }
 #endif
 

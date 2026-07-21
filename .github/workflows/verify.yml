@@ -45,6 +45,12 @@ jobs:
       - name: Test RPi4 EMMC2 probe telemetry
         run: bash tests/run_rpi4_emmc2_probe_diag_test.sh
 
+      - name: Test FAT32 MBR discovery
+        run: bash tests/run_mbr_fat32_test.sh
+
+      - name: Test partition block views
+        run: bash tests/run_block_view_fat32_test.sh
+
       - name: Upload RPi4 EMMC2 probe package
         uses: actions/upload-artifact@v4
         with:

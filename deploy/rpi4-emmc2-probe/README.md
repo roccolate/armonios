@@ -9,7 +9,8 @@ storage through the generic board API.
 - Use a spare SD card or preserve a backup of its boot partition.
 - The ArmoniOS EMMC2 driver is compiled read-only.
 - Every write request returns `EMMC_ERR_READ_ONLY`.
-- The probe reads exactly sector 0 and prints a bounded summary.
+- The probe reads sector 0 and, only when needed, one FAT32 boot sector.
+- It validates geometry read-only and never lists files or mounts the volume.
 - `BOARD_CAP_STORAGE` remains disabled.
 - The Raspberry Pi 4 `broken-cd` policy only allows commands to be attempted;
   it does not assert hot-plug support or prove that a card is inserted.
@@ -97,8 +98,8 @@ EMMC2 probe: begin
 EMMC2 probe: broken-cd assume-present
 EMMC2 probe: init 0
 EMMC2 probe: read0 0
-EMMC2 probe: first16 <32 hexadecimal digits>
-EMMC2 probe: signature <4 hexadecimal digits>
+EMMC2 s0 <32 hexadecimal digits> <4 hexadecimal digits>
+EMMC2 fat <layout> <type> <base-lba> <sectors-per-cluster> <sectors-per-fat> <root-cluster> <total-sectors>
 ```
 
 The clock query translates the early ARM physical message buffer through the
@@ -112,8 +113,17 @@ as present for initialization instead of waiting on unreliable native
 responses, and sector data remain real controller values. A missing card should
 fail through the command or timeout markers after the assume-present marker.
 
-`55AA` is common for an MBR or boot sector signature, but the probe records the
-actual bytes and does not treat a different value as a driver failure.
+`EMMC2 s0` records the first 16 bytes and bytes 510-511. `55AA` is common
+for an MBR or FAT boot sector, but the raw bytes remain evidence rather than a
+success condition.
+
+`EMMC2 fat` uses positional fields to save image space. `layout` is `0` for a
+superfloppy BPB at LBA 0 and `1` for a primary MBR partition. `type` is `00` for
+superfloppy or the MBR type byte (`0B`, `0C`, `1B`, or `1C`). The remaining
+values come from the existing FAT32 mount validator. `EMMC2 fat none` means no
+valid superfloppy BPB or supported primary FAT32 partition was found;
+`EMMC2 fat bad <lba>` means MBR discovery succeeded but that partition's BPB or
+geometry was rejected.
 
 ## Failure telemetry
 
