@@ -111,6 +111,43 @@ fail through the command or timeout markers after the assume-present marker.
 `55AA` is common for an MBR or boot sector signature, but the probe records the
 actual bytes and does not treat a different value as a driver failure.
 
+## Failure telemetry
+
+When `init` or `read0` returns a negative result, the probe prints four bounded
+diagnostic lines:
+
+```text
+EMMC2 probe: diag command <name-or-none> <index> argument <hex>
+EMMC2 probe: diag read-offset <hex> write-offset <hex> write-value <hex>
+EMMC2 probe: diag present <hex> clock-reset <hex> host-power <hex> actual-clock <hz>
+EMMC2 probe: diag int-now <hex> int-last <hex>
+```
+
+The adapter observes the real 32-bit MMIO accesses. It does not synthesize a
+command response or interrupt. The only synthetic values remain the two
+`broken-cd` presence bits returned from reads of offset `0x24`; the raw register
+value is retained in `diag present`.
+
+Useful offset interpretations:
+
+- `read-offset 0x24` before any command: card-detect or command/data-inhibit wait;
+- `read-offset 0x2c` before any command: controller reset or clock stabilization;
+- `read-offset 0x30` after a command: response, data-ready, or data-end interrupt;
+- `write-offset 0x0c`: the encoded transfer-mode and command write;
+- command `CMD17`: the sector-zero read reached the data path.
+
+`int-last` preserves the last non-zero interrupt status even if the driver
+acknowledges it before printing. Relevant SDHCI error bits are:
+
+- `0x00010000`: command timeout;
+- `0x00020000`: command CRC;
+- `0x00040000`: command end-bit;
+- `0x00080000`: command index;
+- `0x00100000`: data timeout;
+- `0x00200000`: data CRC;
+- `0x00400000`: data end-bit;
+- `0x00800000`: bus-power error.
+
 Failure localization is explicit:
 
 - `EMMC2 clock: unavailable -1` means local address, alias, or argument
@@ -121,9 +158,10 @@ Failure localization is explicit:
   or zero clock response;
 - absence of `EMMC2 probe: broken-cd assume-present` means the expected opt-in
   probe image was not reached;
-- `EMMC2 probe: init <negative>` means SDHCI/card initialization failed;
+- `EMMC2 probe: init <negative>` means SDHCI/card initialization failed and is
+  followed by diagnostic lines;
 - `EMMC2 probe: read0 <negative>` means initialization succeeded but sector-0
-  transfer failed.
+  transfer failed and is followed by diagnostic lines.
 
 ## Evidence to record
 
