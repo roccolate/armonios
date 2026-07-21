@@ -414,16 +414,8 @@ static init_status_t init_input(void) {
     uint32_t pci_n = 0;
 
     input_queue_init();
-    uart_puts("input: serial queue\n");
-
-    if (board_supports(BOARD_CAP_INPUT)) {
-        if (board_input_init() == 0) {
-            uart_puts("input: board ok\n");
-        } else {
-            uart_puts("input: board unavailable\n");
-        }
-    } else {
-        uart_puts("input: board unsupported\n");
+    if (board_supports(BOARD_CAP_INPUT) && board_input_init() == 0) {
+        uart_puts("input: ok\n");
     }
 
     if (board_supports(BOARD_CAP_PCI)) {
@@ -437,8 +429,6 @@ static init_status_t init_input(void) {
         uart_puts(" dev, ");
         print_dec64(assigned);
         uart_puts(" BARs\n");
-    } else {
-        uart_puts("PCI: unsupported\n");
     }
 
     if (board_supports(BOARD_CAP_USB) &&
@@ -483,10 +473,6 @@ static init_status_t init_input(void) {
                 uart_puts("USB HID: none\n");
             }
         }
-    } else if (board_supports(BOARD_CAP_USB)) {
-        uart_puts("USB: PCI unsupported\n");
-    } else {
-        uart_puts("USB: unsupported\n");
     }
 
     return INIT_STATUS_OK;
@@ -546,7 +532,6 @@ void kernel_main(uint64_t dtb_addr) {
             } else {
                 storage_status = INIT_STATUS_SKIPPED;
                 init_status_set(INIT_PHASE_STORAGE, INIT_STATUS_SKIPPED);
-                uart_puts("storage: unsupported\n");
             }
             if (storage_status == INIT_STATUS_OK) {
                 uart_puts("storage app image: FAT32\n");
@@ -558,14 +543,12 @@ void kernel_main(uint64_t dtb_addr) {
                 init_status_set(INIT_PHASE_DISPLAY, init_display());
             } else {
                 init_status_set(INIT_PHASE_DISPLAY, INIT_STATUS_SKIPPED);
-                uart_puts("display: unsupported\n");
             }
 
             if (board_supports(BOARD_CAP_NET)) {
                 init_status_set(INIT_PHASE_NETWORK, init_network());
             } else {
                 init_status_set(INIT_PHASE_NETWORK, INIT_STATUS_SKIPPED);
-                uart_puts("network: unsupported\n");
             }
 
             init_status_set(INIT_PHASE_INPUT, init_input());
