@@ -219,23 +219,51 @@ int64_t sys_stat(process_t *process, uint64_t path_ptr, uint64_t stat_ptr) {
 int64_t sys_readdir(process_t *process, uint64_t path_ptr, uint64_t buf,
                     uint64_t len) {
     char path[VFS_MAX_PATH];
-    uint64_t bytes_written = 0;
+    uint8_t kernel_buffer[SYSCALL_VFS_IO_CHUNK];
+    uint64_t total = 0;
+    int64_t status;
 
     if (sys_user_copy_cstr(process, path_ptr, path, sizeof(path)) != 0 ||
         sys_user_buf_out(process, buf, len) != 0) {
         return ERR_INVAL;
     }
 
-    /*
-     * vfs_list currently has no offset/iterator contract, so readdir cannot be
-     * safely chunked without defining new VFS semantics. Keep this final direct
-     * handoff isolated until the directory-list API is converted separately.
-     */
-    if (vfs_list(path, (uint8_t *)(uintptr_t)buf, len, &bytes_written) != 0) {
-        return ERR_NOENT;
+    /* Preserve the existing NULL/zero-length listing rejection. */
+    if (len == 0) {
+        uint64_t bytes_written = 0;
+
+        if (buf == 0 ||
+            vfs_list_at(path, 0, kernel_buffer, 0, &bytes_written) != 0) {
+            return ERR_NOENT;
+        }
+        return (int64_t)bytes_written;
     }
 
-    return (int64_t)bytes_written;
+    while (total < len) {
+        uint64_t requested = syscall_vfs_chunk_size(len - total);
+        uint64_t bytes_written = 0;
+
+        if (vfs_list_at(path, total, kernel_buffer, requested,
+                        &bytes_written) != 0) {
+            return total != 0 ? (int64_t)total : ERR_NOENT;
+        }
+        if (bytes_written == 0) {
+            break;
+        }
+
+        status = sys_copy_to_user(process, buf + total, kernel_buffer,
+                                  bytes_written);
+        if (status != 0) {
+            return total != 0 ? (int64_t)total : status;
+        }
+
+        total += bytes_written;
+        if (bytes_written < requested) {
+            break;
+        }
+    }
+
+    return (int64_t)total;
 }
 
 int64_t sys_unlink(process_t *process, uint64_t path_ptr) {

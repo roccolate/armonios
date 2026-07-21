@@ -115,14 +115,15 @@ static int fat32_vfs_stat(void *context, vfs_stat_t *stat) {
     return 0;
 }
 
-static int fat32_vfs_list_root(void *context, uint8_t *buffer,
-                               uint64_t capacity, uint64_t *bytes_written) {
+static int fat32_vfs_list_root(void *context, uint64_t offset,
+                               uint8_t *buffer, uint64_t capacity,
+                               uint64_t *bytes_written) {
     fat32_fs_t *fs = fat32_vfs_fs(context);
 
     if (fs == 0) {
         return -1;
     }
-    return fat32_list_root(fs, buffer, capacity, bytes_written);
+    return fat32_list_root_at(fs, offset, buffer, capacity, bytes_written);
 }
 
 static int fat32_vfs_open_path(void *context, const char *path,

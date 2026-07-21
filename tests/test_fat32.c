@@ -302,6 +302,19 @@ void test_fat32_list_root_returns_short_names(void) {
     for (uint64_t i = 0; i < bytes_written; i++) {
         TEST_ASSERT_EQUAL_UINT64(expected[i], buffer[i]);
     }
+
+    for (uint64_t i = 0; i < sizeof(buffer); i++) {
+        buffer[i] = 0;
+    }
+    bytes_written = 0;
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)fat32_list_root_at(
+                                 &fs, 6, buffer, 4, &bytes_written));
+    TEST_ASSERT_EQUAL_UINT64(4, bytes_written);
+    TEST_ASSERT_EQUAL_UINT64('T', buffer[0]);
+    TEST_ASSERT_EQUAL_UINT64('X', buffer[1]);
+    TEST_ASSERT_EQUAL_UINT64('T', buffer[2]);
+    TEST_ASSERT_EQUAL_UINT64('\n', buffer[3]);
 }
 
 void test_fat32_mount_vfs_root_lists_through_vfs(void) {
