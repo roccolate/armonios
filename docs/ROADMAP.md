@@ -41,7 +41,7 @@ Chosen release defaults:
 | Phase | State | Promotion blocker |
 |---|---|---|
 | v0.1 baseline | COMPLETE | None for the recorded QEMU baseline |
-| v0.2 cleanup/hardening | IN PROGRESS / RELEASE CANDIDATE | Input, USB, redraw, global-time bounds; sustained-load evidence; promotion record |
+| v0.2 cleanup/hardening | IN PROGRESS / RELEASE CANDIDATE | USB/device, redraw, and global-time bounds; runtime compaction; sustained-load evidence; promotion record |
 | v0.3 storage/VFS platform | NEXT | Depends on v0.2 promotion |
 | v0.4 real FAT | PLANNED | Depends on v0.3 filesystem interfaces |
 | v0.5 userland runtime/widgets | PLANNED | Depends on stable storage and ABI shapes |
@@ -66,6 +66,8 @@ Chosen release defaults:
    and polish belong to v0.6-v0.8.
 7. Preserve the 108000-byte kernel limit unless a deliberate release decision,
    evidence, and replacement size budget are documented. Compact first.
+8. With only 198 bytes currently remaining, the next runtime cut must reduce or
+   reuse state before introducing new persistent counters or phase flags.
 
 ## v0.1 — verified QEMU baseline
 
@@ -118,7 +120,8 @@ The post-EOI service measures:
 - input queue depth, lifetime high-water, and overflow;
 - USB HID polling operations;
 - valid virtio-net RX frames consumed;
-- redraw submissions, partial-damage batches, and full-redraw fallbacks.
+- redraw submissions, partial-damage batches, and full-redraw fallbacks;
+- separate input- and network-budget exhaustion.
 
 Phase 1B was completed through PRs #44-#48.
 
@@ -145,19 +148,46 @@ Evidence:
 The virtio-net path still exposes no trustworthy device-level RX-drop counter.
 This remains an explicit evidence gap.
 
+### Landed input-consumption bound
+
+PR #52 introduced the second enforced class budget:
+
+- `RUNTIME_WORK_INPUT` is independent from periodic and network readiness;
+- active post-EOI queue consumption is capped at 16 events per pass;
+- queue depth is checked without consuming at the cap;
+- exactly 16 events with an empty queue finish without requeue;
+- a seventeenth event preserves `RUNTIME_WORK_INPUT` for a later pass;
+- input-budget exhaustion is counted only when queue work remains;
+- normal timer work executes the existing periodic backend once with the input
+  phase enabled;
+- console-thread and other outside-service consumers retain prior behavior.
+
+Evidence:
+
+- validated head `ba8051cd8edbe6a66a843f80c54c96668d064a91`;
+- `Verify ArmoniOS` run `29853659559`: success;
+- `CI - Tests` run `29853659491`: success;
+- loadable kernel: 107802 / 108000 bytes;
+- remaining margin: 198 bytes;
+- merge `41f3e185ca1f75ed09416313d34279384f3d78a9`.
+
+The initial value is one quarter of the fixed 64-event queue and matches the
+network count budget. It is an engineering starting point, not a final latency
+claim.
+
 ### Remaining runtime work
 
-1. Split input/GUI readiness where independent continuation is needed.
-2. Bound shared input queue consumption per pass.
-3. Split and bound USB HID/device polling.
-4. Bound redraw and damage work.
-5. Enforce a global generic-counter deadline.
-6. Preserve or republish every exhausted class and count each exhaustion.
-7. Add sustained-load QEMU tests proving EL0 heartbeat progress and explicit loss
+1. Compact runtime phase state, wrappers, and telemetry while preserving all
+   current budget and regression contracts.
+2. Split and bound USB HID/device producer polling.
+3. Bound redraw and damage work.
+4. Enforce a global generic-counter deadline.
+5. Preserve or republish every exhausted class and count each exhaustion.
+6. Add sustained-load QEMU tests proving EL0 heartbeat progress and explicit loss
    accounting.
-8. Decide whether the fully bounded bottom half remains permanent or later becomes
+7. Decide whether the fully bounded bottom half remains permanent or later becomes
    a wakeable EL1 service.
-9. Create a formal v0.2 promotion/tag record with exact evidence.
+8. Create a formal v0.2 promotion/tag record with exact evidence.
 
 ### Exit criteria
 
@@ -165,7 +195,8 @@ This remains an explicit evidence gap.
 - no hard timer callback contains rendering, queue drains, network polling, or
   device polling;
 - every budget-relevant class and total service duration are observable;
-- input, USB, network, redraw, and global time are bounded;
+- input consumption, USB/device polling, network RX, redraw, and global time are
+  bounded;
 - leftover class work remains pending;
 - every exhaustion is counted;
 - sustained combined load cannot stop an EL0 heartbeat;
