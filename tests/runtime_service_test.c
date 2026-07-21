@@ -6,6 +6,7 @@
 #include "kernel/irq.h"
 #include "kernel/process.h"
 #include "kernel/runtime_service.h"
+#include "net/virtio_net.h"
 
 static uint32_t g_eoi_seen;
 static uint32_t g_backend_calls;
@@ -18,6 +19,14 @@ static uint32_t g_queue_depth;
 static uint32_t g_queue_high_water;
 static uint64_t g_queue_overflow;
 static gui_desktop_t g_desktop;
+
+static virtio_net_device_t g_net_device;
+static uint8_t g_net_buffer[64];
+static uint32_t g_fake_network_frames;
+static uint32_t g_network_backend_calls;
+static uint32_t g_network_poll_calls;
+static uint32_t g_network_recv_calls;
+static uint32_t g_network_frames_returned;
 
 uint32_t board_irq_ack(void) { return 5U; }
 void board_irq_end(uint32_t irq) { assert(irq == 5U); g_eoi_seen = 1U; }
@@ -41,6 +50,38 @@ uint64_t runtime_service_counter_now(void) {
     uint64_t value = g_counter_now;
     g_counter_now += g_counter_step;
     return value;
+}
+
+int virtio_net_recv(virtio_net_device_t *device, void *data, uint32_t max_len) {
+    (void)data;
+    (void)max_len;
+    assert(device == &g_net_device);
+    g_network_recv_calls++;
+    if (g_fake_network_frames == 0U) {
+        return 0;
+    }
+    g_fake_network_frames--;
+    g_network_frames_returned++;
+    runtime_service_report_metric(RUNTIME_METRIC_NETWORK_FRAMES, 1U);
+    return 60;
+}
+
+int virtio_net_poll(virtio_net_device_t *device) {
+    assert(device == &g_net_device);
+    return g_fake_network_frames != 0U ? 1 : 0;
+}
+
+void net_poll(void) {
+    g_network_poll_calls++;
+    while (runtime_service_virtio_net_recv(&g_net_device, g_net_buffer,
+                                           sizeof(g_net_buffer)) > 0) {
+    }
+}
+
+void kernel_io_poll_network(void) {
+    assert(g_eoi_seen != 0U);
+    g_network_backend_calls++;
+    runtime_service_net_poll();
 }
 
 void kernel_on_timer_tick(void) {
@@ -80,6 +121,12 @@ static void prepare(uint64_t step) {
     g_queue_overflow = 0U;
     g_desktop.damage_count = 0U;
     g_desktop.damage_full = 0U;
+    g_net_device.ready = 1U;
+    g_fake_network_frames = 0U;
+    g_network_backend_calls = 0U;
+    g_network_poll_calls = 0U;
+    g_network_recv_calls = 0U;
+    g_network_frames_returned = 0U;
     for (uint32_t i = 0; i < RUNTIME_METRIC_COUNT; i++) g_metrics[i] = 0U;
 }
 
@@ -226,6 +273,85 @@ static void redraw_batch_helper(void) {
     assert(stats.metric_total[RUNTIME_METRIC_FULL_REDRAWS] == 1U);
 }
 
+static void network_budget_exact_ring_rechecks(void) {
+    runtime_service_stats_t stats;
+
+    prepare(3U);
+    g_fake_network_frames = RUNTIME_NETWORK_FRAME_BUDGET;
+    runtime_service_request(RUNTIME_WORK_NETWORK);
+    assert(runtime_service_run_pending() == RUNTIME_WORK_NETWORK);
+    stats = snapshot();
+
+    assert(g_network_backend_calls == 1U);
+    assert(g_network_poll_calls == 1U);
+    assert(g_network_frames_returned == RUNTIME_NETWORK_FRAME_BUDGET);
+    assert(g_fake_network_frames == 0U);
+    assert(stats.metric_last[RUNTIME_METRIC_NETWORK_FRAMES] ==
+           RUNTIME_NETWORK_FRAME_BUDGET);
+    assert(stats.network_budget_exhaustion_count == 1U);
+    assert(stats.pending_work == RUNTIME_WORK_NETWORK);
+    assert(stats.requeue_count == 1U);
+
+    assert(runtime_service_run_pending() == RUNTIME_WORK_NETWORK);
+    stats = snapshot();
+    assert(g_network_backend_calls == 2U);
+    assert(g_network_poll_calls == 2U);
+    assert(g_network_frames_returned == RUNTIME_NETWORK_FRAME_BUDGET);
+    assert(stats.metric_last[RUNTIME_METRIC_NETWORK_FRAMES] == 0U);
+    assert(stats.metric_total[RUNTIME_METRIC_NETWORK_FRAMES] ==
+           RUNTIME_NETWORK_FRAME_BUDGET);
+    assert(stats.network_budget_exhaustion_count == 1U);
+    assert(stats.pending_work == 0U);
+}
+
+static void network_budget_requeues_leftover(void) {
+    runtime_service_stats_t stats;
+
+    prepare(3U);
+    g_fake_network_frames = RUNTIME_NETWORK_FRAME_BUDGET + 1U;
+    runtime_service_request(RUNTIME_WORK_NETWORK);
+    assert(runtime_service_run_pending() == RUNTIME_WORK_NETWORK);
+    stats = snapshot();
+
+    assert(g_network_backend_calls == 1U);
+    assert(g_network_poll_calls == 1U);
+    assert(g_network_frames_returned == RUNTIME_NETWORK_FRAME_BUDGET);
+    assert(g_fake_network_frames == 1U);
+    assert(stats.metric_last[RUNTIME_METRIC_NETWORK_FRAMES] ==
+           RUNTIME_NETWORK_FRAME_BUDGET);
+    assert(stats.network_budget_exhaustion_count == 1U);
+    assert(stats.pending_work == RUNTIME_WORK_NETWORK);
+    assert(stats.requeue_count == 1U);
+
+    assert(runtime_service_run_pending() == RUNTIME_WORK_NETWORK);
+    stats = snapshot();
+    assert(g_network_backend_calls == 2U);
+    assert(g_network_poll_calls == 2U);
+    assert(g_network_frames_returned == RUNTIME_NETWORK_FRAME_BUDGET + 1U);
+    assert(g_fake_network_frames == 0U);
+    assert(stats.metric_last[RUNTIME_METRIC_NETWORK_FRAMES] == 1U);
+    assert(stats.metric_total[RUNTIME_METRIC_NETWORK_FRAMES] ==
+           RUNTIME_NETWORK_FRAME_BUDGET + 1U);
+    assert(stats.network_budget_exhaustion_count == 1U);
+    assert(stats.pending_work == 0U);
+}
+
+static void network_outside_service_is_not_budgeted(void) {
+    runtime_service_stats_t stats;
+
+    prepare(1U);
+    g_fake_network_frames = RUNTIME_NETWORK_FRAME_BUDGET + 1U;
+    runtime_service_net_poll();
+    stats = snapshot();
+
+    assert(g_network_poll_calls == 1U);
+    assert(g_network_frames_returned == RUNTIME_NETWORK_FRAME_BUDGET + 1U);
+    assert(g_fake_network_frames == 0U);
+    assert(stats.network_budget_exhaustion_count == 0U);
+    assert(stats.metric_total[RUNTIME_METRIC_NETWORK_FRAMES] == 0U);
+    assert(stats.pending_work == 0U);
+}
+
 static void requeue_and_reset(void) {
     runtime_service_stats_t stats;
 
@@ -248,6 +374,7 @@ static void requeue_and_reset(void) {
     assert(stats.metric_total[RUNTIME_METRIC_DEVICE_POLLS] == 0U);
     assert(stats.metric_total[RUNTIME_METRIC_DAMAGE_ITEMS] == 0U);
     assert(stats.metric_total[RUNTIME_METRIC_FULL_REDRAWS] == 0U);
+    assert(stats.network_budget_exhaustion_count == 0U);
     assert(stats.counter_frequency_hz == 1000U);
     assert(stats.budget_ticks == 10U);
 }
@@ -255,10 +382,11 @@ static void requeue_and_reset(void) {
 static void eoi_order(void) {
     prepare(3U);
     g_eoi_seen = 0U;
-    runtime_service_request(RUNTIME_WORK_PERIODIC);
+    runtime_service_request(RUNTIME_WORK_PERIODIC | RUNTIME_WORK_NETWORK);
     irq_handler();
     assert(g_eoi_seen == 1U);
     assert(g_backend_calls == 1U);
+    assert(g_network_backend_calls == 1U);
     assert(snapshot().last_duration_ticks == 3U);
 }
 
@@ -267,8 +395,11 @@ int main(void) {
     maximum_and_overrun();
     work_metrics();
     redraw_batch_helper();
+    network_budget_exact_ring_rechecks();
+    network_budget_requeues_leftover();
+    network_outside_service_is_not_budgeted();
     requeue_and_reset();
     eoi_order();
-    puts("deferred runtime service damage telemetry: ok");
+    puts("deferred runtime service network budget: ok");
     return 0;
 }

@@ -24,6 +24,14 @@ int virtio_net_send(virtio_net_device_t *device, const void *data, uint32_t len)
 int virtio_net_recv(virtio_net_device_t *device, void *data, uint32_t max_len);
 int virtio_net_poll(virtio_net_device_t *device);
 
+/* Runtime-service wrapper used by the DHCP client when budget routing is on. */
+int runtime_service_virtio_net_recv(virtio_net_device_t *device, void *data,
+                                    uint32_t max_len);
+
+#if defined(ARMONIOS_RUNTIME_BUDGET_NET_RX)
+#define virtio_net_recv runtime_service_virtio_net_recv
+#endif
+
 #ifdef ARMONIOS_TEST
 uint32_t virtio_net_test_rx_buffer_bytes(void);
 uint32_t virtio_net_test_tx_buffer_bytes(void);

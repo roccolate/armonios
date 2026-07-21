@@ -4,6 +4,8 @@
 
 #include "board.h"
 #include "kernel/gui_compositor.h"
+#include "net/virtio_net.h"
+#include "kernel/net/dhcp.h"
 #include "kernel/process.h"
 #include "kernel/runtime_service.h"
 #include "uart/pl011.h"
@@ -18,9 +20,15 @@ typedef struct {
 static irq_handler_entry_t g_irq_handlers[IRQ_HANDLER_SLOTS];
 static volatile uint32_t g_runtime_work_pending;
 static runtime_service_stats_t g_runtime_stats;
+static uint32_t g_runtime_network_frames;
 static uint8_t g_runtime_service_active;
+static uint8_t g_runtime_network_phase_active;
+static uint8_t g_runtime_network_budget_exhausted;
 
 __attribute__((weak)) void kernel_on_timer_tick(void) {
+}
+
+__attribute__((weak)) void kernel_io_poll_network(void) {
 }
 
 __attribute__((weak)) uint64_t runtime_service_counter_now(void) {
@@ -32,7 +40,10 @@ void runtime_service_reset(void) {
     uint64_t budget = g_runtime_stats.budget_ticks;
 
     g_runtime_work_pending = 0;
+    g_runtime_network_frames = 0;
     g_runtime_service_active = 0;
+    g_runtime_network_phase_active = 0;
+    g_runtime_network_budget_exhausted = 0;
     g_runtime_stats = (runtime_service_stats_t){0};
     g_runtime_stats.counter_frequency_hz = frequency;
     g_runtime_stats.budget_ticks = budget;
@@ -111,6 +122,40 @@ void runtime_service_request(uint32_t work) {
     g_runtime_work_pending |= accepted;
 }
 
+void runtime_service_net_poll(void) {
+    if (g_runtime_service_active != 0U &&
+        g_runtime_network_phase_active == 0U) {
+        return;
+    }
+    net_poll();
+}
+
+int runtime_service_virtio_net_recv(virtio_net_device_t *device, void *data,
+                                    uint32_t max_len) {
+    int len;
+
+    if (g_runtime_service_active != 0U) {
+        if (g_runtime_network_phase_active == 0U) {
+            return 0;
+        }
+        if (g_runtime_network_frames >= RUNTIME_NETWORK_FRAME_BUDGET) {
+            if (g_runtime_network_budget_exhausted == 0U) {
+                g_runtime_network_budget_exhausted = 1U;
+                g_runtime_stats.network_budget_exhaustion_count++;
+                runtime_service_request(RUNTIME_WORK_NETWORK);
+            }
+            return 0;
+        }
+    }
+
+    len = virtio_net_recv(device, data, max_len);
+    if (len > 0 && g_runtime_service_active != 0U &&
+        g_runtime_network_phase_active != 0U) {
+        g_runtime_network_frames++;
+    }
+    return len;
+}
+
 uint32_t runtime_service_run_pending(void) {
     uint32_t work = g_runtime_work_pending;
     uint64_t started;
@@ -118,6 +163,9 @@ uint32_t runtime_service_run_pending(void) {
 
     g_runtime_work_pending = 0;
     g_runtime_stats.last_work = work;
+    g_runtime_network_frames = 0;
+    g_runtime_network_phase_active = 0;
+    g_runtime_network_budget_exhausted = 0;
     for (uint32_t i = 0; i < RUNTIME_METRIC_COUNT; i++) {
         g_runtime_stats.metric_last[i] = 0;
     }
@@ -131,6 +179,11 @@ uint32_t runtime_service_run_pending(void) {
     g_runtime_service_active = 1U;
     if ((work & RUNTIME_WORK_PERIODIC) != 0U) {
         kernel_on_timer_tick();
+    }
+    if ((work & RUNTIME_WORK_NETWORK) != 0U) {
+        g_runtime_network_phase_active = 1U;
+        kernel_io_poll_network();
+        g_runtime_network_phase_active = 0U;
     }
     g_runtime_service_active = 0U;
     duration = runtime_service_counter_now() - started;
