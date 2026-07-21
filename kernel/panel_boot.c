@@ -227,7 +227,7 @@ static int init_panel_process(process_t *process, const user_image_t *image,
 }
 
 static int place_argv_on_stack(uint64_t stack_paddr, uint32_t slot,
-                               const uint64_t *argv_ptr,
+                               const panel_boot_argv_t *argv,
                                uint32_t argc, uint64_t *out_argv_vaddr) {
     if (stack_paddr == 0 || slot >= PROCESS_MAX_PROCESSES) {
         return -1;
@@ -236,11 +236,11 @@ static int place_argv_on_stack(uint64_t stack_paddr, uint32_t slot,
     return panel_boot_place_argv_on_stack((uint8_t *)(uintptr_t)stack_paddr,
                                           panel_stack_vaddr(slot),
                                           KERNEL_USER_STACK_SIZE,
-                                          argv_ptr, argc, out_argv_vaddr);
+                                          argv, argc, out_argv_vaddr);
 }
 
 int app_spawn_vfs(const char *path, uint32_t entry_index,
-                  const uint64_t *argv_ptr, uint32_t argc) {
+                  const panel_boot_argv_t *argv, uint32_t argc) {
     process_t *process;
     user_image_t image;
     panel_user_storage_t storage = {0};
@@ -303,7 +303,7 @@ int app_spawn_vfs(const char *path, uint32_t entry_index,
      * argc==0 and argc>0 paths and keeps the inlined code small. */
     process->regs[0] = 0;
     process->regs[1] = 0;
-    if (place_argv_on_stack(storage.stack_paddr, slot, argv_ptr, argc,
+    if (place_argv_on_stack(storage.stack_paddr, slot, argv, argc,
                             &argv_vaddr) != 0) {
         process_release(process);
         return -1;

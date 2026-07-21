@@ -6,13 +6,14 @@
  *
  * Error values are shared by all syscall bodies and documented in
  * docs/SYSCALLS.md. The helper functions below keep user-buffer validation,
- * checked EL0/EL1 copies, and GUI window ownership checks centralized instead
- * of duplicated in each syscall case.
+ * checked EL0/EL1 copies, argv import, and GUI window ownership centralized
+ * instead of duplicated in each syscall case.
  */
 
 #include <stdint.h>
 
 #include "kernel/gui.h"
+#include "kernel/panel_boot_argv.h"
 #include "kernel/process.h"
 
 #define ERR_NOENT (-3LL)
@@ -35,5 +36,7 @@ int64_t sys_copy_to_user(const process_t *process, uint64_t ptr,
                          const void *input, uint64_t len);
 int64_t sys_user_copy_cstr(const process_t *process, uint64_t ptr,
                            char *out, uint64_t capacity);
+int64_t sys_copy_argv_from_user(const process_t *process, uint64_t argv_ptr,
+                                uint32_t argc, panel_boot_argv_t *kernel_argv);
 
 #endif

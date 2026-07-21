@@ -44,6 +44,25 @@ extern char __kernel_end[];
 
 void kernel_main(uint64_t dtb_addr);
 
+#if defined(ARMONIOS_RPI4_EMMC2_PROBE)
+void kernel_io_poll_input_sources(uint8_t include_uart) {
+    (void)include_uart;
+}
+
+void kernel_io_poll_network(void) {
+}
+
+void kernel_on_timer_tick(void) {
+}
+
+void kernel_main(uint64_t dtb_addr) {
+    (void)dtb_addr;
+    board_early_init();
+    for (;;) {
+        __asm__ volatile("wfe");
+    }
+}
+#else
 static fat32_fs_t g_fat32_fs;
 
 static int board_supports(uint32_t capability) {
@@ -569,3 +588,4 @@ void kernel_main(uint64_t dtb_addr) {
         __asm__ volatile("wfe");
     }
 }
+#endif
