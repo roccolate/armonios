@@ -4,7 +4,9 @@
 /*
  * Process-control block API.
  *
- * PIDs are non-zero and unique inside the fixed process table. User regions
+ * PIDs are non-zero and unique inside the fixed process table. Spawned
+ * processes record their parent PID so only the parent can reap a child exit.
+ * User regions
  * are half-open virtual ranges [start, end); entries with OWNED_PAGES carry
  * PMM-backed pages that process_free_resources/process_release must return.
  * Region helpers reject zero-length and overflowing ranges, while
@@ -45,6 +47,7 @@ typedef struct {
 
 typedef struct process {
     uint32_t pid;
+    uint32_t parent_pid;
     const char *name;
     char name_storage[PROCESS_NAME_LEN];
     uint64_t regs[31];
@@ -63,6 +66,8 @@ void process_set_current(process_t *process);
 process_t *process_current(void);
 void process_table_init(void);
 process_t *process_alloc(uint32_t pid, const char *name);
+process_t *process_alloc_child(uint32_t pid, uint32_t parent_pid,
+                               const char *name);
 /*
  * Release a process slot. Frees the process-owned physical pages
  * (anonymous mmap regions + the page-table page itself) before
@@ -89,7 +94,10 @@ process_t *process_next_runnable(process_t *after);
 int process_dispatch_next(process_t *current, exception_frame_t *frame,
                           process_dispatch_policy_t policy);
 void process_reclaim_zombies(void);
+void process_reclaim_orphan_zombies(void);
 int process_wait_zombie(uint32_t pid, uint64_t *exit_code);
+int process_wait_child_zombie(uint32_t parent_pid, uint32_t pid,
+                              uint64_t *exit_code);
 int process_kill(uint32_t pid, uint64_t exit_code);
 void process_init(process_t *process, uint32_t pid, const char *name);
 void process_set_entry(process_t *process, uint64_t pc, uint64_t sp,

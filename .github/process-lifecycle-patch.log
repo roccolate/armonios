@@ -1,6 +1,0 @@
-Traceback (most recent call last):
-  File "/home/runner/work/armonios/armonios/.github/scripts/apply_process_lifecycle_patch.py", line 155, in <module>
-    replace_all_exact(
-  File "/home/runner/work/armonios/armonios/.github/scripts/apply_process_lifecycle_patch.py", line 28, in replace_all_exact
-    raise RuntimeError(f"{path}: expected {expected} matches, found {count}: {old!r}")
-RuntimeError: kernel/panel_boot.c: expected 2 matches, found 3: '(void)process_reclaim_zombies();'

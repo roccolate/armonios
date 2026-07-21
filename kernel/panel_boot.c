@@ -242,6 +242,7 @@ static int place_argv_on_stack(uint64_t stack_paddr, uint32_t slot,
 int app_spawn_vfs(const char *path, uint32_t entry_index,
                   const panel_boot_argv_t *argv, uint32_t argc) {
     process_t *process;
+    process_t *parent;
     user_image_t image;
     panel_user_storage_t storage = {0};
     uint32_t slot;
@@ -266,8 +267,11 @@ int app_spawn_vfs(const char *path, uint32_t entry_index,
         return -1;
     }
 
-    (void)process_reclaim_zombies();
-    process = process_alloc(g_next_spawn_pid++, app_name);
+    (void)process_reclaim_orphan_zombies();
+    parent = process_current();
+    process = process_alloc_child(g_next_spawn_pid++,
+                                  parent != 0 ? parent->pid : 0U,
+                                  app_name);
     if (process == 0) {
         return -1;
     }
@@ -328,8 +332,8 @@ uint64_t panel_boot_run(uint64_t memory_base, uint64_t memory_size,
     panel_user_storage_t storage = {0};
     uint32_t slot;
 
-    (void)process_reclaim_zombies();
-    panel = process_alloc(PANEL_BOOT_PID_BASE, PANEL_BOOT_APP);
+    (void)process_reclaim_orphan_zombies();
+    panel = process_alloc_child(PANEL_BOOT_PID_BASE, 0U, PANEL_BOOT_APP);
     if (panel == 0) {
         uart_puts("panel_boot: process alloc failed\n");
         return 1;
@@ -374,7 +378,7 @@ uint64_t panel_boot_run(uint64_t memory_base, uint64_t memory_size,
     }
     uart_puts("panel_boot: returned to EL1\n");
 
-    (void)process_reclaim_zombies();
+    (void)process_reclaim_orphan_zombies();
     process_release(panel);
 
     return exit_code;

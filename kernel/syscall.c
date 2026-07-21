@@ -54,7 +54,7 @@ static uint64_t syscall_call(process_t *current, const uint64_t x[31]) {
     case SYS_SPAWN_ARGV:
         return (uint64_t)sys_spawn_argv(current, x[0], x[1], x[2], x[3]);
     case SYS_WAIT:
-        return (uint64_t)sys_wait(x[0]);
+        return (uint64_t)sys_wait(current, x[0]);
     case SYS_KILL:
         return (uint64_t)sys_kill(x[0]);
     case SYS_OPEN:

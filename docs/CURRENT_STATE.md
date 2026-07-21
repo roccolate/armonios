@@ -57,7 +57,7 @@ Code or test-tool presence is never upgraded to a runtime claim without matching
 | Subsystem | Status | Current evidence | Important limitation |
 |---|---|---|---|
 | AArch64 QEMU boot | BUILD-VERIFIED; QEMU-VERIFIED on current baseline | Boot code, DTB parsing, UART markers, and the usercopy/storage smoke paths | Full desktop/runtime matrix not automated. |
-| EL0 processes | IMPLEMENTED; HOST-VERIFIED | Process table, saved trap frames, per-process page tables, spawn/wait/kill/exit tests, packed argv import | Permission-aware validation and kernel-owned syscall payloads are implemented; fault-recoverable copyin/copyout is still pending. |
+| EL0 processes | IMPLEMENTED; HOST-VERIFIED | Process table, saved trap frames, per-process page tables, parent-owned zombie/wait regression, spawn/wait/kill/exit tests, packed argv import | Process capacity remains fixed; permission-aware validation is implemented, while fault-recoverable copyin/copyout is still pending. |
 | EL0 scheduling | IMPLEMENTED; HOST-VERIFIED | Timer IRQ dispatch and process round-robin tests | Runtime stress/preemption coverage is limited. |
 | EL1 kernel threads | IMPLEMENTED | Cooperative scheduler code | Kernel threads are not timer-preempted. |
 | PMM/VMM/heap | IMPLEMENTED; HOST-VERIFIED | Allocation, mapping, rollback, cleanup, and heap tests | PMM manages at most 128 MiB; kernel RAM mappings are now W^X (RISK-008: text RX, rodata R/NX, data+bss+stack RW+NX, MMIO device+NX, remaining RAM RW+NX). |

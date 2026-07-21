@@ -329,6 +329,7 @@ void process_init(process_t *process, uint32_t pid, const char *name) {
     }
 
     process->pid = pid;
+    process->parent_pid = 0;
     process_copy_name(process, name);
     process->sp = 0;
     process->pc = 0;

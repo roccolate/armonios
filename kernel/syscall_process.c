@@ -60,24 +60,27 @@ int64_t sys_spawn_argv(process_t *process, uint64_t path_ptr,
     return pid;
 }
 
-int64_t sys_wait(uint64_t pid) {
+int64_t sys_wait(process_t *process, uint64_t pid) {
     uint64_t exit_code = 0;
-    process_t *process;
+    process_t *child;
 
-    if (pid == 0 || pid > UINT32_MAX) {
+    if (process == 0 || pid == 0 || pid > UINT32_MAX) {
         return ERR_INVAL;
     }
 
-    process = process_find((uint32_t)pid);
-    if (process == 0) {
+    child = process_find((uint32_t)pid);
+    if (child == 0) {
         return ERR_NOENT;
     }
-
-    if (process->state != PROCESS_ZOMBIE) {
+    if (child->parent_pid != process->pid) {
+        return ERR_PERM;
+    }
+    if (child->state != PROCESS_ZOMBIE) {
         return ERR_AGAIN;
     }
 
-    if (process_wait_zombie((uint32_t)pid, &exit_code) != 0) {
+    if (process_wait_child_zombie(process->pid, (uint32_t)pid,
+                                  &exit_code) != 0) {
         return ERR_INVAL;
     }
 
