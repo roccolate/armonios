@@ -15,10 +15,14 @@ The QEMU `virt` kernel, graphical desktop, narrow writable FAT32 workflow,
 freestanding EL0 applications, and automated verification matrix are real and
 reproducible. Most original v0.2 cleanup goals have landed.
 
-The runtime path measures aggregate duration plus input production/consumption,
-redraw submissions, consumed network RX frames, and shared input queue pressure.
-Work remains unbounded; no sustained-load QEMU test proves EL0 progress under
-simultaneous input, network, and redraw pressure.
+Runtime measurement Phase 1B is complete for the work classes currently
+observable on QEMU. The service measures duration, input production and
+consumption, input queue pressure, USB HID polling operations, consumed network
+frames, redraw submissions, partial-damage items, and full redraws.
+
+The work is still unbounded. No per-class budgets or global deadline exist, and
+no sustained-load QEMU test proves EL0 progress under combined input, network,
+and redraw pressure.
 
 ArmoniOS is accurately described as:
 
@@ -33,29 +37,36 @@ Raspberry Pi operating system.
 
 - **Audit date:** 2026-07-21
 - **Primary verified platform:** QEMU `virt`, Cortex-A72 CPU model
-- **Merged input/redraw telemetry baseline:**
+- **Tracking issue:** #43, v0.2 measure and bound deferred runtime service
+- **Aggregate telemetry merge:**
+  `b3fd013da43fc3eacee153f3535a997e039245f3`
+- **Input/redraw/queue telemetry merge:**
   `a3b9b447839b310c26ba99b8777d2b26a40eba09`
-- **Network metric PR:** #46
-- **Validated code/test/documentation tree:**
-  `02fb1c0f5d5d6274f5c8fe88c754cd7298ebda94`
-- **Tracking issue:** #43
+- **Network frame telemetry merge:**
+  `f60ab2884b91eb5f57a2c1a8c10f7cbb18c769bb`
+- **USB HID poll telemetry merge:**
+  `7a6780d3091c82998f8da08d8fa4c85640f365b5`
+- **Damage/full-redraw telemetry merge:**
+  `f327868fe2439772b79cd004432387dc80bc21a5`
+- **Latest fully validated code head:**
+  `6634c3a6f527433643a56f2c90cc6af8bad62c1d`
 - **Hosted validation:**
-  - `Verify ArmoniOS` run `29833200802`: success
-  - `CI - Tests` run `29833200753`: success
-- **Loadable QEMU kernel size:** 107262 bytes; limit 108000; margin 738 bytes
+  - `Verify ArmoniOS` run `29840410727`: success
+  - `CI - Tests` run `29840411044`: success
+- **Loadable QEMU kernel size:** 107370 bytes
+- **Kernel size limit:** 108000 bytes
+- **Remaining margin:** 630 bytes
 
-Those runs validate code, tests, verification scripts, README, AGENTS, current
-state, runtime documentation, and risk documentation. Later evidence-only
-commits that record the successful run IDs do not change kernel behavior. A
-merge commit is not an independent execution unless a workflow runs against
-that exact SHA.
+Those runs validate the Phase 1B code and tests before this documentation-only
+synchronization. The squash merge commit is not a separately executed workflow
+unless GitHub runs against that exact SHA.
 
 ## Release phases
 
 | Phase | State | Real interpretation |
 |---|---|---|
 | v0.1 QEMU baseline | COMPLETE | Boot, desktop, narrow FAT workflow, deterministic QEMU gates, CI, and dated manual evidence exist. |
-| v0.2 cleanup/hardening | IN PROGRESS / CANDIDATE | Ownership cleanup, process lifecycle, bounded timer callback, aggregate timing, input/redraw/network metrics, and input overflow accounting exist. Budgets and stress proof remain. |
+| v0.2 cleanup/hardening | IN PROGRESS / CANDIDATE | Ownership cleanup, process lifecycle, bounded timer callback, and complete observable-work measurement exist. Budgets and stress proof remain. |
 | v0.3 storage/VFS platform | NEXT AFTER v0.2 | No common path resolver, rich block metadata, or structured filesystem ABI. |
 | v0.4 real FAT | PLANNED | Current FAT remains root-only 8.3 FAT32. |
 | v0.5 userland runtime/widgets | PLANNED | No reusable heap, dynamic containers, or shared widget toolkit. |
@@ -69,10 +80,10 @@ that exact SHA.
 
 | Check | Evidence class | Result and scope |
 |---|---|---|
-| QEMU build and size | BUILD-VERIFIED | `.data == 0`; loadable kernel 107262 bytes under the 108000-byte ceiling. |
+| QEMU build and size | BUILD-VERIFIED | `.data == 0`; loadable kernel 107370 bytes under the 108000-byte ceiling. |
 | RPi4 build/probe gates | BUILD/HOST-VERIFIED | Normal and diagnostic images build; unsupported normal capabilities fail closed. |
 | Native host suite | HOST-VERIFIED | Kernel, memory, VFS, FAT32, GUI, parser, driver, and ABI tests pass. |
-| Runtime service regression | HOST-VERIFIED | Timing, EOI order, coalescing, requeue, reset, indexed input/redraw/network last/max/total, inactive-report rejection, queue pressure, and static network wiring pass. |
+| Runtime service regression | HOST-VERIFIED | Timing, EOI order, coalescing, requeue, reset, all indexed class metrics, direct partial/full helper behavior, inactive-report rejection, queue pressure, and static wiring pass. |
 | Input queue telemetry | HOST-VERIFIED | Zero state, 64-entry high-water, full-queue overflow, draining, and reset. |
 | Process/VFS/user-copy/KLI1 | HOST-VERIFIED | Parent/wait, local FDs, permission-aware copy, and mutable-storage contracts. |
 | Stack check | HOST-VERIFIED | Editor maximum remains 368 bytes against 3072. |
@@ -93,11 +104,11 @@ timer callback
   -> fixed account/rearm/publish work
   -> board_irq_end()
   -> measured runtime pass
-       -> input producers
+       -> virtio-input and USB HID producers
        -> input queue to GUI
-       -> dirty redraw
+       -> dirty redraw and compositor batch report
        -> virtio-net RX drain
-       -> aggregate and class metrics
+       -> aggregate and per-class metrics
   -> process dispatch
   -> eret
 ```
@@ -112,28 +123,33 @@ The timer callback is bounded. The complete pass is measurable but not bounded.
 
 The kernel-internal snapshot records:
 
-- requests, coalescing, non-empty/empty passes, and requeues;
-- last/max/total `CNTPCT_EL0` duration and one-interval overruns;
-- input produced by virtio-input and direct USB HID;
-- input consumed from the shared queue during the active bottom half;
-- successful redraw submissions;
-- valid virtio-net RX frames consumed during the active pass;
+- requests, coalescing, non-empty and empty passes, and requeues;
+- last, maximum, and cumulative `CNTPCT_EL0` duration;
+- passes exceeding the one-timer-interval observation threshold;
+- input events produced by virtio-input and directly attached USB HID;
+- input events consumed from the shared queue;
 - maximum queue depth, lifetime high-water, and full-queue overflow;
+- USB HID polls that reach the active xHCI controller;
+- valid virtio-net RX frames consumed;
+- successful QEMU redraw submissions;
+- merged partial-damage rectangles submitted in successful redraws;
+- full-redraw fallbacks submitted successfully;
 - pending and last-consumed work bits.
 
-Each work class stores last-pass, maximum-pass, and cumulative counts. Reports
-outside the active pass are ignored, so console-thread work does not contaminate
-bottom-half measurements.
+Each indexed class stores last-pass, maximum-pass, and cumulative values. Reports
+outside the active pass are ignored, so cooperative console work does not
+contaminate bottom-half measurements.
 
 The network metric counts frames software actually consumed. It does not prove
-that the 16-descriptor RX ring never dropped or overwrote work; the device API
-currently exposes no reliable RX-drop counter.
+that the 16-descriptor RX ring never lost work; the current device interface has
+no trustworthy device-drop or ring-overflow signal.
 
-Device-operation counts, damage/full-redraw detail, class budget exhaustion, and
-EL0 heartbeat progress remain unmeasured.
+Pixels, damaged area, GPU completion latency, and failed-draw CPU work are not
+measured. These omissions do not prevent choosing initial count-based budgets,
+but must remain explicit.
 
-No syscall exposes the internal layout. Pending state and telemetry assume one
-CPU and one consumer; they are not SMP-safe synchronization.
+No syscall exposes the internal telemetry layout. Pending state and telemetry
+assume one CPU and one consumer; they are not SMP-safe synchronization.
 
 ## Important fixed limits
 
@@ -143,13 +159,13 @@ CPU and one consumer; they are not SMP-safe synchronization.
 | Processes | 16 slots; eight user regions each |
 | VFS | 24 nodes, four mounts, eight FDs/process, 64-byte paths |
 | FAT32 | Root 8.3 files only |
-| GUI | 16 windows; 32 queued events/window |
+| GUI | 16 windows; 32 queued events/window; 32 damage rectangles |
 | Input | Shared 64-event queue; overflow counted but not prevented |
 | Network RX | 16 virtio descriptors; consumed frames measured, device drops unavailable |
 | Editor | 512-byte buffer; caret-line viewport |
 | Files | `/fat` only; eight displayed root entries |
 | Network API | No sockets, TCP, DNS API, or HTTP |
-| USB | Direct keyboard/mouse HID; no hubs |
+| USB | Direct keyboard/mouse HID; no hubs; at most four registered HID devices |
 | User copy | Permission-aware but not fault-recoverable |
 | RPi4 | Build/host scaffolding only |
 
@@ -157,10 +173,12 @@ CPU and one consumer; they are not SMP-safe synchronization.
 
 ### Blocks formal v0.2
 
-- **RISK-017:** selected work is measurable but not bounded.
-- RX device drops, device operations, damage batches, and exhaustion are not fully measured.
-- No class budgets or global deadline exist.
-- Budget-exhausted work has no pending-bit preservation rule.
+- **RISK-017:** work is measurable but not bounded.
+- Only one periodic pending bit exists; work classes cannot yet be resumed
+  independently.
+- No input, network, USB, redraw, or global time budget exists.
+- Budget-exhausted work has no class-specific pending-bit preservation rule.
+- No budget-exhaustion counters exist.
 - No sustained-load QEMU heartbeat proves EL0 progress or no silent loss.
 - No formal v0.2 tag/evidence record exists.
 
@@ -190,9 +208,12 @@ make qemu-fb-visible   # separate manual evidence
 
 ## Next sequence
 
-1. Measure device operations, damage/full-redraw work, and any honest RX-drop signal.
-2. Select class budgets and a global deadline from evidence.
-3. Preserve or republish specific pending bits when a budget expires.
-4. Add sustained-load QEMU heartbeat and explicit loss accounting.
-5. Close or accept RISK-017, record a visible pass, and promote/tag v0.2.
-6. Begin v0.3 storage/VFS work.
+1. Split periodic work into independently pending input, GUI, network, and device
+   classes.
+2. Add a bounded virtio-net receive pass first, preserving network pending work
+   when the frame limit is reached.
+3. Add input, USB, and redraw budgets plus a global generic-counter deadline.
+4. Count every budget exhaustion and preserve the relevant pending bit.
+5. Add sustained-load QEMU heartbeat and explicit loss accounting.
+6. Close or accept RISK-017, record a visible pass, and promote/tag v0.2.
+7. Begin v0.3 storage/VFS work.
