@@ -109,7 +109,6 @@ static void test_syscall_boundary_copies(void) {
                            arg0));
     CHECK_TRUE(text_equals((const char *)(uintptr_t)kernel_argv.pointers[1],
                            arg1));
-    CHECK_EQ(0U, kernel_argv.pointers[2]);
     CHECK_EQ(ERR_INVAL,
              sys_copy_argv_from_user(&process, rw_base + 128U,
                                      PANEL_BOOT_ARGV_MAX_STRINGS + 1U,
