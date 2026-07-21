@@ -23,12 +23,12 @@ ArmoniOS is a **real bare-metal AArch64 operating system** with a verified QEMU
 
 - **public baseline:** v0.1 QEMU desktop;
 - **engineering phase:** v0.2 cleanup and runtime hardening;
-- **next release blocker:** bounded deferred runtime work and sustained-load proof;
+- **next release blocker:** remaining runtime budgets and sustained-load proof;
 - **product target:** v1.0 usable QEMU mini desktop;
 - **hardware:** Raspberry Pi scaffolding only, not hardware-supported.
 
-Most original v0.2 cleanup work is implemented. Runtime measurement Phase 1B is
-complete for the work classes observable on QEMU. The kernel records:
+Runtime measurement Phase 1B is complete for the work classes observable on
+QEMU. The kernel records:
 
 - requests, coalescing, requeue, and non-empty/empty passes;
 - last, maximum, and cumulative generic-counter duration;
@@ -40,13 +40,20 @@ complete for the work classes observable on QEMU. The kernel records:
 - successful redraw submissions;
 - partial-damage rectangle counts and full-redraw fallbacks.
 
-This is measurement, not completion. The post-EOI service still has no per-class
-budgets, independently pending work classes, global deadline, or sustained-load
-proof of EL0 progress. `RISK-017` remains open and v0.2 is not yet promoted.
+Phase 2 has begun. Network readiness now has an independent pending bit, and the
+post-EOI network phase consumes at most 16 valid virtio-net RX frames per pass.
+Reaching that cap conservatively republishes network work and increments an
+exhaustion counter. A workload containing exactly 16 frames may therefore cause
+one empty follow-up network pass.
 
-The virtio-net path has 16 RX descriptors but exposes no trustworthy device-drop
-or ring-overflow counter. Consumed-frame counts are not proof that no packet was
-lost before software observed it.
+This is not complete runtime bounding. Input consumption, USB polling,
+redraw/damage work, and total service time remain unbounded, and no sustained-load
+QEMU test yet proves EL0 progress. `RISK-017` remains open and v0.2 is not
+promoted.
+
+The virtio-net path exposes no trustworthy device-drop or ring-overflow counter.
+Consumed-frame counts are not proof that no packet was lost before software
+observed it.
 
 ## What works
 
@@ -67,6 +74,7 @@ The QEMU codebase includes:
 - PCI/xHCI and directly attached boot-protocol USB HID;
 - Ethernet, ARP, IPv4, UDP, and DHCP for a QEMU user-network lease;
 - one post-EOI deferred runtime service with aggregate and per-class telemetry;
+- an enforced 16-frame post-EOI network RX budget with conservative continuation;
 - deterministic host, QEMU, size, stack, ABI, storage, GUI, USB, network, and
   board-build gates.
 
@@ -83,11 +91,11 @@ The QEMU codebase includes:
 | Files | `/fat` only; at most eight displayed root entries. |
 | GUI | 16 windows, 32 events/window, 32 damage rectangles. |
 | Input | Shared 64-event queue; overflow is counted but not prevented. |
-| Network RX | 16 descriptors; consumed frames measured, device drops unavailable. |
+| Network RX | Post-EOI work is capped at 16 valid frames/pass and conservatively requeued; device drops remain unavailable. |
 | Networking API | No socket ABI, TCP, DNS API, or HTTP. |
 | USB | Direct keyboard/mouse HID, at most four registered devices, no hubs. |
 | Scheduling | EL0 preemptive; EL1 helper threads cooperative. |
-| Runtime service | Runs after EOI but before `eret`; all current classes are measured but none is bounded. |
+| Runtime service | Runs after EOI but before `eret`; network RX is count-bounded, other classes and total time are not. |
 | User copy | Permission checked, but final copies are not fault-recoverable. |
 | Raspberry Pi | Build/host scaffolding only; no physical boot or storage claim. |
 
@@ -125,6 +133,7 @@ The gate covers:
 - native kernel/VFS/FAT/GUI/driver/ABI tests;
 - runtime timing, EOI order, coalescing, requeue, reset, and every current work
   metric;
+- the 16-frame network cap, conservative follow-up, and 17-frame continuation;
 - direct partial/full redraw-helper coverage and static runtime wiring;
 - input queue depth/high-water/overflow;
 - parent/wait, process-local FDs, user-copy, and KLI1;
@@ -133,6 +142,9 @@ The gate covers:
 - usercopy/focus QEMU regressions;
 - framebuffer, USB, and DHCP markers;
 - visible-target FAT + GPU wiring.
+
+The shorter hosted workflow also runs the deferred-runtime regression with strict
+pipeline failure handling and retains a `runtime-service-test-log` artifact.
 
 Useful commands:
 
@@ -177,27 +189,28 @@ automated serial markers.
 
 ```text
 physical timer IRQ
-  -> fixed account/rearm/publish work
+  -> fixed account/rearm/publish periodic + network readiness
   -> EOI
   -> measured post-EOI runtime pass
-       -> input producers and USB HID polls
-       -> input queue to GUI
-       -> redraw plus partial/full damage shape
-       -> virtio-net RX frames
+       -> periodic input/USB/GUI phase
+       -> independently pending network phase
+            -> at most 16 valid RX frames
+            -> conservative requeue when cap is reached
   -> process dispatch
   -> eret
 ```
 
 EOI completes the interrupt-controller transaction but does not leave the CPU
-exception. EL0 remains paused during the pass. The timer callback is bounded; the
-complete pass is measured but not bounded.
+exception. EL0 remains paused during the pass. The timer callback and post-EOI
+network frame count are bounded; the complete pass is not yet globally bounded.
 
-The latest validated Phase 1B code head is
-`6634c3a6f527433643a56f2c90cc6af8bad62c1d`:
+The first network-budget implementation is validated on head
+`e3765864e6719c0b6373a4c9b1b7db59dfaa0202` and merged as
+`3797f7e7cf3dfb825d927e399aa4769b27020e29`:
 
-- `Verify ArmoniOS` run `29840410727`: success;
-- `CI - Tests` run `29840411044`: success;
-- loadable kernel: 107370 bytes against the 108000-byte limit.
+- `Verify ArmoniOS` run `29849603386`: success;
+- `CI - Tests` run `29849603374`: success;
+- loadable kernel: 107548 bytes against the 108000-byte limit.
 
 See [Deferred Runtime Service](docs/RUNTIME_SERVICE.md).
 
@@ -242,8 +255,8 @@ input, or an installable Raspberry Pi desktop image.
 
 ## Road to v1.0
 
-1. Split and bound deferred runtime work, preserve exhausted pending classes, and
-   prove EL0 progress under sustained load.
+1. Bound input, USB, redraw, and total runtime work, then prove EL0 progress under
+   sustained load.
 2. Promote v0.2 with dated automated and visible evidence.
 3. Build v0.3 block/VFS/path infrastructure.
 4. Add real FAT support.
