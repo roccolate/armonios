@@ -289,12 +289,9 @@ int usb_hid_poll_all(void) {
             total += n;
         }
     }
-
-    if (total > 0 && runtime_service_is_active()) {
-        const runtime_service_work_report_t report = {
-            .usb_input_events = (uint32_t)total,
-        };
-        runtime_service_report_work(&report);
+    if (total > 0) {
+        runtime_service_report_metric(RUNTIME_METRIC_INPUT_PRODUCED,
+                                      (uint32_t)total);
     }
     return total;
 }
