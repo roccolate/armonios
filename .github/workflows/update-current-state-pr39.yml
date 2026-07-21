@@ -1,0 +1,38 @@
+name: Update PR39 current state
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/el0-gui-info-usercopy
+
+      - name: Update current state
+        run: |
+          if [[ -f tools/update_current_state_pr39.py ]]; then
+            python3 tools/update_current_state_pr39.py
+          else
+            echo "current-state update already applied"
+          fi
+
+      - name: Commit evidence update
+        run: |
+          if git diff --quiet; then
+            echo "no generated changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Record PR39 verification evidence"
+          git push origin HEAD:agent/el0-gui-info-usercopy
