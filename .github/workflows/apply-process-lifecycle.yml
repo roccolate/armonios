@@ -4,18 +4,22 @@ on:
   push:
     branches:
       - agent/process-parent-wait-lifecycle
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: ${{ !contains(github.event.head_commit.message, '[process-lifecycle-applied]') }}
+    if: ${{ !contains(github.event.pull_request.head.sha || github.sha, '[process-lifecycle-applied]') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Check out branch
+      - name: Check out lifecycle branch
         uses: actions/checkout@v4
         with:
+          ref: agent/process-parent-wait-lifecycle
           fetch-depth: 0
 
       - name: Apply lifecycle patch
