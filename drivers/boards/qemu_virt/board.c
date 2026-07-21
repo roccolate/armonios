@@ -3,6 +3,7 @@
 #include "gpu/virtio_gpu.h"
 #include "input/virtio_input.h"
 #include "irq/gicv2.h"
+#include "kernel/gui_compositor.h"
 #include "kernel/mm/vmm.h"
 #include "kernel/runtime_service.h"
 #include "storage/virtio_blk.h"
@@ -182,7 +183,17 @@ int board_display_redraw(board_display_draw_fn_t draw, void *context) {
     }
     status = virtio_gpu_draw(g_display_base, draw, context);
     if (status == 0) {
+        gui_desktop_t *desktop = gui_desktop();
+
         runtime_service_report_metric(RUNTIME_METRIC_REDRAW, 1U);
+        if (desktop != 0) {
+            if (desktop->damage_full != 0U) {
+                runtime_service_report_metric(RUNTIME_METRIC_FULL_REDRAWS, 1U);
+            } else {
+                runtime_service_report_metric(RUNTIME_METRIC_DAMAGE_ITEMS,
+                                              desktop->damage_count);
+            }
+        }
     }
     return status;
 }
