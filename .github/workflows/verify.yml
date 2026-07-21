@@ -39,6 +39,17 @@ jobs:
       - name: Enforce kernel size limit
         run: make size
 
+      - name: Build RPi4 EMMC2 probe package
+        run: bash tools/package_rpi4_emmc2_probe.sh
+
+      - name: Upload RPi4 EMMC2 probe package
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpi4-emmc2-probe-${{ github.sha }}
+          path: build-rpi4-emmc2-probe/package
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Run native host tests
         run: make -C tests test
 

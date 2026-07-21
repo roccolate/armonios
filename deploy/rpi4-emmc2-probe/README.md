@@ -14,20 +14,48 @@ storage through the generic board API.
 - The Raspberry Pi 4 `broken-cd` policy only allows commands to be attempted;
   it does not assert hot-plug support or prove that a card is inserted.
 
-## Build
+## Build locally
 
 ```sh
 make rpi4-emmc2-probe
+bash tools/package_rpi4_emmc2_probe.sh
 ```
 
-The resulting uncompressed AArch64 image is:
+The raw uncompressed AArch64 image is:
 
 ```text
 build-rpi4-emmc2-probe/kernel8.img
 ```
 
-CI also builds this path through `tests/run_board_build_test.sh`, but CI cannot
-prove mailbox or SD-card behavior on physical hardware.
+The reproducible package is:
+
+```text
+build-rpi4-emmc2-probe/package/
+├── kernel8.img
+├── config.txt
+├── README.md
+├── COMMIT
+└── SHA256SUMS
+```
+
+`COMMIT` records the exact Git revision. Verify the package before copying it:
+
+```sh
+cd build-rpi4-emmc2-probe/package
+sha256sum -c SHA256SUMS
+```
+
+## Download the CI package
+
+The `Verify ArmoniOS` workflow publishes an artifact named:
+
+```text
+rpi4-emmc2-probe-<full-commit-sha>
+```
+
+The artifact contains the same five files as the local package and is retained
+for 30 days. The workflow still runs the host, size, stack, and QEMU gates after
+building the package; an artifact is not physical-hardware evidence.
 
 ## Prepare a test card
 
@@ -35,10 +63,11 @@ Use an existing Raspberry Pi 4 boot partition on a spare card so current
 firmware, the BCM2711 DTB, and overlays are already present.
 
 1. Back up its original `config.txt` and kernel image.
-2. Copy `build-rpi4-emmc2-probe/kernel8.img` to the boot partition.
-3. Merge the lines from this directory's `config.txt` into the boot
-   partition's configuration.
-4. Keep Device Tree enabled and do not apply `disable-emmc2`.
+2. Verify `SHA256SUMS` from the local or CI package.
+3. Copy the package's `kernel8.img` to the boot partition.
+4. Merge the package's `config.txt` into the boot partition configuration.
+5. Record the exact value from the package's `COMMIT` file.
+6. Keep Device Tree enabled and do not apply `disable-emmc2`.
 
 `dtoverlay=disable-bt` restores the first PL011 UART to GPIO 14 and GPIO 15 on
 a Raspberry Pi 4. ArmoniOS uses PL011 UART0 at `0xFE201000`.
@@ -103,7 +132,8 @@ Physical evidence should include:
 - Raspberry Pi 4 revision and RAM size;
 - firmware/bootloader date when available;
 - SD-card make, model, and capacity;
-- exact ArmoniOS commit;
+- the value in `COMMIT`;
+- the verified `kernel8.img` SHA-256;
 - complete UART log from power-on through the probe markers;
 - whether the result is repeatable after a cold power cycle.
 
