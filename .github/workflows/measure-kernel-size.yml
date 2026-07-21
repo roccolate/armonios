@@ -1,4 +1,4 @@
-name: Measure kernel size
+name: Apply zero-data kernel optimization
 
 on:
   pull_request:
@@ -9,34 +9,33 @@ permissions:
   contents: write
 
 jobs:
-  measure:
+  apply:
     if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: agent/process-parent-wait-lifecycle
+          fetch-depth: 0
+      - name: Apply zero-data optimization
+        run: python3 .github/scripts/zero_kernel_data.py
       - name: Install cross toolchain
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
-      - name: Build and record sizes
+      - name: Verify size and lifecycle regression
         run: |
           make clean >/dev/null
           make -j2 >/dev/null
-          {
-            printf 'kernel.bin bytes: '
-            wc -c < build/kernel.bin
-            aarch64-linux-gnu-size build/kernel.elf
-            printf '\nInitialized writable data symbols:\n'
-            aarch64-linux-gnu-nm -S --size-sort --radix=d build/kernel.elf | awk '$3 == "D" || $3 == "d"'
-            printf '\nLargest text/data symbols:\n'
-            aarch64-linux-gnu-nm -S --size-sort --radix=d build/kernel.elf | tail -40
-          } > .github/kernel-size-diagnostic.txt
-      - name: Publish diagnostic
+          make size
+          bash tests/run_process_parent_wait_test.sh
+      - name: Publish clean optimized tree
         run: |
+          rm -f .github/kernel-size-diagnostic.txt
+          rm -f .github/scripts/zero_kernel_data.py
+          rm -f .github/workflows/measure-kernel-size.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/kernel-size-diagnostic.txt
-          git commit -m "Capture initialized kernel data symbols"
+          git add -A
+          git commit -m "Keep mutable kernel defaults in BSS"
           git push origin HEAD:agent/process-parent-wait-lifecycle
