@@ -7,6 +7,7 @@ BUILD_DIR="${RPI4_PROBE_BUILD_DIR:-$ROOT_DIR/build-rpi4-emmc2-probe}"
 PACKAGE_DIR="${RPI4_PROBE_PACKAGE_DIR:-$BUILD_DIR/package}"
 KERNEL_IMAGE="$BUILD_DIR/kernel8.img"
 DEPLOY_DIR="$ROOT_DIR/deploy/rpi4-emmc2-probe"
+KERNEL_SIZE_LIMIT="${KERNEL_SIZE_LIMIT:-108000}"
 
 if [[ ! -f "$KERNEL_IMAGE" ]]; then
     make -C "$ROOT_DIR" rpi4-emmc2-probe
@@ -18,6 +19,15 @@ for source in "$KERNEL_IMAGE" "$DEPLOY_DIR/config.txt" "$DEPLOY_DIR/README.md"; 
         exit 1
     fi
 done
+
+kernel_size=$(stat -c%s "$KERNEL_IMAGE")
+if (( kernel_size > KERNEL_SIZE_LIMIT )); then
+    printf 'FAIL: RPi4 probe image is %d bytes, exceeds limit %d\n' \
+        "$kernel_size" "$KERNEL_SIZE_LIMIT" >&2
+    exit 1
+fi
+printf 'PASS: RPi4 probe image size %d (limit %d)\n' \
+    "$kernel_size" "$KERNEL_SIZE_LIMIT"
 
 rm -rf "$PACKAGE_DIR"
 mkdir -p "$PACKAGE_DIR"

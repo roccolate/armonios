@@ -45,6 +45,10 @@ cd build-rpi4-emmc2-probe/package
 sha256sum -c SHA256SUMS
 ```
 
+The packaging command rejects an image larger than 108000 bytes before copying
+or hashing it. Override `KERNEL_SIZE_LIMIT` only for an intentional size-policy
+experiment, not for a normal probe build.
+
 ## Download the CI package
 
 The `Verify ArmoniOS` workflow publishes an artifact named:
@@ -111,6 +115,50 @@ fail through the command or timeout markers after the assume-present marker.
 `55AA` is common for an MBR or boot sector signature, but the probe records the
 actual bytes and does not treat a different value as a driver failure.
 
+## Failure telemetry
+
+When `init` or `read0` returns a negative result, the probe prints one bounded
+line:
+
+```text
+EMMC2 diag c <command|-1> a <argument> r <read-offset> p <present> k <clock-reset> h <host-power> i <last-interrupt> f <actual-clock-hz>
+```
+
+The fields are deliberately compact to keep `kernel8.img` under the 108000-byte
+limit:
+
+- `c`: last SD command index; `-1` means no command reached the controller;
+- `a`: last command argument;
+- `r`: last MMIO offset read by the SDHCI driver;
+- `p`: raw `PRESENT_STATE` before the two `broken-cd` bits are supplied;
+- `k`: current clock/reset register;
+- `h`: current host-control/power register pair;
+- `i`: last non-zero `INT_STATUS`, retained after acknowledgement;
+- `f`: actual card clock selected by the driver.
+
+The adapter observes real 32-bit MMIO accesses. It does not synthesize a command
+response or interrupt. The only synthetic values remain the two `broken-cd`
+presence bits returned from reads of offset `0x24`; the raw value is reported in
+`p`.
+
+Useful interpretations:
+
+- `c -1` and `r 0x2c`: controller reset or clock stabilization;
+- `c -1` and `r 0x24`: card-detect or command/data-inhibit wait before CMD0;
+- `r 0x30` after a command: response, data-ready, or data-end interrupt wait;
+- `c 17`: the sector-zero read reached CMD17.
+
+Relevant `i` error bits are:
+
+- `0x00010000`: command timeout;
+- `0x00020000`: command CRC;
+- `0x00040000`: command end-bit;
+- `0x00080000`: command index;
+- `0x00100000`: data timeout;
+- `0x00200000`: data CRC;
+- `0x00400000`: data end-bit;
+- `0x00800000`: bus-power error.
+
 Failure localization is explicit:
 
 - `EMMC2 clock: unavailable -1` means local address, alias, or argument
@@ -121,9 +169,10 @@ Failure localization is explicit:
   or zero clock response;
 - absence of `EMMC2 probe: broken-cd assume-present` means the expected opt-in
   probe image was not reached;
-- `EMMC2 probe: init <negative>` means SDHCI/card initialization failed;
+- `EMMC2 probe: init <negative>` means SDHCI/card initialization failed and is
+  followed by `EMMC2 diag`;
 - `EMMC2 probe: read0 <negative>` means initialization succeeded but sector-0
-  transfer failed.
+  transfer failed and is followed by `EMMC2 diag`.
 
 ## Evidence to record
 
