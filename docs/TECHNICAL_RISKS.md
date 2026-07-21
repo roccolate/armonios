@@ -35,7 +35,7 @@ fail closed and no physical support claim is made.
 | RISK-014 | P1 v1 | Desktop applications | OPEN | Blocks v1 usability |
 | RISK-015 | P2 | Fault-contained user copy | OPEN | Future mapping hardening |
 | RISK-016 | P1 | Process lifecycle | CLOSED | Parent/wait correctness |
-| RISK-017 | P1 | Deferred runtime execution | OPEN; INPUT/REDRAW METRICS LANDED | Blocks formal v0.2 |
+| RISK-017 | P1 | Deferred runtime execution | OPEN; INPUT/REDRAW/NETWORK METRICS CANDIDATE | Blocks formal v0.2 |
 
 ## Open risks
 
@@ -46,12 +46,13 @@ fail closed and no physical support claim is made.
 exception-stack occupancy, and v0.2 promotion  
 **Tracking:** issue #43  
 **Aggregate implementation:** PR #44 / `b3fd013`  
-**Input/redraw implementation:** PR #45
+**Input/redraw implementation:** PR #45 / `a3b9b44`  
+**Network frame candidate:** PR #46
 
 The timer callback performs fixed account/rearm/publication/scheduler work. The
 runtime backend executes after EOI but before process dispatch and `eret`.
 
-#### Measurements implemented
+#### Measurements implemented or under final validation
 
 The internal snapshot records:
 
@@ -61,30 +62,39 @@ The internal snapshot records:
 - input produced by virtio-input and direct USB HID;
 - input consumed from the shared queue during the active bottom half;
 - successful display redraw submissions;
-- maximum queue depth, lifetime high-water, and full-queue overflow;
-- counter frequency, timing threshold, pending bits, and last-consumed bits.
+- valid virtio-net RX frames consumed during the active pass;
+- maximum input queue depth, lifetime high-water, and full-queue overflow;
+- counter frequency, threshold, pending bits, and last-consumed bits.
 
 Each work class keeps last-pass, maximum-pass, and cumulative counts. Reports
 outside the active pass are ignored so console-thread work is excluded.
 
 Production timing uses `CNTPCT_EL0`; `CNTFRQ_EL0` provides conversion. At 100 Hz
-the current overrun threshold is approximately 10 ms. This is an observation
-threshold, not the accepted final budget.
+the current threshold is approximately 10 ms. It is an observation threshold,
+not the accepted final budget.
 
-#### Validation
+#### Network evidence boundary
 
-Validated PR tree: `2923fe133de368ace8ac5ff88342f4a9bd3dd3a4`
+`virtio_net_recv()` reports one network metric only after it returns a valid
+non-empty RX frame during the active runtime pass. This counts completed software
+consumption, not polling attempts.
 
-- `Verify ArmoniOS` run `29831391737`: success;
-- `CI - Tests` run `29831391738`: success;
-- QEMU kernel: 107204 bytes against the 108000-byte ceiling.
+The current 16-descriptor virtio RX implementation exposes no reliable device
+counter for frames dropped, overwritten, or never delivered to software. The
+network metric must not be interpreted as proof that the receive ring lost
+nothing. RX drop/ring-pressure evidence remains open.
 
-The matrix covers the indexed metric regression, inactive-report rejection,
-queue depth/high-water/overflow regression, complete host suite, QEMU/RPi4
-builds, stack, FAT32, usercopy, focus, framebuffer, USB, and network markers.
-Later evidence-only commits that record these run IDs do not change kernel
-behavior. A merge commit is not independently tested unless a workflow runs on
-that exact SHA.
+#### Candidate validation
+
+PR #46 code/test head before documentation:
+`f5b5b69888a9734d482c329d64224b60d62c03d9`.
+
+- `Verify ArmoniOS` run `29832730156`: final result must be recorded before merge;
+- `CI - Tests` run `29832730340`: final result must be recorded before merge.
+
+The candidate extends the deterministic metric regression with network
+last/max/total and reset checks, and statically verifies the driver wiring. The
+final code/documentation tree must be green before merge.
 
 #### Why the risk remains open
 
@@ -96,7 +106,8 @@ During the service pass:
 - EL0 remains paused;
 - the entire input queue may still be drained;
 - USB/device work has no operation budget;
-- network frames and receive drops are not measured or bounded;
+- network frames are measured but not limited;
+- network device drops/ring overflow are not measurable;
 - redraw damage/full-screen fallback is not measured or bounded;
 - no class or global deadline is enforced;
 - no budget-exhaustion pending-bit rule exists;
@@ -107,16 +118,16 @@ only under the current one-consumer model.
 
 **Failure mode:** sustained input, USB, redraw, or network traffic can extend one
 exception path and delay EL0 and other normal IRQ handling. Shared input loss is
-now countable but not prevented.
+countable; network device loss is not yet observable.
 
 **Remaining exit criteria:**
 
-1. measure network frames, receive pressure/drops, device operations, damage
-   batches, and full-redraw fallbacks;
+1. measure device operations, damage batches, full-redraw fallbacks, and any
+   honest network RX-drop/ring-pressure signal;
 2. choose independent class limits from measured evidence;
 3. enforce a global generic-counter deadline;
 4. preserve or republish specific pending bits when a class/deadline expires;
-5. count every exhaustion and loss path;
+5. count every exhaustion and observable loss path;
 6. add QEMU stress with an EL0 heartbeat under combined load;
 7. retain all current subsystem gates;
 8. record a dated visible desktop pass;

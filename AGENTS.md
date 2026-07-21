@@ -8,14 +8,14 @@ ArmoniOS is a **v0.1 QEMU desktop baseline** and an active **v0.2
 cleanup/runtime-hardening candidate**. It is a real freestanding AArch64
 operating system, not a Linux application or distribution.
 
-The merged runtime foundation measures requests, coalescing, requeues,
-last/maximum/cumulative generic-counter duration, and passes exceeding one timer
-interval. PR #45 adds candidate measurements for input produced, input consumed,
-successful redraws, shared input-queue depth/high-water, and full-queue overflow.
+The runtime foundation measures requests, coalescing, requeues,
+last/maximum/cumulative generic-counter duration, interval overruns, input
+produced/consumed, successful redraws, consumed virtio-net RX frames, and input
+queue depth/high-water/overflow.
 
 Measurement does not complete v0.2. The service still has no class budgets,
-global deadline, network frame measurement, or sustained-load QEMU proof of EL0
-progress. Track the remaining work in issue #43 and RISK-017.
+global deadline, reliable network device-drop signal, or sustained-load QEMU
+proof of EL0 progress. Track remaining work in issue #43 and RISK-017.
 
 Issue #2 is the **v0.6 useful desktop applications** milestone. Do not treat it
 as v1.1 work or use it to bypass v0.3 storage/VFS, v0.4 real FAT, and v0.5 shared
@@ -59,7 +59,10 @@ must never be used as evidence that a feature exists.
 - Work-class reports are accepted only during the active runtime pass so console
   thread activity is not mixed into bottom-half telemetry.
 - Input overflow is counted but not prevented.
-- Network frames, device operations, and damage batches are not yet measured.
+- Consumed network frames are measured, but the 16-descriptor virtio RX path has
+  no reliable device-drop/ring-overflow counter.
+- Device operations and compositor damage/full-redraw batches are not yet
+  measured.
 - Runtime telemetry is kernel-internal. Do not expose the internal structure
   directly as a syscall ABI.
 - Pending state and telemetry assume one CPU and one consumer; they are not
@@ -85,7 +88,9 @@ The baseline includes:
 - `.data == 0` and the 108000-byte kernel limit;
 - RPi4 EMMC2 diagnostic, MBR, and block-view gates;
 - native kernel, VFS, filesystem, GUI, parser, driver, and ABI tests;
-- runtime EOI/coalescing/timing/requeue/reset and indexed work-metric checks;
+- runtime EOI/coalescing/timing/requeue/reset and indexed input/redraw/network
+  metric checks;
+- static network metric wiring validation;
 - input queue depth/high-water/overflow regression;
 - parent/wait and process-local FD isolation;
 - user-copy and KLI1 contracts;
@@ -112,7 +117,8 @@ Serial markers are not visible manual validation.
 - Do not add blocking operations, unbounded scans, queue drains, or rendering to a
   hard-IRQ callback.
 - Treat timing and work counts as measurement, not proof of a bound.
-- Keep driver reports compact and count completed work, not polling attempts.
+- Keep reports compact and count completed work, not polling attempts.
+- Do not infer “no drops” from consumed-frame counts.
 - Preserve or republish pending work when future budgets expire.
 - Add host tests and deterministic QEMU progress tests for exception/scheduler
   boundary changes.
