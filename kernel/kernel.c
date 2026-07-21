@@ -492,6 +492,15 @@ static init_status_t start_scheduler(void) {
     return INIT_STATUS_OK;
 }
 
+#if defined(ARMONIOS_RPI4_EMMC2_PROBE)
+void kernel_main(uint64_t dtb_addr) {
+    (void)dtb_addr;
+    board_early_init();
+    for (;;) {
+        __asm__ volatile("wfe");
+    }
+}
+#else
 void kernel_main(uint64_t dtb_addr) {
     dtb_memory_t memory;
     init_status_t storage_status;
@@ -569,3 +578,4 @@ void kernel_main(uint64_t dtb_addr) {
         __asm__ volatile("wfe");
     }
 }
+#endif
