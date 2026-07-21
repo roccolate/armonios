@@ -8,7 +8,7 @@
  *
  * UART polling is optional because the timer path must preserve its current
  * board/USB-only behavior, while the console and syscall paths also service
- * serial input. Unsupported board and USB sources are skipped explicitly.
+ * serial input. The service owns capability checks; callers own event routing.
  */
 void kernel_io_poll_input_sources(uint8_t include_uart);
 
