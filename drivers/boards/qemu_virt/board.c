@@ -4,6 +4,7 @@
 #include "input/virtio_input.h"
 #include "irq/gicv2.h"
 #include "kernel/mm/vmm.h"
+#include "kernel/runtime_service.h"
 #include "storage/virtio_blk.h"
 #include "uart/pl011.h"
 
@@ -174,10 +175,16 @@ int board_display_init(board_display_draw_fn_t draw, void *context) {
 }
 
 int board_display_redraw(board_display_draw_fn_t draw, void *context) {
+    int status;
+
     if (draw == 0 || g_display_ready == 0U) {
         return -1;
     }
-    return virtio_gpu_draw(g_display_base, draw, context);
+    status = virtio_gpu_draw(g_display_base, draw, context);
+    if (status == 0) {
+        runtime_service_report_metric(RUNTIME_METRIC_REDRAW, 1U);
+    }
+    return status;
 }
 
 uint32_t board_input_irq(void) {
@@ -198,5 +205,11 @@ int board_input_init(void) {
 }
 
 int board_input_poll(void) {
-    return virtio_input_poll(&g_input_dev);
+    int events = virtio_input_poll(&g_input_dev);
+
+    if (events > 0) {
+        runtime_service_report_metric(RUNTIME_METRIC_INPUT_PRODUCED,
+                                      (uint32_t)events);
+    }
+    return events;
 }
