@@ -4,16 +4,13 @@ on:
   push:
     branches:
       - agent/rpi4-emmc2-fat-layout-probe
-  pull_request:
-    branches:
-      - main
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: github.event_name == 'pull_request' || contains(github.event.head_commit.message, '[apply-fat-probe]')
+    if: contains(github.event.head_commit.message, '[apply-fat-probe-2]')
     runs-on: ubuntu-24.04
     steps:
       - name: Check out branch
@@ -22,7 +19,21 @@ jobs:
           ref: agent/rpi4-emmc2-fat-layout-probe
 
       - name: Apply exact substitutions
-        run: python3 tools/apply_rpi4_fat_probe_patch.py
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import runpy
+
+          original_unlink = pathlib.Path.unlink
+
+          def keep_workflow(path, *args, **kwargs):
+              if str(path) == '.github/workflows/apply-rpi4-fat-probe-patch.yml':
+                  return None
+              return original_unlink(path, *args, **kwargs)
+
+          pathlib.Path.unlink = keep_workflow
+          runpy.run_path('tools/apply_rpi4_fat_probe_patch.py', run_name='__main__')
+          PY
 
       - name: Commit generated integration
         run: |
