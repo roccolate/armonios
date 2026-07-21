@@ -312,8 +312,7 @@ int64_t sys_window_get_bounds(process_t *process, uint64_t window_id,
     out[1] = window->y;
     out[2] = window->w;
     out[3] = window->h;
-    sys_copy_to_user_validated(out_ptr, out, sizeof(out));
-    return 0;
+    return sys_copy_to_user(process, out_ptr, out, sizeof(out));
 }
 
 int64_t sys_window_set_bounds(process_t *process, uint64_t window_id,
@@ -402,8 +401,7 @@ int64_t sys_window_state(process_t *process, uint64_t window_id,
         (window->flags & GUI_WINDOW_NO_FOCUS) == 0U) {
         state |= 0x2U;
     }
-    sys_copy_to_user_validated(out_ptr, &state, sizeof(state));
-    return 0;
+    return sys_copy_to_user(process, out_ptr, &state, sizeof(state));
 }
 
 int64_t sys_window_event(process_t *process, uint64_t window_id,
@@ -439,8 +437,11 @@ int64_t sys_window_event(process_t *process, uint64_t window_id,
         out[0] = ev.type;
         out[1] = (uint32_t)ev.data1;
         out[2] = (uint32_t)ev.data2;
-        sys_copy_to_user_validated(buf_ptr + n * sizeof(out),
-                                   out, sizeof(out));
+        status = sys_copy_to_user(process, buf_ptr + n * sizeof(out),
+                                  out, sizeof(out));
+        if (status != 0) {
+            return status;
+        }
         n++;
     }
     return (int64_t)n;
