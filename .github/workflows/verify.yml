@@ -62,6 +62,9 @@ jobs:
       - name: Run native host tests
         run: make -C tests test
 
+      - name: Test deferred runtime service
+        run: bash tests/run_runtime_service_test.sh
+
       - name: Enforce userland stack limit
         run: make stack-check
 
