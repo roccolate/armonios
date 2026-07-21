@@ -15,12 +15,6 @@ typedef struct {
 
 int64_t sys_meminfo(process_t *process, uint64_t info_ptr) {
     uint64_t info[2];
-    int64_t status;
-
-    status = sys_user_buf_out(process, info_ptr, sizeof(info));
-    if (status != 0) {
-        return status;
-    }
 
     info[0] = pmm_total_count();
     info[1] = pmm_free_count();
@@ -29,12 +23,6 @@ int64_t sys_meminfo(process_t *process, uint64_t info_ptr) {
 
 int64_t sys_timeinfo(process_t *process, uint64_t info_ptr) {
     uint64_t info[3];
-    int64_t status;
-
-    status = sys_user_buf_out(process, info_ptr, sizeof(info));
-    if (status != 0) {
-        return status;
-    }
 
     info[0] = timer_ticks();
     info[1] = sched_ticks();
@@ -44,7 +32,6 @@ int64_t sys_timeinfo(process_t *process, uint64_t info_ptr) {
 
 int64_t sys_proclist(process_t *process, uint64_t entries_ptr,
                      uint64_t max_entries) {
-    syscall_proc_entry_t entries[PROCESS_MAX_PROCESSES];
     uint64_t written = 0;
     int64_t status;
 
@@ -64,7 +51,7 @@ int64_t sys_proclist(process_t *process, uint64_t entries_ptr,
     for (uint32_t i = 0; i < PROCESS_MAX_PROCESSES && written < max_entries;
          i++) {
         const process_t *slot = process_at(i);
-        syscall_proc_entry_t *entry;
+        syscall_proc_entry_t entry;
         const char *name;
         uint32_t j;
 
@@ -72,23 +59,23 @@ int64_t sys_proclist(process_t *process, uint64_t entries_ptr,
             continue;
         }
 
-        entry = &entries[written];
-        entry->pid = slot->pid;
-        entry->state = (uint32_t)slot->state;
+        entry.pid = slot->pid;
+        entry.state = (uint32_t)slot->state;
         name = slot->name != 0 ? slot->name : "";
 
-        for (j = 0; j + 1U < sizeof(entry->name) && name[j] != '\0'; j++) {
-            entry->name[j] = name[j];
+        for (j = 0; j + 1U < sizeof(entry.name) && name[j] != '\0'; j++) {
+            entry.name[j] = name[j];
         }
-        entry->name[j] = '\0';
-        for (j++; j < sizeof(entry->name); j++) {
-            entry->name[j] = '\0';
+        entry.name[j] = '\0';
+        for (j++; j < sizeof(entry.name); j++) {
+            entry.name[j] = '\0';
         }
 
+        sys_copy_to_user_validated(
+            entries_ptr + written * sizeof(syscall_proc_entry_t),
+            &entry, sizeof(entry));
         written++;
     }
 
-    status = sys_copy_to_user(process, entries_ptr, entries,
-                              written * sizeof(syscall_proc_entry_t));
-    return status == 0 ? (int64_t)written : status;
+    return (int64_t)written;
 }
