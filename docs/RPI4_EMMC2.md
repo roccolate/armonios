@@ -109,30 +109,34 @@ or the transfer timeouts.
 ## Probe failure telemetry
 
 `drivers/boards/rpi4/emmc2_probe_diag.h` extends the same probe-only adapter
-with passive MMIO observation. It records:
+with passive MMIO observation. To preserve the 108000-byte image ceiling, a
+failure emits one compact line:
 
-- the last command index and argument written;
-- the last MMIO read offset;
-- the last MMIO write offset and value;
-- the raw `PRESENT_STATE`, before the two broken-CD bits are supplied;
-- current clock/reset and host-power registers;
-- current `INT_STATUS`;
-- the last non-zero `INT_STATUS`, preserved after an interrupt acknowledge.
+```text
+EMMC2 diag c <command|-1> a <argument> r <read-offset> p <present> k <clock-reset> h <host-power> i <last-interrupt> f <actual-clock-hz>
+```
 
-On an initialization or sector-read failure, `board.c` prints four bounded UART
-lines containing those fields. The observer does not manufacture a response,
-interrupt, register write, or sector byte. This keeps telemetry out of the
-generic SDHCI driver and out of the normal RPi4 image while making the first
-physical failure actionable.
+The fields retain the minimum actionable state:
+
+- last command index and argument;
+- last MMIO read offset;
+- raw `PRESENT_STATE`, before broken-CD bits are supplied;
+- clock/reset and host-power register pairs;
+- last non-zero `INT_STATUS`, preserved after acknowledgement;
+- actual card clock chosen by the driver.
+
+The observer does not manufacture a response, interrupt, register write, or
+sector byte. This keeps telemetry out of the generic SDHCI driver and out of the
+normal RPi4 image while making the first physical failure actionable.
 
 Useful interpretations are:
 
-- last command `none` with read offset `0x2c`: reset or clock stabilization;
-- last command `none` with read offset `0x24`: card/inhibit wait before CMD0;
+- command `-1` with read offset `0x2c`: reset or clock stabilization;
+- command `-1` with read offset `0x24`: card/inhibit wait before CMD0;
 - read offset `0x30` after a command: response or data interrupt wait;
-- last command `17`: sector-zero transfer reached CMD17;
-- last non-zero interrupt status retains command/data timeout, CRC, end-bit,
-  index, or bus-power error bits after the driver clears the controller status.
+- command `17`: sector-zero transfer reached CMD17;
+- the interrupt field retains command/data timeout, CRC, end-bit, index, or
+  bus-power error bits after the driver clears controller status.
 
 ## Opt-in physical probe
 
@@ -146,7 +150,7 @@ Only that build performs the early diagnostic sequence:
 2. install the RPi4 broken-card-detect and telemetry adapter;
 3. initialize the SDHCI/card path at `RPI4_EMMC_BASE`;
 4. read exactly sector 0;
-5. print detailed MMIO telemetry on failure;
+5. print compact MMIO telemetry on failure;
 6. print the first 16 bytes and bytes 510-511 on success.
 
 The probe uses static kernel buffers and the read-only controller. It does not
@@ -179,9 +183,8 @@ evidence requirements live in `deploy/rpi4-emmc2-probe/`.
 adapter alone with `-Wall -Wextra -Werror` and verifies:
 
 - synthetic presence bits are returned without changing the raw register bank;
-- command index, argument, transfer word, read offset, and write offset/value
-  are captured;
-- live power, clock/reset, presence, and interrupt snapshots are refreshed;
+- command index, argument, and read offset are captured;
+- live power, clock/reset, and presence snapshots are refreshed;
 - the last non-zero interrupt survives a later zero/acknowledged status.
 
 `bash tests/run_rpi_mailbox_test.sh` builds the production mailbox code against
@@ -197,7 +200,8 @@ a simulated FIFO. It verifies:
 
 `tests/run_board_build_test.sh` builds both the normal RPi4 image and the
 opt-in `kernel8.img`, enforcing the configured kernel-size limit on both.
-These regressions are part of `bash tools/verify.sh`.
+`tools/package_rpi4_emmc2_probe.sh` repeats the same size check before producing
+a distributable artifact. These regressions are part of `bash tools/verify.sh`.
 
 ## Why the board remains fail-closed
 
