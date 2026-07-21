@@ -41,7 +41,7 @@ Chosen release defaults:
 | Phase | State | Promotion blocker |
 |---|---|---|
 | v0.1 baseline | COMPLETE | None for the recorded QEMU baseline |
-| v0.2 cleanup/hardening | IN PROGRESS / RELEASE CANDIDATE | Redraw/global-time bounds, sustained-load evidence, promotion record |
+| v0.2 cleanup/hardening | IN PROGRESS / RELEASE CANDIDATE | Compaction, global-time deadline, sustained-load evidence, promotion record |
 | v0.3 storage/VFS platform | NEXT | Depends on v0.2 promotion |
 | v0.4 real FAT | PLANNED | Depends on v0.3 filesystem interfaces |
 | v0.5 userland runtime/widgets | PLANNED | Depends on stable storage and ABI shapes |
@@ -118,7 +118,7 @@ The post-EOI service measures:
 - input queue depth, lifetime high-water, and overflow;
 - USB HID polling operations;
 - valid virtio-net RX frames consumed;
-- redraw submissions, partial-damage batches, and full-redraw fallbacks.
+- redraw submissions, partial-damage batches, full redraws, and redraw exhaustion.
 
 Phase 1B was completed through PRs #44-#48.
 
@@ -130,37 +130,45 @@ Phase 1B was completed through PRs #44-#48.
 | #52 | Shared input consumer | 16 queue events per active input pass; requeue only when work remains |
 | #55 | USB HID producer | Four registered device visits per call, even with malformed count |
 | #56 | Virtio-input producer | At most one negotiated ring length and never more than 16 descriptors per call |
+| #58 | Partial compositor damage | Eight rectangles per successful redraw; preserve ordered remainder or all damage on failure |
 
-Runtime state was compacted in PR #54 before the producer bounds. The latest
-validated implementation head is
-`ee92e8074ed2995a48ce22fb88a901ea02cf031d`:
+Runtime state was compacted in PR #54 before the producer bounds. PR #58 also
+removed two terminal scheduler UART messages to preserve the fixed ceiling
+without changing scheduler behavior.
 
-- `Verify ArmoniOS` `29859659229`: success;
-- `CI - Tests` `29859659270`: success;
-- loadable QEMU kernel 107706 / 108000 bytes;
-- remaining margin 294 bytes;
-- USB producer merge `53c1440261267b36e813fb90e6405261ec7bbfad`;
-- virtio-input producer merge `7674b639b9a53dea4cec42bcccf84e71d7f6d10c`.
+Latest validated implementation head:
+`8b86a8c24f25af0937f1df2e983c1c7c4f489b7d`.
 
-Virtio-input continuation remains in the used ring and resumes on the next
-periodic tick. The deterministic host regression proves ten descriptors on an
-eight-entry negotiated ring complete as 8 + 2. USB covers every fixed supported
-slot in one bounded scan.
+- `Verify ArmoniOS` `29863653280`: success;
+- `CI - Tests` `29863653209`: success;
+- loadable QEMU kernel 107982 / 108000 bytes;
+- remaining margin 18 bytes;
+- partial-redraw merge `fe4f2a622f5633e55b0eddb2f8f6767453a9ddca`.
+
+The deterministic runtime regression proves:
+
+- virtio-input ten descriptors on an eight-entry ring complete as 8 + 2;
+- malformed USB count scans only four slots;
+- shared input and network caps preserve continuation;
+- 20 partial rectangles complete as 8 + 8 + 4;
+- failed redraw preserves all five damage rectangles;
+- full redraw clears as one successful operation.
 
 The virtio-net path still exposes no trustworthy device-level RX-drop counter.
 This remains an explicit evidence gap.
 
 ### Remaining runtime work
 
-1. Bound redraw and damage work with explicit continuation.
+1. Compact production code/state again; only 18 bytes remain under the ceiling.
 2. Enforce a service-wide generic-counter deadline.
-3. Preserve or republish unfinished work at redraw/deadline exhaustion.
-4. Count redraw and global-deadline exhaustion.
-5. Add sustained-load QEMU tests proving EL0 heartbeat progress and explicit loss
+3. Check the deadline at class and safe inner-loop boundaries.
+4. Preserve or republish unfinished work at deadline exhaustion.
+5. Count deadline exhaustion.
+6. Add sustained-load QEMU tests proving EL0 heartbeat progress and explicit loss
    accounting.
-6. Decide whether the fully bounded bottom half remains permanent or later becomes
+7. Decide whether the fully bounded bottom half remains permanent or later becomes
    a wakeable EL1 service.
-7. Create a formal v0.2 promotion/tag record with exact evidence.
+8. Create a formal v0.2 promotion/tag record with exact evidence.
 
 ### Exit criteria
 
@@ -168,9 +176,9 @@ This remains an explicit evidence gap.
 - no hard timer callback contains rendering, queue drains, network polling, or
   device polling;
 - every budget-relevant class and total service duration are observable;
-- input producers, input consumption, USB, network, redraw, and global time are
-  bounded;
-- leftover work remains pending or retained in its native queue;
+- input producers, input consumption, USB, network, partial redraw, and global
+  time are bounded;
+- leftover work remains pending or retained in its native queue/list;
 - every exhaustion is counted;
 - sustained combined load cannot stop an EL0 heartbeat;
 - documentation states the exact post-EOI exception-context model;
