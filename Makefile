@@ -163,7 +163,6 @@ OBJS := \
     $(BUILD_DIR)/kernel/net/dhcp_options.o \
     $(BUILD_DIR)/kernel/print.o \
     $(BUILD_DIR)/kernel/process.o \
-    $(BUILD_DIR)/kernel/process_lifecycle.o \
     $(BUILD_DIR)/kernel/sched/sched.o \
     $(BUILD_DIR)/kernel/sched/switch.o \
     $(BUILD_DIR)/kernel/syscall_gui.o \

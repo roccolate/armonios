@@ -79,8 +79,7 @@ int64_t sys_wait(process_t *process, uint64_t pid) {
         return ERR_AGAIN;
     }
 
-    if (process_wait_child_zombie(process->pid, (uint32_t)pid,
-                                  &exit_code) != 0) {
+    if (process_wait_zombie((uint32_t)pid, &exit_code) != 0) {
         return ERR_INVAL;
     }
 
