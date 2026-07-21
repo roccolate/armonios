@@ -71,12 +71,12 @@ typedef struct {
 
 static uint64_t g_sched_ticks;
 static uint64_t g_sched_quantums;
-static uint32_t g_quantum_ticks = 1;
-static uint32_t g_ticks_left = 1;
+static uint32_t g_quantum_ticks;
+static uint32_t g_ticks_left;
 static kernel_thread_t g_threads[SCHED_MAX_THREADS];
 static kernel_thread_t *g_current_thread;
 static uint32_t g_thread_count;
-static uint32_t g_next_pid = 1;
+static uint32_t g_next_pid;
 
 void switch_context(sched_context_t *old_context, sched_context_t *new_context);
 void sched_thread_trampoline(void);

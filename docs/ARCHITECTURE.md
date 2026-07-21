@@ -58,6 +58,7 @@ Current behavior:
 
 - the early kernel builds an identity map of the detected RAM range;
 - kernel text is mapped RX, rodata R/NX, data+bss+stack RW/NX, and remaining RAM RW/NX;
+- mutable kernel globals use zero-initialized BSS and subsystem init functions establish non-zero defaults, keeping the loadable `.data` section empty while preserving the page-aligned W^X boundary;
 - board MMIO is identity-mapped as device memory;
 - each EL0 process has a separate TTBR0 root;
 - every process TTBR0 also contains the full kernel/RAM identity map needed while handling exceptions;

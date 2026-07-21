@@ -434,6 +434,9 @@ qemu-usb: qemu-check entry-check $(KERNEL_BIN)
 
 size: $(KERNEL_ELF) $(KERNEL_BIN)
 	$(LOG_SIZE)$(SIZE) $(KERNEL_ELF)
+	@data_bytes=$$($(SIZE) $(KERNEL_ELF) | awk 'NR == 2 { print $$2 }'); \
+	printf "kernel initialized data: %s bytes (required: 0)\n" "$$data_bytes"; \
+	test "$$data_bytes" -eq 0
 	@bytes=$$(wc -c < $(KERNEL_BIN)); \
 	printf "kernel.bin: %s bytes (limit: $(KERNEL_SIZE_LIMIT))\n" "$$bytes"; \
 	test "$$bytes" -lt $(KERNEL_SIZE_LIMIT)

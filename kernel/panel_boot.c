@@ -45,7 +45,7 @@ typedef struct {
 static uint64_t g_spawn_memory_base;
 static uint64_t g_spawn_memory_size;
 static panel_map_mmio_fn_t g_spawn_map_mmio;
-static uint32_t g_next_spawn_pid = PANEL_BOOT_PID_BASE + 1U;
+static uint32_t g_next_spawn_pid;
 
 uint64_t el0_return_address(void) {
     return (uint64_t)(uintptr_t)user_enter_el0_return;
@@ -331,6 +331,9 @@ uint64_t panel_boot_run(uint64_t memory_base, uint64_t memory_size,
     panel_user_storage_t storage = {0};
     uint32_t slot;
 
+    if (g_next_spawn_pid == 0U) {
+        g_next_spawn_pid = PANEL_BOOT_PID_BASE + 1U;
+    }
     (void)process_reclaim_zombies();
     panel = process_alloc(PANEL_BOOT_PID_BASE, PANEL_BOOT_APP);
     if (panel == 0) {
