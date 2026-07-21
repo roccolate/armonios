@@ -13,10 +13,53 @@
 static uint32_t g_emmc2_clock_hz;
 
 #if defined(ARMONIOS_RPI4_EMMC2_PROBE)
+#define RPI4_SDHCI_PRESENT_STATE 0x24U
+#define RPI4_SDHCI_CARD_PRESENT  0x00010000U
+#define RPI4_SDHCI_CARD_STABLE   0x00020000U
+
 static emmc_device_t g_emmc2_probe_device;
 static uint8_t g_emmc2_sector0[EMMC_BLKSZ] __attribute__((aligned(16)));
 
+/*
+ * Raspberry Pi 4 declares EMMC2 with `broken-cd`. Keep that quirk at the
+ * board boundary: only the two card-detect bits are supplied here; command
+ * inhibit, data inhibit, interrupts, responses, and data remain real MMIO.
+ */
+static uint32_t rpi4_emmc2_probe_read32(void *context, uint32_t offset) {
+    uintptr_t base = (uintptr_t)context;
+    uint32_t value = *(volatile uint32_t *)(base + offset);
+
+    if (offset == RPI4_SDHCI_PRESENT_STATE) {
+        value |= RPI4_SDHCI_CARD_PRESENT | RPI4_SDHCI_CARD_STABLE;
+    }
+    return value;
+}
+
+static void rpi4_emmc2_probe_write32(void *context, uint32_t offset,
+                                     uint32_t value) {
+    uintptr_t base = (uintptr_t)context;
+
+    *(volatile uint32_t *)(base + offset) = value;
+    __asm__ volatile("dmb sy" ::: "memory");
+}
+
+static void rpi4_emmc2_probe_delay_us(void *context, uint32_t usec) {
+    uint64_t frequency;
+    uint64_t start;
+    uint64_t now;
+    uint64_t ticks;
+
+    (void)context;
+    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
+    __asm__ volatile("mrs %0, cntpct_el0" : "=r"(start));
+    ticks = (frequency * usec + 999999U) / 1000000U;
+    do {
+        __asm__ volatile("mrs %0, cntpct_el0" : "=r"(now));
+    } while (now - start < ticks);
+}
+
 static void rpi4_emmc2_probe(void) {
+    emmc_io_t io;
     int result;
 
     if (g_emmc2_clock_hz == 0U) {
@@ -24,9 +67,15 @@ static void rpi4_emmc2_probe(void) {
         return;
     }
 
+    io.read32 = rpi4_emmc2_probe_read32;
+    io.write32 = rpi4_emmc2_probe_write32;
+    io.delay_us = rpi4_emmc2_probe_delay_us;
+    io.context = (void *)(uintptr_t)RPI4_EMMC_BASE;
+
     uart_puts("EMMC2 probe: begin\n");
-    result = emmc_init(&g_emmc2_probe_device, RPI4_EMMC_BASE,
-                       g_emmc2_clock_hz);
+    uart_puts("EMMC2 probe: broken-cd assume-present\n");
+    result = emmc_init_with_io(&g_emmc2_probe_device, &io,
+                               g_emmc2_clock_hz);
     uart_puts("EMMC2 probe: init ");
     print_signed32(result);
     uart_puts("\n");
