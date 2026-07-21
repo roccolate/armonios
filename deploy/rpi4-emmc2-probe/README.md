@@ -11,6 +11,8 @@ storage through the generic board API.
 - Every write request returns `EMMC_ERR_READ_ONLY`.
 - The probe reads exactly sector 0 and prints a bounded summary.
 - `BOARD_CAP_STORAGE` remains disabled.
+- The Raspberry Pi 4 `broken-cd` policy only allows commands to be attempted;
+  it does not assert hot-plug support or prove that a card is inserted.
 
 ## Build
 
@@ -59,6 +61,7 @@ A successful firmware and card path should include output shaped like:
 ```text
 EMMC2 clock: <non-zero rate>
 EMMC2 probe: begin
+EMMC2 probe: broken-cd assume-present
 EMMC2 probe: init 0
 EMMC2 probe: read0 0
 EMMC2 probe: first16 <32 hexadecimal digits>
@@ -69,6 +72,12 @@ The clock query translates the early ARM physical message buffer through the
 BCM2711 `/soc` DMA alias (`+ 0xc0000000`) before sending property channel 8.
 The buffer is static, 16-byte aligned, below 1 GiB, and queried before normal
 MMU/cache bring-up.
+
+Raspberry Pi 4 marks EMMC2 as `broken-cd`. The probe therefore treats the card
+as present for initialization instead of waiting on unreliable native
+`PRESENT_STATE` card-detect bits. All command/data inhibit bits, interrupts,
+responses, and sector data remain real controller values. A missing card should
+fail through the command or timeout markers after the assume-present marker.
 
 `55AA` is common for an MBR or boot sector signature, but the probe records the
 actual bytes and does not treat a different value as a driver failure.
@@ -81,6 +90,8 @@ Failure localization is explicit:
   response timed out;
 - `EMMC2 clock: unavailable -3` means firmware returned a malformed, rejected,
   or zero clock response;
+- absence of `EMMC2 probe: broken-cd assume-present` means the expected opt-in
+  probe image was not reached;
 - `EMMC2 probe: init <negative>` means SDHCI/card initialization failed;
 - `EMMC2 probe: read0 <negative>` means initialization succeeded but sector-0
   transfer failed.
