@@ -63,7 +63,9 @@ jobs:
         run: make -C tests test
 
       - name: Test deferred runtime service
-        run: bash tests/run_runtime_service_test.sh 2>&1 | tee runtime-service-test.log
+        run: |
+          set -o pipefail
+          bash tests/run_runtime_service_test.sh 2>&1 | tee runtime-service-test.log
 
       - name: Upload runtime-service log
         if: always()
