@@ -5,7 +5,6 @@
 #include "kernel/mm/pmm.h"
 #include "kernel/mm/vmm.h"
 #include "kernel/process.h"
-#include "kernel/syscall_argv.h"
 #include "kernel/syscall_helpers.h"
 #include "kernel/syscall_internal.h"
 
