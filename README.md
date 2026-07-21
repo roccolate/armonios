@@ -23,7 +23,7 @@ ArmoniOS is a **real bare-metal AArch64 operating system** with a verified QEMU
 
 - **public baseline:** v0.1 QEMU desktop;
 - **engineering phase:** v0.2 cleanup and runtime hardening;
-- **next release blockers:** redraw/global-time bounds and sustained-load proof;
+- **next release blockers:** global-time enforcement and sustained-load proof;
 - **product target:** v1.0 usable QEMU mini desktop;
 - **hardware:** Raspberry Pi scaffolding only, not hardware-supported.
 
@@ -35,28 +35,33 @@ QEMU. Phase 2 currently enforces these count bounds:
 | Virtio-input producer | At most 16 used descriptors per call |
 | USB HID producer | At most four registered device visits per call |
 | Shared input consumer | At most 16 queued events per pass |
+| Partial compositor damage | At most eight rectangles per successful redraw |
 | Virtio-net RX | At most 16 valid frames per pass |
 
 Virtio-input leaves later used descriptors in its ring for the next periodic
 pass. USB covers every supported slot because the fixed device array has four
-entries. Input readiness and network readiness have independent pending bits.
-Input requeues only when the shared queue still contains events; network uses a
-conservative rule, so exactly 16 frames may schedule one empty follow-up pass.
+entries. Partial compositor damage remains in-order in the existing damage list
+and `dirty` stays set until later batches complete. Failed GPU submissions do not
+consume damage. Input readiness and network readiness have independent pending
+bits. Input requeues only when the shared queue still contains events; network
+uses a conservative rule, so exactly 16 frames may schedule one empty follow-up
+pass.
 
-This is **not** complete runtime bounding. Redraw/damage work and total service
-time still lack enforced budgets, cooperative network polling outside the
-bottom half remains outside the network guarantee, and no sustained-load QEMU
-test yet proves EL0 progress. `RISK-017` remains open and v0.2 is not promoted.
+This is **not** complete runtime bounding. A full redraw is one operation but may
+still be expensive, total service time has no enforced generic-counter deadline,
+cooperative network polling outside the bottom half remains outside the network
+guarantee, and no sustained-load QEMU test yet proves EL0 progress. `RISK-017`
+remains open and v0.2 is not promoted.
 
 The latest validated implementation head is
-`ee92e8074ed2995a48ce22fb88a901ea02cf031d`:
+`8b86a8c24f25af0937f1df2e983c1c7c4f489b7d`:
 
-- `Verify ArmoniOS` run `29859659229`: success;
-- `CI - Tests` run `29859659270`: success;
-- loadable QEMU kernel: **107706 / 108000 bytes**;
-- remaining size margin: **294 bytes**;
-- producer-bound merges: PR #55 `53c1440261267b36e813fb90e6405261ec7bbfad`
-  and PR #56 `7674b639b9a53dea4cec42bcccf84e71d7f6d10c`.
+- `Verify ArmoniOS` run `29863653280`: success;
+- `CI - Tests` run `29863653209`: success;
+- loadable QEMU kernel: **107982 / 108000 bytes**;
+- remaining size margin: **18 bytes**;
+- partial-redraw merge: PR #58
+  `fe4f2a622f5633e55b0eddb2f8f6767453a9ddca`.
 
 The virtio-net path still exposes no trustworthy device-drop or ring-overflow
 counter. Consumed-frame counts are not proof that no packet was lost before
@@ -95,14 +100,14 @@ The QEMU codebase includes:
 | FAT32 | Root directory, short 8.3 names, no subdirectories or LFN. |
 | Editor | 512-byte buffer; only the caret line is rendered. |
 | Files | `/fat` only; at most eight displayed root entries. |
-| GUI | 16 windows, 32 events/window, 32 damage rectangles. |
+| GUI | 16 windows, 32 events/window, 32 damage rectangles; eight partial rectangles/redraw. |
 | Input queue | 64 events; overflow is counted but not prevented. |
 | Virtio input | Negotiated ring up to 16; at most one ring-length drained/call. |
 | USB HID | Four devices; at most four device polls/call; no hubs. |
 | Network RX | 16 valid frames/post-EOI pass; device drops unavailable. |
 | Networking API | No socket ABI, TCP, DNS API, or HTTP. |
 | Scheduling | EL0 preemptive; EL1 helper threads cooperative. |
-| Runtime service | Runs after EOI but before `eret`; redraw and total time remain unbounded. |
+| Runtime service | Runs after EOI but before `eret`; partial damage is count-bounded, full redraw and total time are not. |
 | User copy | Permission checked, but final copies are not fault-recoverable. |
 | Raspberry Pi | Build/host scaffolding only; no physical support claim. |
 
@@ -183,7 +188,8 @@ physical timer IRQ
             -> virtio-input: <=16 used descriptors/call
             -> USB HID: <=4 device visits/call
             -> shared input queue: <=16 events/pass when INPUT is pending
-            -> dirty compositor redraw (not yet globally/time bounded)
+            -> partial damage: <=8 rectangles/successful redraw
+            -> full redraw: one operation, elapsed time not yet globally bounded
        -> independently pending network phase
             -> <=16 valid RX frames
             -> conservative requeue when cap is reached
@@ -193,8 +199,8 @@ physical timer IRQ
 
 EOI completes the interrupt-controller transaction but does not leave the CPU
 exception. EL0 remains paused during the service pass. Count bounds now cover
-input producers, input consumption, and post-EOI network RX; the complete pass
-still has no global duration guarantee.
+input producers, input consumption, partial damage, and post-EOI network RX; the
+complete pass still has no global duration guarantee.
 
 See [Deferred Runtime Service](docs/RUNTIME_SERVICE.md).
 
@@ -239,7 +245,7 @@ input, or an installable Raspberry Pi desktop image.
 
 ## Road to v1.0
 
-1. Bound redraw/damage and total runtime time, then prove EL0 progress under
+1. Compact again, enforce a global runtime deadline, and prove EL0 progress under
    sustained load.
 2. Promote v0.2 with dated automated and visible evidence.
 3. Build v0.3 block/VFS/path infrastructure.

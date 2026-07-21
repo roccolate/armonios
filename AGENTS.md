@@ -14,30 +14,33 @@ bounds are:
 - virtio-input producer: at most 16 used descriptors per call;
 - USB HID producer: at most four registered device visits per call;
 - shared input consumer: at most 16 queued events per pass;
+- partial compositor damage: at most eight rectangles per successful redraw;
 - virtio-net RX: at most 16 valid frames per pass.
 
-Virtio-input continuation stays in the used ring and resumes on the next
-periodic tick. Input readiness and network readiness are independent pending
-bits. Input only requeues when queue work remains. Network conservatively
-requeues whenever its cap is reached, so exactly 16 frames may produce one
-empty follow-up pass.
+Virtio-input continuation stays in the used ring. Remaining partial damage stays
+in-order in the compositor damage list and `dirty` remains set. Failed GPU
+submissions consume no damage. Input readiness and network readiness have
+independent pending bits. Input requeues only when queue work remains; network
+conservatively requeues at its cap.
 
-This does not complete v0.2. Redraw/damage work and total runtime time remain
-without enforced budgets, cooperative network polling outside the bottom half
-is outside the class guarantee, and no sustained-load QEMU test proves EL0
-progress. Track this work in issue #43 and `RISK-017`.
+This does not complete v0.2. Full redraw elapsed time and total runtime-service
+time have no enforced generic-counter deadline, cooperative network polling
+outside the bottom half is outside the class guarantee, and no sustained-load
+QEMU test proves EL0 progress. Track this work in issue #43 and `RISK-017`.
 
-Latest producer-bound evidence:
+Latest redraw-bound evidence:
 
-- USB PR #55 merge `53c1440261267b36e813fb90e6405261ec7bbfad`;
-- virtio-input PR #56 merge `7674b639b9a53dea4cec42bcccf84e71d7f6d10c`;
-- validated head `ee92e8074ed2995a48ce22fb88a901ea02cf031d`;
-- `Verify ArmoniOS` `29859659229`: success;
-- `CI - Tests` `29859659270`: success;
-- loadable kernel 107706 / 108000 bytes; margin 294 bytes.
+- PR #58 merge `fe4f2a622f5633e55b0eddb2f8f6767453a9ddca`;
+- validated head `8b86a8c24f25af0937f1df2e983c1c7c4f489b7d`;
+- `Verify ArmoniOS` `29863653280`: success;
+- `CI - Tests` `29863653209`: success;
+- loadable kernel 107982 / 108000 bytes; margin 18 bytes.
+
+Another compaction is mandatory before adding production deadline code. Do not
+raise the kernel ceiling to bypass that work.
 
 Issue #2 is the **v0.6 useful desktop applications** milestone. Do not treat it
-as v1.1 work or use it to bypass v0.3 storage/VFS, v0.4 real FAT, and v0.5 shared
+as v1.1 work or bypass v0.3 storage/VFS, v0.4 real FAT, and v0.5 shared
 runtime/widget foundations.
 
 The release claim applies only to QEMU `virt`. Raspberry Pi 4 remains
@@ -69,29 +72,26 @@ and must never be used as evidence that a feature exists.
   half before process dispatch and `eret`.
 - EOI is not exception return: EL0 remains paused and the vector's IRQ-mask
   state is preserved while the pass executes.
-- `irq_disable()` and `irq_enable()` are nested state-preserving helpers; do not
-  replace them with unconditional DAIF operations.
+- `irq_disable()` and `irq_enable()` are nested state-preserving helpers.
 - Pending readiness has periodic, input, and network bits.
-- The timer callback is bounded. Input producer/consumer and network RX counts
-  are bounded; complete exception latency is not yet globally bounded.
-- Timing uses `CNTPCT_EL0`; `CNTFRQ_EL0` supplies conversion. One timer interval
-  remains an observation threshold, not the final global deadline.
-- Work-class reports are accepted only during the active runtime pass, excluding
-  cooperative console-thread work.
+- The timer callback is bounded. Input producer/consumer, partial-damage, and
+  network RX counts are bounded; complete exception latency is not.
+- Timing uses `CNTPCT_EL0`; one timer interval is an observation threshold, not
+  the final enforced deadline.
+- Work-class reports are accepted only during the active runtime pass.
 - Cooperative input/network polling outside the active runtime service remains
-  outside the post-EOI budget guarantees.
-- Virtio-input reports actual successfully queued events; later descriptors stay
-  in the ring for a subsequent periodic pass.
-- USB HID polling is bounded by the fixed four-device array. Each xHCI poll has
-  finite spins, but only the future global deadline can bound combined time.
+  outside post-EOI guarantees.
+- Virtio-input reports successfully queued events; later descriptors stay in the
+  ring for a subsequent periodic pass.
+- USB HID polling is bounded by the fixed four-device array.
+- Partial damage is processed in eight-rectangle batches. A failed board redraw
+  consumes nothing. Full redraw is one operation.
 - Input overflow is counted but not prevented.
 - Network frames consumed are measurable; device-level RX loss is not.
-- Redraw submissions, partial-damage items, and full redraws are separate metrics.
-- Runtime telemetry is kernel-internal. Do not copy its layout into a syscall ABI.
+- Runtime telemetry is kernel-internal and must not be copied into a syscall ABI.
 - Pending state and telemetry assume one CPU and one consumer; they are not
   SMP-safe synchronization.
-- User-copy permission validation exists, but final copies are not
-  fault-recoverable.
+- User-copy validation exists, but final copies are not fault-recoverable.
 - Every process still carries kernel mappings in TTBR0; TTBR1, ASIDs, and scoped
   TLB invalidation remain future hardening.
 - FAT32 is root-directory 8.3 only.
@@ -112,9 +112,10 @@ The baseline includes:
 - RPi4 EMMC2 diagnostic, MBR, and block-view gates;
 - native kernel, VFS, filesystem, GUI, parser, driver, and ABI tests;
 - runtime EOI/coalescing/timing/requeue/reset checks;
-- deterministic input consumer, virtio-input producer, USB producer, and network
-  bounds;
-- indexed input, network, USB-poll, redraw, damage, and full-redraw metrics;
+- deterministic input consumer, virtio-input producer, USB producer, partial
+  redraw, and network bounds;
+- indexed input, network, USB-poll, redraw, damage, full-redraw, and redraw-
+  exhaustion metrics;
 - input queue depth/high-water/overflow regression;
 - parent/wait and process-local FD isolation;
 - user-copy and KLI1 contracts;
@@ -139,20 +140,18 @@ Serial markers are not visible manual validation.
 - Keep hard-IRQ callbacks bounded.
 - Do not add blocking operations, unbounded scans, queue drains, or rendering to a
   hard-IRQ callback.
-- Treat timing and work counts as measurement unless an explicit stop rule exists.
-- Count completed work or actual device operations, not generic polling attempts.
+- Treat timing and counts as measurement unless an explicit stop rule exists.
+- Count completed work or actual device operations, not generic attempts.
 - Do not infer absence of loss from consumption counters.
-- Preserve the independent input and network pending bits and their continuation
-  rules.
+- Preserve independent input/network readiness and continuation rules.
 - Preserve virtio-input ring continuation; do not discard descriptors at a cap.
 - Never scan beyond `USB_HID_MAX_DEVICES`, even if state is malformed.
-- The next runtime cuts should bound redraw/damage and enforce a global generic-
-  counter deadline that preserves unfinished work.
-- Every exhausted class must remain pending or retain work in its native queue.
+- Preserve partial-damage ordering and consume damage only after redraw success.
+- The next production cut must compact first, then enforce a service-wide
+  generic-counter deadline while preserving unfinished work.
 - Add deterministic and sustained-load EL0 progress tests.
 - Preserve `.data == 0`, W^X, kernel-size, and stack limits.
-- Do not raise the 108000-byte ceiling to make runtime work fit; compact or
-  redesign first.
+- Do not raise the 108000-byte ceiling to make runtime work fit.
 
 ### Syscall or ABI changes
 
