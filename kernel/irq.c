@@ -131,8 +131,9 @@ void runtime_service_report_redraw(void) {
         runtime_service_report_metric(RUNTIME_METRIC_FULL_REDRAWS, 1U);
     } else {
         runtime_service_report_metric(RUNTIME_METRIC_DAMAGE_ITEMS, batch);
-        if (g_runtime_phase != 0U && desktop->damage_count > batch) {
-            g_runtime_stats.redraw_budget_exhaustion_count++;
+        if (desktop->damage_count > batch) {
+            runtime_service_report_metric(
+                RUNTIME_METRIC_REDRAW_EXHAUSTIONS, 1U);
         }
     }
 
