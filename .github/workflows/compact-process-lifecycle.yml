@@ -22,6 +22,18 @@ jobs:
       - name: Compact lifecycle implementation
         shell: bash
         run: |
+          rm -f .github/process-lifecycle-compact.log
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/compact_process_lifecycle.py')
+          text = path.read_text(encoding='utf-8')
+          start = text.find('\nreplace_once(\n    "tests/run_process_parent_wait_test.sh",')
+          end = text.find('\n\nprint("compacted process lifecycle")', start)
+          if start < 0 or end < 0:
+              raise SystemExit('test runner transformation block not found')
+          path.write_text(text[:start] + text[end:], encoding='utf-8')
+          PY
+
           set +e
           python3 .github/scripts/compact_process_lifecycle.py \
             > .github/process-lifecycle-compact.log 2>&1
