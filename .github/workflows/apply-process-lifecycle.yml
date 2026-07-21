@@ -27,8 +27,6 @@ jobs:
         run: |
           rm -f .github/process-lifecycle-patch.log
           sed -i '161s/2/3/' .github/scripts/apply_process_lifecycle_patch.py
-          sed -n '157,162p' .github/scripts/apply_process_lifecycle_patch.py
-          grep -A4 -F 'replace_all_exact(' .github/scripts/apply_process_lifecycle_patch.py | grep -q '    3,'
 
           set +e
           python3 .github/scripts/apply_process_lifecycle_patch.py \
