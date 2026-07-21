@@ -32,6 +32,10 @@ static uint64_t read_cntpct(void) {
     return value;
 }
 
+uint64_t runtime_service_counter_now(void) {
+    return read_cntpct();
+}
+
 static void write_cntp_cval(uint64_t value) {
     __asm__ volatile("msr cntp_cval_el0, %0" :: "r"(value));
 }
@@ -51,6 +55,11 @@ void timer_init(uint32_t hz) {
     if (g_interval_ticks == 0) {
         g_interval_ticks = 1;
     }
+
+    /* One timer interval is the initial observation threshold. Exceeding it
+     * means a service pass delayed EL0 beyond the next nominal timer deadline;
+     * later budget work will introduce smaller per-subsystem limits. */
+    runtime_service_configure_timing(freq, g_interval_ticks);
 
     g_next_cval = read_cntpct() + g_interval_ticks;
     write_cntp_cval(g_next_cval);
