@@ -25,41 +25,36 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 | RISK-009 | P1 | KLI1 application format | CLOSED | Mutable `.data`/`.bss` is forbidden by the linker script and tested. |
 | RISK-010 | P2 | Scheduling documentation | CLOSED | EL0 processes are preemptive; EL1 helper threads are cooperative. |
 | RISK-011 | P1 | Verification infrastructure | CLOSED | Local and hosted verification gates have evidence for the v0.1 baseline. |
-| RISK-012 | P1 for v0.2 | Syscall boundary | OPEN | Some syscall internals still rely on validated raw EL0 pointers and non-fault-contained byte copies. |
+| RISK-012 | P1 for v0.2 | Syscall buffer ownership | CLOSED | VFS, argv, IPC, GUI, and information syscall payloads cross through bounded kernel-owned temporaries. |
 | RISK-013 | P1 for v1 | Storage/VFS | OPEN | Current VFS/FAT path is too narrow for the v1 filesystem target. |
 | RISK-014 | P1 for v1 | Desktop apps | OPEN | Current apps are useful demos, not complete daily-use tools. |
+| RISK-015 | P2 hardening | Fault-contained copy | OPEN | User-copy transfers remain ordinary EL1 loads/stores without exception recovery. |
 
 ## Open risks
 
-### RISK-007 — Raspberry Pi eMMC driver is not a valid storage reference
+### RISK-007 — Raspberry Pi storage lacks physical evidence
 
 **Severity:** P0 for the hardware track
 **Affected scope:** Raspberry Pi hardware support
-**Evidence:** static driver inspection
+**Evidence:** controller host tests, build-verified diagnostic image, no physical serial run
 
-The current eMMC implementation mixes register offsets and block-size constants, uses inconsistent buffer indexing, constructs command indexes through conflicting constants, and marks the controller ready without a complete SD-card initialization sequence.
+The SDHCI controller core, firmware clock query, broken-card-detect adapter, failure telemetry, primary FAT32 MBR discovery, and bounded partition view are implemented. The opt-in image is read-only and the normal RPi4 board still advertises no capabilities.
 
-This file must be treated as experimental scaffolding, not a working driver.
+The remaining blocker is physical evidence, not a claim that the old scaffold is production-ready. No clock response, card initialization, sector read, or FAT geometry has been confirmed on a Raspberry Pi 4.
 
-**Exit criteria:** rewrite or validate the controller sequence against BCM2711 documentation; add pure command/register tests where possible; confirm sector reads on physical hardware before enabling FAT writes.
+**Exit criteria:** boot the diagnostic image on real hardware; record repeatable serial telemetry across cold boots; confirm sector-zero and FAT geometry reads; only then consider exposing `BOARD_CAP_STORAGE`. Writes remain a later disposable-media milestone.
 
-### RISK-012 — Syscall internals still need kernel-owned copy boundaries
+### RISK-015 — User-copy is not fault-contained
 
-**Severity:** P1 for v0.2
-**Affected scope:** syscall implementation, VFS/storage cleanup, process isolation hardening
-**Evidence:** static syscall-boundary inspection
+**Severity:** P2 hardening
+**Affected scope:** syscall exception recovery and hostile/racy address-space changes
+**Evidence:** static user-copy inspection
 
-The public helper layer now validates user ranges and output PTE write
-permissions, closing the v0.1 P0 permission bug. The remaining design debt is
-that several syscall paths can still validate an EL0 pointer and then let
-deeper code operate through ordinary kernel loads/stores. That keeps the copy
-path non-fault-contained and makes future VFS/storage refactors harder to
-reason about.
+Permission-aware validation and kernel-owned buffer boundaries are implemented. The final byte transfers still use ordinary EL1 loads/stores. ArmoniOS currently has no exception-table or recovery mechanism that can turn an unexpected translation fault during copy into a syscall error.
 
-**Exit criteria:** syscall entry points copy path strings, argv, IPC payloads,
-I/O buffers, and output structs into kernel-owned temporary buffers before
-calling lower layers; helper tests cover invalid, read-only, and boundary-crossing
-cases; `bash tools/verify.sh` still passes.
+This is distinct from buffer ownership: lower subsystems no longer operate on caller pointers, but the boundary copy itself is not hardened against a mapping changing unexpectedly after validation.
+
+**Exit criteria:** add fault-recoverable copyin/copyout primitives, targeted exception-path tests, and preserve the current `ERR_INVAL`/`ERR_PERM` contracts without crashing EL1.
 
 ### RISK-013 — Storage and VFS are too narrow for v1
 
@@ -67,19 +62,13 @@ cases; `bash tools/verify.sh` still passes.
 **Affected scope:** VFS, FAT, desktop persistence, Shell/Files behavior
 **Evidence:** static architecture inspection and current documented filesystem scope
 
-The current VFS is a fixed-table facade over bootfs, tmpfs, and dynamic FAT32
-root nodes. The FAT32 implementation is limited to root-directory 8.3 names and
-does not provide long names, subdirectories, partition discovery, a generic
-mount table, a common path resolver, structured directory entries, or ext2.
+The current VFS now has a small generic mount table and filesystem callbacks, and the storage layer has a reusable primary-MBR FAT32 parser plus bounded block views. FAT32 is still limited to root-directory 8.3 names and does not provide long names, subdirectories, GPT/extended partitions, a common path resolver, structured directory entries, or ext2.
 
 This is acceptable for v0.1, but it cannot satisfy the v1 requirement that a
 user browse persistent storage, create folders, edit files in directories, and
 verify persistence after reboot.
 
-**Exit criteria:** the v0.3-v0.4 storage roadmap lands with block-device
-metadata, a mount table, common path resolution, filesystem-driver operations,
-real FAT long-name/directory support, host image tests, QEMU persistence tests,
-and updated syscall documentation.
+**Exit criteria:** the v0.3-v0.4 storage roadmap lands with richer block-device metadata, common path resolution, structured filesystem operations, real FAT long-name/directory support, host image tests, QEMU persistence tests, and updated syscall documentation.
 
 ### RISK-014 — Desktop applications are not complete daily tools
 
@@ -98,9 +87,15 @@ helpers and widgets; Files, Editor, Shell, Settings, Monitor, Panel, and Clock
 support the v1 manual workflow; persistence survives a QEMU reboot; visible
 manual evidence is recorded.
 
-## Closed v0.1 risks
+## Closed risks
 
 Closed risks remain summarized here so the current release claim can be audited without carrying old branch or PR history into the new first commit.
+
+### RISK-012 — Kernel-owned syscall buffers
+
+VFS buffers and paths, argv, IPC messages, GUI output, and system-information output are copied through bounded kernel-owned temporaries before lower layers use them. Invalid or read-only destinations are rejected before state-consuming receives dequeue data.
+
+**Evidence:** host user-copy boundary regressions plus the complete `tools/verify.sh` matrix recorded with the closing change.
 
 ### RISK-001 — User-copy permissions
 

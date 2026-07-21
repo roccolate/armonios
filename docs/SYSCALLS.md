@@ -19,7 +19,7 @@ Syscall numbers are frozen in `kernel/syscall_numbers.h`. Existing numbers and a
 
 ## Important current safety limits
 
-### User pointer checks are permission-aware, not fault-contained
+### User pointers cross a kernel-owned boundary
 
 Every syscall pointer is checked against the current process's registered user ranges and page table. This prevents one process from directly passing an address that belongs only to another process.
 
@@ -29,7 +29,11 @@ The helper layer distinguishes:
 - writable destination memory;
 - executable image memory.
 
-`sys_user_buf_in()` requires valid EL0-readable pages. `sys_user_buf_out()` additionally rejects read-only pages with `ERR_PERM` before writing any byte. The remaining limitation is that actual byte copies are still normal kernel loads/stores, not fault-contained copyin/copyout.
+`sys_user_buf_in()` requires valid EL0-readable pages. `sys_user_buf_out()` additionally rejects read-only pages with `ERR_PERM` before writing any byte.
+
+Syscall entry points copy input payloads into bounded kernel temporaries before lower layers use them. Output calls first build kernel-owned values. Calls that consume state, such as IPC receive and window-event receive, validate the complete destination before dequeuing data. Most paths use `sys_copy_from_user()` or `sys_copy_to_user()`; already validated state-consuming paths use the shared `kmemcpy()` primitive for the final bounded copy.
+
+The remaining limitation is fault containment: these byte copies are ordinary kernel loads/stores, not exception-recoverable copyin/copyout routines.
 
 ### VFS file descriptors are process-local
 
@@ -47,13 +51,13 @@ The current limit is eight open descriptors per process, backed by a fixed globa
 | 4 | `sys_spawn` | `x0=path, x1=entry_index` | PID/error | Load one KLI1 image from VFS and create a ready process. |
 | 6 | `sys_wait` | `x0=pid` | exit code/error | Non-blocking: succeeds only for an existing zombie process, then reclaims it. |
 | 7 | `sys_kill` | `x0=pid` | 0/error | Mark another live process exited with the kernel kill code. |
-| 8 | `sys_spawn_argv` | `x0=path, x1=entry_index, x2=argv_ptr, x3=argc` | PID/error | Spawn a KLI1 image and copy a bounded argv payload to the new stack. |
+| 8 | `sys_spawn_argv` | `x0=path, x1=entry_index, x2=argv_ptr, x3=argc` | PID/error | Import argv into a pointer-free kernel block, then build the child argv on its new stack. |
 
 Current spawn limitations:
 
 - application paths are expected under `/armonios/`;
 - entry indexes must exist in the KLI1 header;
-- argv is capped at 8 strings and 256 bytes total payload;
+- argv is capped at 8 strings and 256 bytes total payload; the loader receives kernel-owned bytes plus offsets, never caller addresses;
 - process slots are fixed and capped by `PROCESS_MAX_PROCESSES`;
 - the loader uses fixed image and stack virtual slots per process-table index.
 
@@ -152,7 +156,7 @@ Current limitations:
 - fixed maximum message size;
 - non-blocking empty/full behavior returns `ERR_AGAIN`;
 - receive currently requires the expected fixed capacity;
-- destination output validation is permission-aware but not fault-contained.
+- send copies the source payload before queueing; receive validates the destination before removing the message; copies remain non-fault-contained.
 
 ## Window and cursor syscalls
 
@@ -206,7 +210,7 @@ Most mutating window calls enforce `owner_pid == current_pid`. The following are
 
 Current focus policy: normal application wrappers request focus after successful window creation; the kernel rejects no-focus windows such as docks/taskbars. The focus syscall path is covered by `tools/qemu_focus_test.sh`; the files-to-editor flow has existing manual confirmation from rocco on 2026-07-17.
 
-Any window syscall that writes results or events to user memory uses writable-page validation before copying. The copy itself is not fault-contained.
+Window bounds and state are assembled in kernel temporaries before copy-out. `sys_window_event` validates the complete destination before removing the first event, so a read-only or invalid output does not consume input. The final copy is not fault-contained.
 
 ## System information syscalls
 
@@ -224,7 +228,7 @@ uint32_t state;
 char     name[16];
 ```
 
-These calls validate writable user pages before copying their output. The copy itself is not fault-contained.
+These calls assemble results in kernel temporaries. `sys_proclist` validates the complete requested array before enumeration and copies bounded entries without exposing process-table storage. The final copy is not fault-contained.
 
 ## Error codes
 
