@@ -7,6 +7,7 @@
 #include "kernel/panel_boot_argv.h"
 #include "kernel/print.h"
 #include "kernel/sched/sched.h"
+#include "kernel/syscall_argv.h"
 #include "kernel/syscall_helpers.h"
 #include "kernel/user_exit.h"
 #include "kernel/user_vm.h"
@@ -34,7 +35,9 @@ int64_t sys_spawn(process_t *process, uint64_t path_ptr,
 int64_t sys_spawn_argv(process_t *process, uint64_t path_ptr,
                        uint64_t entry_index, uint64_t argv_ptr,
                        uint64_t argc) {
+    syscall_kernel_argv_t kernel_argv;
     char path[VFS_MAX_PATH];
+    int64_t status;
     int pid;
 
     if (entry_index > UINT32_MAX || argc > PANEL_BOOT_ARGV_MAX_STRINGS ||
@@ -42,20 +45,14 @@ int64_t sys_spawn_argv(process_t *process, uint64_t path_ptr,
         return ERR_INVAL;
     }
 
-    if (argc == 0) {
-        if (argv_ptr != 0) {
-            return ERR_INVAL;
-        }
-    } else {
-        if (argv_ptr == 0 ||
-            sys_user_buf_in(process, argv_ptr,
-                            argc * sizeof(uint64_t)) != 0) {
-            return ERR_INVAL;
-        }
+    status = sys_copy_argv_from_user(process, argv_ptr, (uint32_t)argc,
+                                     &kernel_argv);
+    if (status != 0) {
+        return status;
     }
 
     pid = app_spawn_vfs(path, (uint32_t)entry_index,
-                        (const uint64_t *)(uintptr_t)argv_ptr,
+                        argc == 0U ? 0 : kernel_argv.pointers,
                         (uint32_t)argc);
     if (pid < 0) {
         return ERR_NOENT;
