@@ -2,6 +2,7 @@
 
 #include "keymap.h"
 #include "kernel/irq.h"
+#include "kernel/runtime_service.h"
 #include "uart/pl011.h"
 
 static input_event_t g_event_queue[INPUT_EVENT_QUEUE_SIZE];
@@ -12,10 +13,6 @@ static uint64_t g_event_accepted_push_count;
 static uint64_t g_event_overflow_count;
 static uint32_t g_event_high_water;
 
-/*
- * ANSI escape-sequence parser. UART bytes are converted into the same internal
- * events used by virtio-input and USB HID.
- */
 enum {
     ESC_STATE_IDLE = 0,
     ESC_STATE_GOT_ESC = 1,
@@ -25,6 +22,22 @@ enum {
 
 static uint8_t g_esc_state;
 static uint8_t g_esc_digit;
+
+static void report_runtime_queue_activity(uint32_t consumed) {
+    runtime_service_work_report_t report;
+
+    if (!runtime_service_is_active()) {
+        return;
+    }
+
+    report = (runtime_service_work_report_t){
+        .input_events_consumed = consumed,
+        .input_queue_depth_after_producers = g_event_count,
+        .input_queue_high_water = g_event_high_water,
+        .input_queue_overflow_count = g_event_overflow_count,
+    };
+    runtime_service_report_work(&report);
+}
 
 static void push_key_event(uint32_t key) {
     input_event_t event = {
@@ -89,44 +102,48 @@ void input_queue_init(void) {
 }
 
 int input_queue_push(const input_event_t *event) {
+    int status = 0;
+
     irq_disable();
 
     if (event == 0) {
-        irq_enable();
-        return -1;
-    }
-    if (g_event_count >= INPUT_EVENT_QUEUE_SIZE) {
+        status = -1;
+    } else if (g_event_count >= INPUT_EVENT_QUEUE_SIZE) {
         g_event_overflow_count++;
-        irq_enable();
-        return -1;
-    }
-
-    g_event_queue[g_event_tail] = *event;
-    g_event_tail = (g_event_tail + 1U) % INPUT_EVENT_QUEUE_SIZE;
-    g_event_count++;
-    g_event_accepted_push_count++;
-    if (g_event_count > g_event_high_water) {
-        g_event_high_water = g_event_count;
+        status = -1;
+    } else {
+        g_event_queue[g_event_tail] = *event;
+        g_event_tail = (g_event_tail + 1U) % INPUT_EVENT_QUEUE_SIZE;
+        g_event_count++;
+        g_event_accepted_push_count++;
+        if (g_event_count > g_event_high_water) {
+            g_event_high_water = g_event_count;
+        }
     }
 
     irq_enable();
-    return 0;
+    report_runtime_queue_activity(0U);
+    return status;
 }
 
 int input_queue_poll(input_event_t *event) {
+    int status = 0;
+
     irq_disable();
 
     if (event == 0 || g_event_count == 0U) {
-        irq_enable();
-        return -1;
+        status = -1;
+    } else {
+        *event = g_event_queue[g_event_head];
+        g_event_head = (g_event_head + 1U) % INPUT_EVENT_QUEUE_SIZE;
+        g_event_count--;
     }
 
-    *event = g_event_queue[g_event_head];
-    g_event_head = (g_event_head + 1U) % INPUT_EVENT_QUEUE_SIZE;
-    g_event_count--;
-
     irq_enable();
-    return 0;
+    if (status == 0) {
+        report_runtime_queue_activity(1U);
+    }
+    return status;
 }
 
 int input_queue_peek(input_event_t *event) {
