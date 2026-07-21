@@ -7,7 +7,7 @@ BUILD_DIR="${RPI4_PROBE_BUILD_DIR:-$ROOT_DIR/build-rpi4-emmc2-probe}"
 PACKAGE_DIR="${RPI4_PROBE_PACKAGE_DIR:-$BUILD_DIR/package}"
 KERNEL_IMAGE="$BUILD_DIR/kernel8.img"
 DEPLOY_DIR="$ROOT_DIR/deploy/rpi4-emmc2-probe"
-KERNEL_SIZE_LIMIT="${KERNEL_SIZE_LIMIT:-200000}"
+KERNEL_SIZE_LIMIT="${KERNEL_SIZE_LIMIT:-108000}"
 
 if [[ ! -f "$KERNEL_IMAGE" ]]; then
     make -C "$ROOT_DIR" rpi4-emmc2-probe
