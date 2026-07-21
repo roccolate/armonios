@@ -30,6 +30,7 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 | RISK-014 | P1 for v1 | Desktop apps | OPEN | Current apps are useful demos, not complete daily-use tools. |
 | RISK-015 | P2 hardening | Fault-contained copy | OPEN | User-copy transfers remain ordinary EL1 loads/stores without exception recovery. |
 | RISK-016 | P1 | Process lifecycle | CLOSED | Child zombies remain waitable by their parent; only kernel-owned or orphaned zombies are auto-reclaimed. |
+| RISK-017 | P1 | Deferred runtime service | OPEN | Timer-published GUI, network, and device work is deferred past EOI, but the single service still lacks measured execution budgets and starvation bounds. |
 
 ## Open risks
 
@@ -56,6 +57,18 @@ Permission-aware validation and kernel-owned buffer boundaries are implemented. 
 This is distinct from buffer ownership: lower subsystems no longer operate on caller pointers, but the boundary copy itself is not hardened against a mapping changing unexpectedly after validation.
 
 **Exit criteria:** add fault-recoverable copyin/copyout primitives, targeted exception-path tests, and preserve the current `ERR_INVAL`/`ERR_PERM` contracts without crashing EL1.
+
+### RISK-017 — Deferred runtime service lacks execution budgets
+
+**Severity:** P1 runtime hardening
+**Affected scope:** timer latency, EL0 progress, GUI responsiveness, network/input fairness
+**Evidence:** `tests/run_runtime_service_test.sh`, static timer-boundary gate, QEMU marker matrix, and hosted runs `29823442266` / `29823442301`
+
+The physical timer callback now performs only tick accounting, timer rearm, periodic-work publication, and scheduler accounting. The generic IRQ dispatcher sends EOI before one coalescing runtime service consumes device polling, GUI event routing/redraw, and network work. The host regression proves repeated requests coalesce, a request published during a pass survives, and the backend does not run before EOI.
+
+The service is still a non-preemptible post-EOI EL1 bottom half. Its backend may drain the complete input queue, perform a redraw, and poll network/device paths in one pass. ArmoniOS does not yet measure maximum service duration, cap work per pass, or prove that repeated traffic cannot delay EL0 progress.
+
+**Exit criteria:** instrument service duration and high-water marks; establish per-pass budgets for events, packets, redraw, and device polling; preserve pending bits when a budget is exhausted; add sustained-load QEMU regressions that prove EL0 progress and no event loss; then decide whether the scheduler is ready to promote the bottom half into a wakeable EL1 runtime thread.
 
 ### RISK-013 — Storage and VFS are too narrow for v1
 
