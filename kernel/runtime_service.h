@@ -62,6 +62,9 @@ void runtime_service_report_input_queue(uint32_t depth, uint32_t high_water,
                                         uint64_t overflow_count);
 void runtime_service_get_stats(runtime_service_stats_t *stats);
 
+/* Network wrapper used by kernel orchestration and deterministic tests. */
+void runtime_service_net_poll(void);
+
 /* Weak zero clock in irq.c; strong CNTPCT_EL0 implementation in timer.c. */
 uint64_t runtime_service_counter_now(void);
 
