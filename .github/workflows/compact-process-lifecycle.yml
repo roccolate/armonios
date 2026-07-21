@@ -1,0 +1,33 @@
+name: Compact process lifecycle
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  compact:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out lifecycle branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/process-parent-wait-lifecycle
+          fetch-depth: 0
+
+      - name: Compact lifecycle implementation
+        run: python3 .github/scripts/compact_process_lifecycle.py
+
+      - name: Remove temporary helper and publish
+        run: |
+          rm -f .github/scripts/compact_process_lifecycle.py
+          rm -f .github/workflows/compact-process-lifecycle.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Compact parent-owned process lifecycle"
+          git push origin HEAD:agent/process-parent-wait-lifecycle
