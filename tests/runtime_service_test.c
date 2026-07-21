@@ -273,7 +273,7 @@ static void redraw_batch_helper(void) {
     assert(stats.metric_total[RUNTIME_METRIC_FULL_REDRAWS] == 1U);
 }
 
-static void network_budget_exact_ring(void) {
+static void network_budget_exact_ring_rechecks(void) {
     runtime_service_stats_t stats;
 
     prepare(3U);
@@ -288,7 +288,19 @@ static void network_budget_exact_ring(void) {
     assert(g_fake_network_frames == 0U);
     assert(stats.metric_last[RUNTIME_METRIC_NETWORK_FRAMES] ==
            RUNTIME_NETWORK_FRAME_BUDGET);
-    assert(stats.network_budget_exhaustion_count == 0U);
+    assert(stats.network_budget_exhaustion_count == 1U);
+    assert(stats.pending_work == RUNTIME_WORK_NETWORK);
+    assert(stats.requeue_count == 1U);
+
+    assert(runtime_service_run_pending() == RUNTIME_WORK_NETWORK);
+    stats = snapshot();
+    assert(g_network_backend_calls == 2U);
+    assert(g_network_poll_calls == 2U);
+    assert(g_network_frames_returned == RUNTIME_NETWORK_FRAME_BUDGET);
+    assert(stats.metric_last[RUNTIME_METRIC_NETWORK_FRAMES] == 0U);
+    assert(stats.metric_total[RUNTIME_METRIC_NETWORK_FRAMES] ==
+           RUNTIME_NETWORK_FRAME_BUDGET);
+    assert(stats.network_budget_exhaustion_count == 1U);
     assert(stats.pending_work == 0U);
 }
 
@@ -383,7 +395,7 @@ int main(void) {
     maximum_and_overrun();
     work_metrics();
     redraw_batch_helper();
-    network_budget_exact_ring();
+    network_budget_exact_ring_rechecks();
     network_budget_requeues_leftover();
     network_outside_service_is_not_budgeted();
     requeue_and_reset();
