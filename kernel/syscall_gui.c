@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "kernel/gui.h"
+#include "kernel/kstring.h"
 #include "kernel/syscall_helpers.h"
 
 int64_t sys_window_create(process_t *process, uint64_t x, uint64_t y,
@@ -300,10 +301,6 @@ int64_t sys_window_get_bounds(process_t *process, uint64_t window_id,
     uint32_t out[4];
     int64_t status;
 
-    status = sys_user_buf_out(process, out_ptr, sizeof(out));
-    if (status != 0) {
-        return status;
-    }
     status = sys_owner_window(process, window_id, &desktop, &window);
     if (status != 0) {
         return status;
@@ -380,10 +377,6 @@ int64_t sys_window_state(process_t *process, uint64_t window_id,
     uint32_t state = 0;
     int64_t status;
 
-    status = sys_user_buf_out(process, out_ptr, sizeof(state));
-    if (status != 0) {
-        return status;
-    }
     if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
         return ERR_INVAL;
     }
@@ -415,7 +408,7 @@ int64_t sys_window_event(process_t *process, uint64_t window_id,
         return ERR_INVAL;
     }
     status = sys_user_buf_out(process, buf_ptr,
-                              buf_count * 3U * sizeof(uint32_t));
+                              buf_count * sizeof(gui_event_t));
     if (status != 0) {
         return status;
     }
@@ -429,19 +422,12 @@ int64_t sys_window_event(process_t *process, uint64_t window_id,
 
     while (n < buf_count && window->event_count > 0) {
         gui_event_t ev;
-        uint32_t out[3];
 
         if (gui_window_pop_event(window, &ev) != 0) {
             break;
         }
-        out[0] = ev.type;
-        out[1] = (uint32_t)ev.data1;
-        out[2] = (uint32_t)ev.data2;
-        status = sys_copy_to_user(process, buf_ptr + n * sizeof(out),
-                                  out, sizeof(out));
-        if (status != 0) {
-            return status;
-        }
+        kmemcpy((void *)(uintptr_t)(buf_ptr + n * sizeof(ev)),
+                &ev, sizeof(ev));
         n++;
     }
     return (int64_t)n;
