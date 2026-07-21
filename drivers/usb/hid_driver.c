@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "input/input.h"
+#include "kernel/runtime_service.h"
 #include "usb/hid.h"
 #include "usb/xhci.h"
 
@@ -38,7 +39,6 @@ uint8_t usb_hid_add_device(usb_hid_state_t *state,
         }
         uint8_t proto = iface->desc->bInterfaceProtocol;
         if (proto != 0x01U && proto != 0x02U) {
-            /* Only boot-protocol keyboard (0x01) and mouse (0x02). */
             continue;
         }
         const usb_endpoint_ref_t *ep =
@@ -109,12 +109,6 @@ uint8_t usb_hid_keyboard_report(usb_hid_device_t *dev,
         return 0;
     }
     uint8_t produced = 0;
-    /*
-     * Releases are debounced by one empty report. QEMU's usb-kbd can present
-     * very short empty gaps while the host is still repeating a held key; if we
-     * clear prev_keys immediately, the next identical report becomes another
-     * KEY_PRESS and userland sees "aaaa..." from a single long press.
-     */
     for (uint8_t i = 0; i < 6U; i++) {
         uint8_t prev = dev->prev_keys[i];
         if (prev == HID_KEY_NONE) {
@@ -141,7 +135,6 @@ uint8_t usb_hid_keyboard_report(usb_hid_device_t *dev,
             return produced;
         }
     }
-    /* Presses: any code in the new report not seen in prev_keys. */
     for (uint8_t i = 0; i < 6U; i++) {
         uint8_t cur = report->keys[i];
         if (cur == HID_KEY_NONE) {
@@ -289,11 +282,16 @@ void usb_hid_state_reset(void) {
 
 int usb_hid_poll_all(void) {
     int total = 0;
+
     for (uint8_t i = 0; i < g_usb_hid_state.count; i++) {
         int n = usb_hid_poll_device(&g_usb_hid_state.devices[i]);
         if (n > 0) {
             total += n;
         }
+    }
+    if (total > 0) {
+        runtime_service_report_metric(RUNTIME_METRIC_INPUT_PRODUCED,
+                                      (uint32_t)total);
     }
     return total;
 }
@@ -303,7 +301,7 @@ int usb_hid_set_protocol_boot(usb_hid_device_t *dev) {
         return -1;
     }
     usb_setup_t setup;
-    setup.bmRequestType = 0x21U; /* Class, Interface, Host-to-device */
+    setup.bmRequestType = 0x21U;
     setup.bRequest = USB_HID_SET_PROTOCOL;
     setup.wValue = USB_HID_BOOT_PROTOCOL;
     setup.wIndex = dev->interface_number;

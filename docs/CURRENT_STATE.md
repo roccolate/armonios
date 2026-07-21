@@ -3,8 +3,8 @@
 > Operational source of truth for ArmoniOS.
 >
 > Evidence terminology: `DOCUMENTATION_POLICY.md`  
-> Active correctness and release risks: `TECHNICAL_RISKS.md`  
-> Future intent and milestone ordering: `ROADMAP.md`
+> Active risks: `TECHNICAL_RISKS.md`  
+> Future milestones: `ROADMAP.md`
 
 ## Executive classification
 
@@ -13,185 +13,179 @@ cleanup/runtime-hardening candidate**.
 
 The QEMU `virt` kernel, graphical desktop, narrow writable FAT32 workflow,
 freestanding EL0 applications, and automated verification matrix are real and
-reproducible. Most original v0.2 cleanup work has landed.
+reproducible. Most original v0.2 cleanup goals have landed.
 
-The v0.2 candidate now measures deferred-runtime requests, coalescing, requeues,
-non-empty and empty passes, last/maximum/cumulative duration, and passes that
-exceed one timer interval. It is still not a formal v0.2 release because work per
-pass remains unbounded and no sustained-load QEMU test proves EL0 progress under
-input/network/redraw pressure.
+The current runtime path measures aggregate duration plus selected work classes:
+input produced, input consumed, successful redraws, queue depth/high-water, and
+queue overflow. Work remains unbounded; no sustained-load QEMU test yet proves
+EL0 progress under simultaneous input, network, and redraw pressure.
 
-ArmoniOS should be described publicly as:
+ArmoniOS is accurately described as:
 
 > A compact AArch64 QEMU desktop alpha with freestanding EL0 applications, a
-> kernel compositor, a narrow writable FAT32 workflow, and a broad automated
-> verification baseline.
+> kernel compositor, a narrow writable FAT32 workflow, and broad automated
+> regression coverage.
 
-It should not be described as a production OS, a general FAT implementation, a
-POSIX system, or a Raspberry Pi operating system.
+It is not a production OS, general FAT implementation, POSIX system, or verified
+Raspberry Pi operating system.
 
 ## Audit metadata
 
 - **Audit date:** 2026-07-21
 - **Primary verified platform:** QEMU `virt`, Cortex-A72 CPU model
-- **Main before the telemetry candidate:** `84d84cd0698a5a62c02ad4250c7fbec8adab88e6`
-- **Candidate PR:** #44, deferred runtime-service telemetry
-- **Validated candidate tree:** `95616b865ba021da6ff733bb54213a2db404ba9d`
-- **Telemetry implementation code head:** `9b047f2e0b97291e184af9f528d1a4f128baf788`
-- **Tracking issue:** #43, v0.2 measure and bound deferred runtime service
+- **Merged aggregate telemetry baseline:**
+  `b3fd013da43fc3eacee153f3535a997e039245f3`
+- **Work-class candidate PR:** #45
+- **Validated final PR tree:**
+  `2923fe133de368ace8ac5ff88342f4a9bd3dd3a4`
+- **Tracking issue:** #43
 - **Hosted validation:**
-  - `Verify ArmoniOS` run `29828181038`: success
-  - `CI - Tests` run `29828181039`: success
+  - `Verify ArmoniOS` run `29831391737`: success
+  - `CI - Tests` run `29831391738`: success
+- **QEMU kernel size:** 107204 bytes; limit 108000; margin 796 bytes
 
-Those runs validated the complete candidate containing code, tests, README,
-AGENTS, runtime documentation, current status, and risk updates. Later
- evidence-only commits that merely record the successful run IDs do not change
-the kernel or its verified behavior. A final merge commit must not be described
-as independently tested unless GitHub runs a separate workflow against that
-exact commit.
+Those runs validate code, tests, verification scripts, README, AGENTS, current
+state, runtime documentation, and risk documentation. Later commits that only
+record the successful run IDs do not change kernel behavior. A final merge
+commit is not an independent execution unless a workflow runs on that exact SHA.
 
-## Release-phase status
+## Release phases
 
 | Phase | State | Real interpretation |
 |---|---|---|
 | v0.1 QEMU baseline | COMPLETE | Boot, desktop, narrow FAT workflow, deterministic QEMU gates, CI, and dated manual evidence exist. |
-| v0.2 cleanup/hardening | IN PROGRESS / CANDIDATE | Syscall ownership, VFS decoupling, fail-closed RPi behavior, process lifecycle, bounded timer callback, and aggregate runtime timing telemetry are implemented. Work budgets and stress proof remain. |
-| v0.3 storage/VFS platform | NEXT AFTER v0.2 | Mount callbacks, MBR parsing, and block views exist, but there is no common path resolver, rich block metadata, or structured filesystem ABI. |
-| v0.4 real FAT | PLANNED | FAT remains root-only 8.3 FAT32. |
-| v0.5 userland runtime/widgets | PLANNED | No reusable heap, dynamic containers, or widget toolkit exists. |
-| v0.6 useful applications | PARTIAL DEMOS ONLY | Seven apps run, but issue #2's daily-use workflows are not implemented. |
-| v0.7 ext2 | PLANNED | No ext2 implementation exists. |
+| v0.2 cleanup/hardening | IN PROGRESS / CANDIDATE | Ownership cleanup, process lifecycle, bounded timer callback, aggregate timing, input/redraw metrics, and input overflow accounting exist. Budgets and stress proof remain. |
+| v0.3 storage/VFS platform | NEXT AFTER v0.2 | No common path resolver, rich block metadata, or structured filesystem ABI. |
+| v0.4 real FAT | PLANNED | Current FAT remains root-only 8.3 FAT32. |
+| v0.5 userland runtime/widgets | PLANNED | No reusable heap, dynamic containers, or shared widget toolkit. |
+| v0.6 useful applications | PARTIAL DEMOS ONLY | Seven apps run, but issue #2's daily-use workflows are incomplete. |
+| v0.7 ext2 | PLANNED | No ext2 implementation. |
 | v0.8 polish | EARLY PARTIAL | Basic window/panel behavior exists; sustained visible-session evidence does not. |
-| v0.9 beta | NOT STARTED | No ABI freeze, fuzz campaign, reboot-persistence gate, or beta record exists. |
+| v0.9 beta | NOT STARTED | No ABI freeze, fuzz campaign, reboot-persistence gate, or beta record. |
 | v1.0 | NOT READY | Storage, apps, ext2, persistence, runtime bounds, and final evidence are incomplete. |
 
 ## Verification record
 
 | Check | Evidence class | Result and scope |
 |---|---|---|
-| `make BOARD=qemu_virt` | BUILD-VERIFIED | Kernel and seven KLI1 applications build for QEMU. |
-| `make BOARD=qemu_virt size` | BUILD-VERIFIED | Kernel preserves `.data == 0` and the 108000-byte binary limit with telemetry present. |
-| `make -C tests test` | HOST-VERIFIED | Native kernel, memory, VFS, FAT32, GUI, parser, driver, and ABI tests pass. |
-| `bash tests/run_runtime_service_test.sh` | HOST-VERIFIED | Coalescing, EOI order, requeue preservation/counting, deterministic timing, last/max/total duration, interval overrun counting, snapshot state, null snapshot handling, and reset behavior pass. |
-| Process/VFS/user-copy/KLI1 gates | HOST-VERIFIED | Parent/wait, process-local descriptors, permission-aware copy, and mutable-storage contracts pass. |
+| QEMU build and size | BUILD-VERIFIED | `.data == 0`; kernel 107204 bytes under the 108000-byte ceiling. |
 | RPi4 build/probe gates | BUILD/HOST-VERIFIED | Normal and diagnostic images build; unsupported normal capabilities remain fail closed. |
-| `make stack-check` | HOST-VERIFIED | Recorded maximum remains 368 bytes in Editor against a 3072-byte limit. |
-| `make qemu-fs-test` | QEMU-VERIFIED | Storage initialization and FAT application markers appear. |
-| User-copy/focus QEMU gates | QEMU-VERIFIED | Invalid output is rejected without halting; six app focus transitions pass. |
-| Framebuffer/USB/network gates | QEMU-VERIFIED | Window/panel, xHCI/two HID, and DHCP markers pass. |
+| Native host suite | HOST-VERIFIED | Kernel, memory, VFS, FAT32, GUI, parser, driver, and ABI tests pass. |
+| Runtime service regression | HOST-VERIFIED | Timing, EOI order, coalescing, requeue, reset, indexed work last/max/total, inactive-report rejection, and queue-pressure accumulation pass. |
+| Input queue telemetry | HOST-VERIFIED | Zero state, 64-entry high-water, full-queue overflow, draining, and reset pass. |
+| Process/VFS/user-copy/KLI1 | HOST-VERIFIED | Parent/wait, local FDs, permission-aware copy, and mutable-storage contracts pass. |
+| Stack check | HOST-VERIFIED | Editor maximum remains 368 bytes against 3072. |
+| FAT32 smoke | QEMU-VERIFIED | Storage initialization and FAT application markers appear. |
+| User-copy/focus | QEMU-VERIFIED | Invalid output is rejected without halt; six app focus transitions pass. |
+| Framebuffer/USB/network | QEMU-VERIFIED | Window/panel, xHCI/two HID, and DHCP markers pass. |
 | Visible FAT + GPU wiring | QEMU-VERIFIED | FAT32, display, and panel readiness appear in one boot. |
-| `make qemu-fb-visible` | MANUAL-VERIFIED, dated | Rocco verified create/edit/save/rename/reopen/delete on 2026-07-17. No newer visible pass is recorded. |
-| Physical Raspberry Pi boot | UNVERIFIED | No repeatable physical boot, timer, storage, framebuffer, or input evidence exists. |
+| Visible desktop workflow | MANUAL-VERIFIED, dated | Rocco verified create/edit/save/rename/reopen/delete on 2026-07-17. No newer visible pass is recorded. |
+| Physical Raspberry Pi | UNVERIFIED | No repeatable physical boot, timer, storage, framebuffer, or input evidence. |
 
-## Runtime architecture
-
-### EL0 and EL1 execution
+## Runtime execution model
 
 EL0 processes are preemptive. EL1 helper threads are cooperative. The deferred
 runtime service is a third execution mode:
 
 ```text
-timer IRQ callback
-  -> tick accounting and CNTP_CVAL rearm
-  -> publish RUNTIME_WORK_PERIODIC
-  -> scheduler accounting
+timer callback
+  -> fixed account/rearm/publish work
   -> board_irq_end()
-  -> runtime_service_run_pending()
-       -> read CNTPCT_EL0
-       -> poll input/devices, route GUI, redraw, poll network
-       -> read CNTPCT_EL0 and update telemetry
+  -> measured runtime pass
+       -> input producers
+       -> input queue to GUI
+       -> dirty redraw
+       -> network poll
+       -> aggregate and class metrics
   -> process dispatch
   -> eret
 ```
 
-EOI releases the interrupt controller but does not leave the exception. During
-the service pass, execution remains in EL1, normal IRQs remain masked, the
-288-byte exception frame stays on the EL1 stack, and EL0 remains paused.
+EOI does not leave the exception. During the pass execution remains in EL1, the
+288-byte exception frame remains on the EL1 stack, nested IRQ helpers restore the
+vector's prior masked state, and EL0 remains paused.
 
-The physical timer callback is bounded. The complete exception path is measured
-but not yet bounded.
+The timer callback is bounded. The complete pass is measurable but not bounded.
 
-### Runtime telemetry
+## Runtime telemetry
 
 The kernel-internal snapshot records:
 
-- accepted and coalesced requests;
-- non-empty and empty consumer invocations;
-- passes that republish work;
-- last, maximum, and cumulative generic-counter duration;
-- passes exceeding the configured timer interval;
-- counter frequency, threshold, pending bits, and last consumed bits.
+- requests, coalescing, non-empty/empty passes, and requeues;
+- last/max/total `CNTPCT_EL0` duration and one-interval overruns;
+- input produced by virtio-input and direct USB HID;
+- input consumed from the shared queue during the active bottom half;
+- successful redraw submissions;
+- maximum queue depth, lifetime high-water, and full-queue overflow;
+- pending and last-consumed work bits.
 
-Production timing uses `CNTPCT_EL0`; `CNTFRQ_EL0` provides the conversion
-frequency. The initial observation threshold is one timer interval—about 10 ms
-at 100 Hz. It detects a serious overrun but is not the final accepted budget.
+Work-class reports outside the active pass are ignored, so cooperative console
+activity does not contaminate bottom-half measurements. Each class stores
+last-pass, maximum-pass, and cumulative counts.
 
-No syscall exposes this internal structure. Pending publication and telemetry
-remain valid only under the current single-core, IRQ-masked, one-consumer model.
+Network frames, device-operation counts, damage/full-redraw detail, class budget
+exhaustion, and EL0 heartbeat progress remain unmeasured.
+
+No syscall exposes the internal layout. The pending mask and telemetry assume one
+CPU and one consumer; they are not SMP-safe synchronization.
 
 ## Important fixed limits
 
 | Area | Current limit |
 |---|---|
-| PMM | At most 128 MiB managed |
+| PMM | 128 MiB managed |
 | Processes | 16 slots; eight user regions each |
 | VFS | 24 nodes, four mounts, eight FDs/process, 64-byte paths |
-| FAT32 | Root 8.3 files only; no directories/LFN/general FAT claim |
+| FAT32 | Root 8.3 files only |
 | GUI | 16 windows; 32 queued events/window |
-| Input | Shared 64-event producer queue |
-| Editor | 512-byte buffer; renders the caret line only |
+| Input | Shared 64-event queue; overflow counted but not prevented |
+| Editor | 512-byte buffer; caret-line viewport |
 | Files | `/fat` only; eight displayed root entries |
 | Network | No sockets, TCP, DNS API, or HTTP |
 | USB | Direct keyboard/mouse HID; no hubs |
 | User copy | Permission-aware but not fault-recoverable |
-| RPi4 | Build/host scaffolding only; no physical claim |
+| RPi4 | Build/host scaffolding only |
 
-## Open risks by release impact
+## Risks by release impact
 
-### Blocks formal v0.2 promotion
+### Blocks formal v0.2
 
-- **RISK-017:** aggregate duration is measured, but work remains unbounded.
-- Per-class queue, input, device, packet, redraw, overflow, and budget metrics are absent.
-- No sustained-load QEMU heartbeat proves EL0 progress or explicit loss accounting.
+- **RISK-017:** selected work is measurable but not bounded.
+- Network frames, device operations, damage batches, and exhaustion are not fully measured.
+- No class budgets or global deadline exist.
+- Budget-exhausted work has no pending-bit preservation rule.
+- No sustained-load QEMU heartbeat proves EL0 progress or no silent loss.
 - No formal v0.2 tag/evidence record exists.
 
 ### Required before v1.0
 
-- **RISK-013:** storage/VFS platform is too narrow.
-- **RISK-014:** applications are not complete daily tools.
-- No ext2 implementation, combined reboot-persistence gate, or 30-minute stable visible session exists.
+- **RISK-013:** storage/VFS is too narrow.
+- **RISK-014:** applications are incomplete daily tools.
+- No ext2, combined reboot-persistence gate, or 30-minute stable visible session.
 
 ### Ongoing hardening and hardware
 
 - **RISK-015:** copyin/copyout is not fault-contained.
 - TTBR1, ASIDs, and scoped TLB invalidation are absent.
-- **RISK-007:** no physical Raspberry Pi evidence exists.
+- **RISK-007:** no physical Raspberry Pi evidence.
 
-## Application milestone correction
+## Application milestone
 
 Issue #2 is **v0.6 useful desktop applications**, not v1.1. It depends on v0.3
-common paths/metadata, v0.4 real FAT, and v0.5 shared runtime/widgets. Small
-isolated usability fixes may land earlier but must not replace those foundations.
+paths/metadata, v0.4 real FAT, and v0.5 shared runtime/widgets.
 
-## Promotion gate
+## Promotion gates
 
 ```sh
 bash tools/verify.sh
+make qemu-fb-visible   # separate manual evidence
 ```
 
-Manual visible claims additionally require:
+## Next sequence
 
-```sh
-make qemu-fb-visible
-```
-
-Record tester, date, exact commit, workflow, result, and limitations.
-
-## Next technically correct sequence
-
-1. Add per-class input, device, packet, redraw, queue, and overflow metrics.
-2. Use measurements to define independent work budgets and a global deadline.
+1. Measure network frames, device operations, damage/full-redraw work, and drops.
+2. Select class budgets and a global deadline from evidence.
 3. Preserve or republish specific pending bits when a budget expires.
-4. Add sustained-load QEMU tests proving EL0 heartbeat and explicit loss accounting.
+4. Add sustained-load QEMU heartbeat and explicit loss accounting.
 5. Close or accept RISK-017, record a visible pass, and promote/tag v0.2.
-6. Begin v0.3 storage/VFS platform work.
+6. Begin v0.3 storage/VFS work.

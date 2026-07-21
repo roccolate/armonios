@@ -3,25 +3,20 @@
 
 #include <stdint.h>
 
-/*
- * Deferred runtime work published by hard-IRQ handlers and consumed once the
- * interrupt controller has received EOI. Repeated requests coalesce in the
- * pending bitmask; the single consumer performs one pass before EL0 dispatch
- * resumes.
- */
+/* Deferred work published from hard IRQ and consumed after EOI. */
 enum {
     RUNTIME_WORK_PERIODIC = 1U << 0,
     RUNTIME_WORK_ALL = RUNTIME_WORK_PERIODIC,
 };
 
-/*
- * Internal runtime-service telemetry. Durations are generic-counter ticks, not
- * CPU clock cycles. counter_frequency_hz converts them to time when non-zero.
- *
- * The structure is kernel-internal for now. It is deliberately snapshot-based
- * so tests and a later Monitor/sysinfo integration do not depend on mutable
- * globals or partially read counters.
- */
+/* Work classes measured during one active runtime-service pass. */
+enum {
+    RUNTIME_METRIC_INPUT_PRODUCED = 0,
+    RUNTIME_METRIC_INPUT_CONSUMED,
+    RUNTIME_METRIC_REDRAW,
+    RUNTIME_METRIC_COUNT,
+};
+
 typedef struct {
     uint64_t request_count;
     uint64_t coalesced_request_count;
@@ -34,6 +29,14 @@ typedef struct {
     uint64_t over_budget_count;
     uint64_t counter_frequency_hz;
     uint64_t budget_ticks;
+
+    uint64_t metric_total[RUNTIME_METRIC_COUNT];
+    uint64_t input_queue_overflow_count;
+    uint32_t metric_last[RUNTIME_METRIC_COUNT];
+    uint32_t metric_max[RUNTIME_METRIC_COUNT];
+    uint32_t max_input_queue_depth;
+    uint32_t input_queue_high_water;
+
     uint32_t pending_work;
     uint32_t last_work;
 } runtime_service_stats_t;
@@ -44,13 +47,12 @@ void runtime_service_reset(void);
 
 void runtime_service_configure_timing(uint64_t counter_frequency_hz,
                                       uint64_t budget_ticks);
+void runtime_service_report_metric(uint32_t metric, uint32_t value);
+void runtime_service_report_input_queue(uint32_t depth, uint32_t high_water,
+                                        uint64_t overflow_count);
 void runtime_service_get_stats(runtime_service_stats_t *stats);
 
-/*
- * Architecture clock hook used by the service. irq.c provides a weak zero
- * clock for host-only link tests; the AArch64 timer driver provides the strong
- * generic-counter implementation.
- */
+/* Weak zero clock in irq.c; strong CNTPCT_EL0 implementation in timer.c. */
 uint64_t runtime_service_counter_now(void);
 
 #endif
