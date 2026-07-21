@@ -25,7 +25,7 @@ typedef struct {
     uint32_t input_events_consumed;
     uint32_t input_queue_depth_after_producers;
     uint32_t input_queue_high_water;
-    uint64_t input_queue_overflow_delta;
+    uint64_t input_queue_overflow_count;
     uint32_t redraw_count;
     uint32_t network_frames;
 } runtime_service_work_report_t;
@@ -81,6 +81,7 @@ void runtime_service_reset(void);
 
 void runtime_service_configure_timing(uint64_t counter_frequency_hz,
                                       uint64_t budget_ticks);
+int runtime_service_is_active(void);
 void runtime_service_report_work(const runtime_service_work_report_t *report);
 void runtime_service_get_stats(runtime_service_stats_t *stats);
 
