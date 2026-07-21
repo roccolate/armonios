@@ -33,6 +33,7 @@ jobs:
           pathlib.Path.unlink = keep_workflow
           runpy.run_path('tools/apply_rpi4_fat_probe_patch.py', run_name='__main__')
           PY
+          git checkout -- .github/workflows/verify.yml
 
       - name: Commit generated integration
         run: |
