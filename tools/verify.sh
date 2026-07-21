@@ -21,6 +21,7 @@ printf 'date: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 run_gate build make BOARD=qemu_virt
 run_gate size make BOARD=qemu_virt size
 run_gate board-rpi4 bash tests/run_board_build_test.sh
+run_gate rpi4-probe-package bash tools/package_rpi4_emmc2_probe.sh
 run_gate emmc-sdhci-host bash tests/run_emmc_sdhci_test.sh
 run_gate rpi-mailbox-host bash tests/run_rpi_mailbox_test.sh
 run_gate host-tests make -C tests test
