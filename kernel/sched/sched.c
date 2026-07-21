@@ -5,7 +5,6 @@
 
 #include "kernel/irq.h"
 #include "kernel/mm/pmm.h"
-#include "uart/pl011.h"
 
 #define SCHED_MAX_THREADS 4U
 #define SCHED_STACK_PAGES 4ULL
@@ -219,7 +218,6 @@ void sched_thread_exit(void) {
 
     old_thread = g_current_thread;
     if (old_thread == 0) {
-        uart_puts("SCHED idle: no current thread\n");
         irq_enable();
         for (;;) {
             sched_wait_for_event();
@@ -240,7 +238,6 @@ void sched_thread_exit(void) {
             }
             old_thread->stack_base = 0;
         }
-        uart_puts("SCHED idle: no runnable threads\n");
         irq_enable();
         for (;;) {
             sched_wait_for_event();
@@ -251,7 +248,7 @@ void sched_thread_exit(void) {
     g_current_thread = next_thread;
 
     /*
-     * Free the exiting thread's stack pages.  IRQs are disabled and
+     * Free the exiting thread's stack pages. IRQs are disabled and
      * switch_context will atomically swap SP to next_thread's stack,
      * so the few instructions between here and the SP swap are safe.
      */
