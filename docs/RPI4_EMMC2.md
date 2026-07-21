@@ -4,7 +4,9 @@
 
 - **Controller core:** IMPLEMENTED; HOST-VERIFIED.
 - **Firmware mailbox clock protocol:** IMPLEMENTED; HOST-VERIFIED.
-- **Raspberry Pi 4 board integration:** FAIL-CLOSED.
+- **EL2 to EL1 boot entry:** IMPLEMENTED; QEMU-VERIFIED.
+- **Opt-in sector-0 probe image:** IMPLEMENTED; BUILD-VERIFIED when CI passes.
+- **Normal Raspberry Pi 4 storage integration:** FAIL-CLOSED.
 - **Physical clock response, card initialization, and sector reads:** UNVERIFIED.
 - **Writes:** intentionally disabled.
 
@@ -53,7 +55,28 @@ change board capabilities or make storage reachable.
 The physical mailbox address translation and firmware response remain
 unverified until a real Raspberry Pi 4 serial boot records the marker.
 
-## Host regressions
+## Opt-in physical probe
+
+`make rpi4-emmc2-probe` builds
+`build-rpi4-emmc2-probe/kernel8.img` with
+`ARMONIOS_RPI4_EMMC2_PROBE=1`.
+
+Only that build performs the early diagnostic sequence:
+
+1. query the EMMC2 base clock through firmware;
+2. initialize the SDHCI/card path at `RPI4_EMMC_BASE`;
+3. read exactly sector 0;
+4. print the first 16 bytes and bytes 510-511 over UART.
+
+The probe uses static kernel buffers and the read-only controller. It does not
+advertise `BOARD_CAP_STORAGE`, does not route the device through VFS/FAT, and
+does not call a write operation. The normal `make BOARD=rpi4` image excludes
+the probe path at preprocessing time.
+
+Boot configuration, serial wiring, markers, and evidence requirements live in
+`deploy/rpi4-emmc2-probe/`.
+
+## Automated regressions
 
 `bash tests/run_emmc_sdhci_test.sh` builds the production SDHCI driver with
 `-Wall -Wextra -Werror` against a simulated register bank. It verifies:
@@ -77,31 +100,29 @@ a simulated FIFO. It verifies:
 - write-FIFO and response-FIFO timeout paths;
 - invalid clock IDs and misaligned addresses.
 
-Both standalone regressions are part of `bash tools/verify.sh`.
+`tests/run_board_build_test.sh` builds both the normal RPi4 image and the
+opt-in `kernel8.img`, enforcing the configured kernel-size limit on both.
+These regressions are part of `bash tools/verify.sh`.
 
 ## Why the board remains fail-closed
 
-`drivers/boards/rpi4/board.c` does not advertise `BOARD_CAP_STORAGE`, does not
-map EMMC2 MMIO, and returns failure from the generic storage entry points.
-The clock query is diagnostic preparation only. This prevents an unverified
-driver from being reached during ordinary RPi4 boot or from exposing FAT
-writes.
+`drivers/boards/rpi4/board.c` always returns zero capabilities and failure from
+the generic storage entry points. EMMC2 MMIO is not included in the normal
+post-MMU board map. The probe is an early, compile-time-selected diagnostic,
+not a storage backend.
 
 The base clock is no longer guessed from the SDHCI capability register. It is
-requested from firmware and will be passed to the controller only in the
-opt-in physical probe path.
+requested from firmware and passed to the controller only in the opt-in probe.
 
 ## Next hardware milestones
 
-1. add an opt-in RPi4 storage-probe build that maps only the EMMC2 register
-   range and prints every initialization stage over UART;
-2. boot on a Raspberry Pi 4 and record the firmware clock marker;
-3. record CMD0-through-CMD7 completion;
-4. read sector 0 and print a bounded hexadecimal/signature marker;
-5. parse an MBR or superfloppy FAT boot sector read-only;
-6. expose `BOARD_CAP_STORAGE` only after repeatable physical reads;
-7. add four-bit mode and CMD18/CMD12 after single-block reads are stable;
-8. implement writes only after read-only FAT mounting and disposable-card tests
+1. boot the probe on a Raspberry Pi 4 and record the firmware clock marker;
+2. record EMMC2 initialization and sector-0 markers across cold boots;
+3. add finer command-stage diagnostics only where the physical log needs them;
+4. parse an MBR or superfloppy FAT boot sector read-only;
+5. expose `BOARD_CAP_STORAGE` only after repeatable physical reads;
+6. add four-bit mode and CMD18/CMD12 after single-block reads are stable;
+7. implement writes only after read-only FAT mounting and disposable-card tests
    are repeatable.
 
 No physical clock, card-read, FAT-mount, or write claim is made by this file.
