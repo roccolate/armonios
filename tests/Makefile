@@ -12,12 +12,12 @@ APPS_DIR  := programs/apps
 # production kernel does the same with aarch64 objcopy, so this
 # test catches the same shape of bug in the BUILD process.
 APP_BLOB_BINS  := $(BUILD_DIR)/$(APPS_DIR)/shell.bin \
-                  $(BUILD_DIR)/$(APPS_DIR)/editor.bin \
-                  $(BUILD_DIR)/$(APPS_DIR)/files.bin \
-                  $(BUILD_DIR)/$(APPS_DIR)/monitor.bin \
-                  $(BUILD_DIR)/$(APPS_DIR)/clock.bin \
-                  $(BUILD_DIR)/$(APPS_DIR)/panel.bin \
-                  $(BUILD_DIR)/$(APPS_DIR)/control.bin
+                   $(BUILD_DIR)/$(APPS_DIR)/editor.bin \
+                   $(BUILD_DIR)/$(APPS_DIR)/files.bin \
+                   $(BUILD_DIR)/$(APPS_DIR)/monitor.bin \
+                   $(BUILD_DIR)/$(APPS_DIR)/clock.bin \
+                   $(BUILD_DIR)/$(APPS_DIR)/panel.bin \
+                   $(BUILD_DIR)/$(APPS_DIR)/control.bin
 APP_BLOB_OBJS  := $(patsubst %.bin,%.host_blob.o,$(APP_BLOB_BINS))
 
 SRCS=unity/unity.c main.c \
@@ -27,7 +27,9 @@ SRCS=unity/unity.c main.c \
      test_user_image_runtime.c \
      test_panel_boot_argv.c \
      test_panel_boot_recovery.c \
-     test_irq.c test_sched.c test_vfs.c test_vfs_fat32_invalidation.c test_tmpfs.c test_fat32.c test_dhcp_options.c \
+     test_irq.c test_sched.c test_vfs.c test_vfs_mount_dispatch.c \
+     test_vfs_fat32_invalidation.c test_fat32_vfs_registration.c \
+     test_tmpfs.c test_fat32.c test_dhcp_options.c \
      test_ipc.c test_font.c \
      test_gui.c test_fb.c test_dtb.c test_virtio_blk.c test_virtio_net.c \
      test_input.c test_virtio_input.c \
