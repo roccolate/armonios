@@ -60,6 +60,7 @@ void kernel_on_timer_tick(void) {
 
 static void repeated_ticks_coalesce(void) {
     runtime_service_reset();
+    g_eoi_seen = 1U;
     g_backend_calls = 0U;
 
     runtime_service_request(RUNTIME_WORK_PERIODIC);
@@ -72,6 +73,7 @@ static void repeated_ticks_coalesce(void) {
 
 static void backend_requeue_survives_current_pass(void) {
     runtime_service_reset();
+    g_eoi_seen = 1U;
     g_backend_calls = 0U;
     g_requeue_once = 1U;
 
