@@ -125,7 +125,8 @@ void runtime_service_request(uint32_t work) {
 static void runtime_service_requeue_budget(uint32_t work, uint64_t *counter) {
     if ((g_runtime_stats.pending_work & work) == 0U) {
         (*counter)++;
-        runtime_service_request(work);
+        g_runtime_stats.request_count++;
+        g_runtime_stats.pending_work |= work;
     }
 }
 
