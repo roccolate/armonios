@@ -1,0 +1,40 @@
+name: Measure kernel size
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  measure:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/process-parent-wait-lifecycle
+      - name: Install cross toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+      - name: Build and record sizes
+        run: |
+          make clean >/dev/null
+          make -j2 >/dev/null
+          {
+            printf 'kernel.bin bytes: '
+            wc -c < build/kernel.bin
+            aarch64-linux-gnu-size build/kernel.elf
+            printf '\nLargest text/data symbols:\n'
+            aarch64-linux-gnu-nm -S --size-sort --radix=d build/kernel.elf | tail -40
+          } > .github/kernel-size-diagnostic.txt
+      - name: Publish diagnostic
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/kernel-size-diagnostic.txt
+          git commit -m "Capture kernel size diagnostic"
+          git push origin HEAD:agent/process-parent-wait-lifecycle
