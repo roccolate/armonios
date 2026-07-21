@@ -28,6 +28,7 @@ run_gate mbr-fat32-host bash tests/run_mbr_fat32_test.sh
 run_gate block-view-fat32-host bash tests/run_block_view_fat32_test.sh
 run_gate rpi-mailbox-host bash tests/run_rpi_mailbox_test.sh
 run_gate host-tests make -C tests test
+run_gate runtime-service bash tests/run_runtime_service_test.sh
 run_gate process-parent-wait bash tests/run_process_parent_wait_test.sh
 run_gate process-fd-isolation bash tests/run_vfs_process_fd_test.sh
 run_gate usercopy-host bash tests/run_user_copy_permissions_test.sh
