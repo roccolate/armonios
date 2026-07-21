@@ -7,7 +7,9 @@
 #define PANEL_BOOT_ARGV_MAX_BYTES   256U
 
 /*
- * Pack argv strings and the argv pointer array into a new EL0 stack.
+ * Pack kernel-owned argv strings and the argv pointer array into a new EL0
+ * stack. Syscall callers must copy the pointer array and every string across
+ * the EL0 boundary before invoking the app loader.
  *
  * `stack` is the kernel-accessible backing memory for the user stack, mapped
  * at `stack_base` for the process. The returned argv vaddr is also the initial
