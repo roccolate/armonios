@@ -3,10 +3,14 @@
 
 #include <stdint.h>
 
+/* One complete virtio RX ring is the first enforced class budget. */
+#define RUNTIME_NETWORK_FRAME_BUDGET 16U
+
 /* Deferred work published from hard IRQ and consumed after EOI. */
 enum {
     RUNTIME_WORK_PERIODIC = 1U << 0,
-    RUNTIME_WORK_ALL = RUNTIME_WORK_PERIODIC,
+    RUNTIME_WORK_NETWORK = 1U << 1,
+    RUNTIME_WORK_ALL = RUNTIME_WORK_PERIODIC | RUNTIME_WORK_NETWORK,
 };
 
 /* Work classes measured during one active runtime-service pass. */
@@ -31,6 +35,7 @@ typedef struct {
     uint64_t max_duration_ticks;
     uint64_t total_duration_ticks;
     uint64_t over_budget_count;
+    uint64_t network_budget_exhaustion_count;
     uint64_t counter_frequency_hz;
     uint64_t budget_ticks;
 
