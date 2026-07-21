@@ -12,6 +12,8 @@
 #define REG_PRESENT_STATE        0x24U
 #define REG_CLOCK_RESET          0x2cU
 #define REG_INT_STATUS           0x30U
+#define REG_INT_ENABLE           0x34U
+#define REG_SIGNAL_ENABLE        0x38U
 
 #define PRESENT_CARD             0x00010000U
 #define PRESENT_STABLE           0x00020000U
@@ -22,6 +24,9 @@
 #define INT_RESPONSE             0x00000001U
 #define INT_DATA_END             0x00000002U
 #define INT_DATA_AVAIL           0x00000020U
+#define INT_ERROR_MASK           0xffff8000U
+#define INT_POLL_MASK            (INT_RESPONSE | INT_DATA_END | \
+                                  INT_DATA_AVAIL | INT_ERROR_MASK)
 
 #define CMD_GO_IDLE              0U
 #define CMD_ALL_SEND_CID         2U
@@ -183,6 +188,8 @@ static int test_init_and_read(void) {
     ASSERT_EQ_U32(0x1234U, dev.rca);
     ASSERT_TRUE(dev.actual_clock_hz <= EMMC_TRANSFER_CLOCK_HZ);
     ASSERT_TRUE(dev.actual_clock_hz > 0U);
+    ASSERT_EQ_U32(INT_POLL_MASK, fake.regs[REG_INT_ENABLE / 4U]);
+    ASSERT_EQ_U32(0U, fake.regs[REG_SIGNAL_ENABLE / 4U]);
 
     ASSERT_EQ_U32(CMD_GO_IDLE, fake.command_log[0]);
     ASSERT_EQ_U32(CMD_IF_COND, fake.command_log[1]);
@@ -210,8 +217,13 @@ static int test_init_and_read(void) {
         ASSERT_EQ_U32(20U, fake.argument_log[before]);
         ASSERT_EQ_U32(CMD_READ_SINGLE, fake.command_log[before + 1U]);
         ASSERT_EQ_U32(21U, fake.argument_log[before + 1U]);
+        ASSERT_EQ_U32(EMMC_ERR_INVAL,
+                      emmc_read_sector(&dev, UINT32_MAX, 2U, two_sectors));
+        ASSERT_EQ_U32(before + 2U, fake.command_count);
     }
 
+    ASSERT_EQ_U32(EMMC_ERR_INVAL,
+                  emmc_read_sector(&dev, 0U, 0U, sector));
     ASSERT_EQ_U32(EMMC_ERR_READ_ONLY,
                   emmc_write_sector(&dev, 7U, 1U, sector));
     return 0;
