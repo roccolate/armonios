@@ -33,71 +33,25 @@ static void rpi4_emmc2_probe_delay_us(void *context, uint32_t usec) {
     } while (now - start < ticks);
 }
 
-static const char *rpi4_emmc2_probe_command_name(uint32_t command) {
-    switch (command) {
-    case 0U:
-        return "CMD0";
-    case 2U:
-        return "CMD2";
-    case 3U:
-        return "CMD3";
-    case 7U:
-        return "CMD7";
-    case 8U:
-        return "CMD8";
-    case 9U:
-        return "CMD9";
-    case 16U:
-        return "CMD16";
-    case 17U:
-        return "CMD17";
-    case 41U:
-        return "ACMD41";
-    case 55U:
-        return "CMD55";
-    default:
-        return "CMD?";
-    }
-}
-
 static void rpi4_emmc2_probe_print_diag(void) {
     rpi4_emmc2_probe_diag_refresh(&g_emmc2_probe_diag);
 
-    uart_puts("EMMC2 probe: diag command ");
-    if (g_emmc2_probe_diag.last_command == RPI4_EMMC2_DIAG_NO_COMMAND) {
-        uart_puts("none");
-    } else {
-        uart_puts(rpi4_emmc2_probe_command_name(
-            g_emmc2_probe_diag.last_command));
-        uart_puts(" ");
-        print_dec64(g_emmc2_probe_diag.last_command);
-    }
-    uart_puts(" argument ");
+    uart_puts("EMMC2 diag c ");
+    print_signed32((int32_t)g_emmc2_probe_diag.last_command);
+    uart_puts(" a ");
     print_hex64(g_emmc2_probe_diag.last_argument);
-    uart_puts("\n");
-
-    uart_puts("EMMC2 probe: diag read-offset ");
+    uart_puts(" r ");
     print_hex64(g_emmc2_probe_diag.last_read_offset);
-    uart_puts(" write-offset ");
-    print_hex64(g_emmc2_probe_diag.last_write_offset);
-    uart_puts(" write-value ");
-    print_hex64(g_emmc2_probe_diag.last_write_value);
-    uart_puts("\n");
-
-    uart_puts("EMMC2 probe: diag present ");
+    uart_puts(" p ");
     print_hex64(g_emmc2_probe_diag.present_state);
-    uart_puts(" clock-reset ");
+    uart_puts(" k ");
     print_hex64(g_emmc2_probe_diag.clock_reset);
-    uart_puts(" host-power ");
+    uart_puts(" h ");
     print_hex64(g_emmc2_probe_diag.host_power);
-    uart_puts(" actual-clock ");
-    print_dec64(g_emmc2_probe_device.actual_clock_hz);
-    uart_puts("\n");
-
-    uart_puts("EMMC2 probe: diag int-now ");
-    print_hex64(g_emmc2_probe_diag.interrupt_status);
-    uart_puts(" int-last ");
+    uart_puts(" i ");
     print_hex64(g_emmc2_probe_diag.last_nonzero_interrupt_status);
+    uart_puts(" f ");
+    print_dec64(g_emmc2_probe_device.actual_clock_hz);
     uart_puts("\n");
 }
 
