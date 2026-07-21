@@ -35,7 +35,7 @@ SRCS=unity/unity.c main.c \
      test_input.c test_virtio_input.c \
      test_hid.c test_pci.c test_hid_driver.c test_usb_core.c \
      test_pci_assign.c test_hid_state.c test_hid_init.c \
-     test_syscall_abi.c test_syscall_helpers.c \
+     test_syscall_abi.c test_syscall_helpers.c test_syscall_vfs_user_copy.c \
      test_process_isolation.c test_window_abi.c \
      ../kernel/mm/pmm.c ../kernel/mm/kheap.c ../kernel/mm/vmm.c \
      ../kernel/boot_program.c ../kernel/bootfs.c \
@@ -48,7 +48,8 @@ SRCS=unity/unity.c main.c \
      ../kernel/init_status.c ../kernel/print.c \
      ../kernel/ipc.c ../kernel/irq.c ../kernel/process.c \
      ../kernel/sched/sched.c \
-     ../kernel/tmpfs.c ../kernel/syscall_helpers.c ../kernel/kstring.c \
+     ../kernel/tmpfs.c ../kernel/syscall_helpers.c ../kernel/syscall_vfs.c \
+     ../kernel/kstring.c \
      ../kernel/user_image.c ../kernel/user_vm.c ../kernel/vfs.c \
      ../kernel/dtb.c ../kernel/dtb_framebuffer.c \
      ../drivers/fb/fb.c ../drivers/storage/virtio_blk.c \
