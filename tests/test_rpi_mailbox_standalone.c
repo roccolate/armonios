@@ -11,6 +11,7 @@
 #define STATUS_EMPTY    0x40000000U
 #define CHANNEL_PROPERTY 8U
 #define TAG_GET_CLOCK_RATE 0x00030002U
+#define TEST_BUS_ALIAS  0xc0000000U
 
 #define ASSERT_TRUE(expr) do { \
     if (!(expr)) { \
@@ -100,11 +101,12 @@ static int test_clock_rate_request(void) {
     fake_mailbox_t fake;
     rpi_mailbox_io_t io;
     uint32_t rate = 0U;
+    uintptr_t arm_address = 0x00102030U;
 
     memset(message, 0, sizeof(message));
     memset(&fake, 0, sizeof(fake));
     fake.message = message;
-    fake.expected_address = 0x00102030U;
+    fake.expected_address = TEST_BUS_ALIAS + (uint32_t)arm_address;
     io.read32 = fake_read32;
     io.write32 = fake_write32;
     io.barrier = fake_barrier;
@@ -112,7 +114,7 @@ static int test_clock_rate_request(void) {
 
     ASSERT_EQ_U32(RPI_MAILBOX_OK,
                   rpi_mailbox_get_clock_rate_with_io(
-                      &io, fake.expected_address, message,
+                      &io, arm_address, TEST_BUS_ALIAS, message,
                       RPI_FIRMWARE_CLOCK_EMMC2, &rate));
     ASSERT_EQ_U32(200000000U, rate);
     ASSERT_EQ_U32(fake.expected_address | CHANNEL_PROPERTY, fake.written);
@@ -126,11 +128,12 @@ static int test_timeout_and_validation(void) {
     fake_mailbox_t fake;
     rpi_mailbox_io_t io;
     uint32_t rate = 0U;
+    uintptr_t arm_address = 0x00102030U;
 
     memset(message, 0, sizeof(message));
     memset(&fake, 0, sizeof(fake));
     fake.message = message;
-    fake.expected_address = 0x00102030U;
+    fake.expected_address = TEST_BUS_ALIAS + (uint32_t)arm_address;
     io.read32 = fake_read32;
     io.write32 = fake_write32;
     io.barrier = fake_barrier;
@@ -139,23 +142,31 @@ static int test_timeout_and_validation(void) {
     fake.full_forever = 1U;
     ASSERT_EQ_U32(RPI_MAILBOX_ERR_TIMEOUT,
                   rpi_mailbox_get_clock_rate_with_io(
-                      &io, fake.expected_address, message,
+                      &io, arm_address, TEST_BUS_ALIAS, message,
                       RPI_FIRMWARE_CLOCK_EMMC2, &rate));
 
     fake.full_forever = 0U;
     fake.empty_forever = 1U;
     ASSERT_EQ_U32(RPI_MAILBOX_ERR_TIMEOUT,
                   rpi_mailbox_get_clock_rate_with_io(
-                      &io, fake.expected_address, message,
+                      &io, arm_address, TEST_BUS_ALIAS, message,
                       RPI_FIRMWARE_CLOCK_EMMC2, &rate));
 
     ASSERT_EQ_U32(RPI_MAILBOX_ERR_INVAL,
                   rpi_mailbox_get_clock_rate_with_io(
-                      &io, fake.expected_address + 1U, message,
+                      &io, arm_address + 1U, TEST_BUS_ALIAS, message,
                       RPI_FIRMWARE_CLOCK_EMMC2, &rate));
     ASSERT_EQ_U32(RPI_MAILBOX_ERR_INVAL,
                   rpi_mailbox_get_clock_rate_with_io(
-                      &io, fake.expected_address, message, 0U, &rate));
+                      &io, arm_address, TEST_BUS_ALIAS + 1U, message,
+                      RPI_FIRMWARE_CLOCK_EMMC2, &rate));
+    ASSERT_EQ_U32(RPI_MAILBOX_ERR_INVAL,
+                  rpi_mailbox_get_clock_rate_with_io(
+                      &io, 0x40000000U, TEST_BUS_ALIAS, message,
+                      RPI_FIRMWARE_CLOCK_EMMC2, &rate));
+    ASSERT_EQ_U32(RPI_MAILBOX_ERR_INVAL,
+                  rpi_mailbox_get_clock_rate_with_io(
+                      &io, arm_address, TEST_BUS_ALIAS, message, 0U, &rate));
     return 0;
 }
 

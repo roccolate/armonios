@@ -52,17 +52,35 @@ static int rpi_mailbox_wait_status(const rpi_mailbox_io_t *io,
     return RPI_MAILBOX_ERR_TIMEOUT;
 }
 
-static int rpi_mailbox_transaction(const rpi_mailbox_io_t *io,
-                                   uint32_t message_address) {
-    uint32_t request;
-
-    if (io == NULL || io->read32 == NULL || io->write32 == NULL ||
-        io->barrier == NULL || message_address == 0U ||
-        (message_address & RPI_MAILBOX_CHANNEL_MASK) != 0U) {
+static int rpi_mailbox_arm_to_bus(uintptr_t arm_address, uint32_t bus_alias,
+                                  uint32_t *bus_address) {
+    if (bus_address == NULL || arm_address == 0U ||
+        (arm_address & RPI_MAILBOX_CHANNEL_MASK) != 0U ||
+        (bus_alias & RPI_MAILBOX_CHANNEL_MASK) != 0U ||
+        arm_address > UINT32_MAX ||
+        (uint32_t)arm_address > UINT32_MAX - bus_alias) {
         return RPI_MAILBOX_ERR_INVAL;
     }
 
-    request = (message_address & RPI_MAILBOX_ADDRESS_MASK) |
+    *bus_address = (uint32_t)arm_address + bus_alias;
+    if (*bus_address == 0U ||
+        (*bus_address & RPI_MAILBOX_CHANNEL_MASK) != 0U) {
+        return RPI_MAILBOX_ERR_INVAL;
+    }
+    return RPI_MAILBOX_OK;
+}
+
+static int rpi_mailbox_transaction(const rpi_mailbox_io_t *io,
+                                   uint32_t message_bus_address) {
+    uint32_t request;
+
+    if (io == NULL || io->read32 == NULL || io->write32 == NULL ||
+        io->barrier == NULL || message_bus_address == 0U ||
+        (message_bus_address & RPI_MAILBOX_CHANNEL_MASK) != 0U) {
+        return RPI_MAILBOX_ERR_INVAL;
+    }
+
+    request = (message_bus_address & RPI_MAILBOX_ADDRESS_MASK) |
               RPI_MAILBOX_CHANNEL_PROPERTY;
     if (rpi_mailbox_wait_status(io, RPI_MAILBOX_STATUS_FULL, 0U) !=
         RPI_MAILBOX_OK) {
@@ -90,15 +108,22 @@ static int rpi_mailbox_transaction(const rpi_mailbox_io_t *io,
 }
 
 int rpi_mailbox_get_clock_rate_with_io(const rpi_mailbox_io_t *io,
-                                       uint32_t message_address,
+                                       uintptr_t message_arm_address,
+                                       uint32_t bus_alias,
                                        uint32_t message[8],
                                        uint32_t clock_id,
                                        uint32_t *rate_hz) {
+    uint32_t message_bus_address;
     int result;
 
     if (message == NULL || rate_hz == NULL || clock_id == 0U ||
         ((uintptr_t)message & RPI_MAILBOX_CHANNEL_MASK) != 0U) {
         return RPI_MAILBOX_ERR_INVAL;
+    }
+    result = rpi_mailbox_arm_to_bus(message_arm_address, bus_alias,
+                                    &message_bus_address);
+    if (result != RPI_MAILBOX_OK) {
+        return result;
     }
 
     message[0] = 8U * sizeof(uint32_t);
@@ -110,7 +135,7 @@ int rpi_mailbox_get_clock_rate_with_io(const rpi_mailbox_io_t *io,
     message[6] = 0U;
     message[7] = RPI_FIRMWARE_TAG_END;
 
-    result = rpi_mailbox_transaction(io, message_address);
+    result = rpi_mailbox_transaction(io, message_bus_address);
     if (result != RPI_MAILBOX_OK) {
         return result;
     }
@@ -126,12 +151,12 @@ int rpi_mailbox_get_clock_rate_with_io(const rpi_mailbox_io_t *io,
     return RPI_MAILBOX_OK;
 }
 
-int rpi_mailbox_get_clock_rate(uint64_t mailbox_base, uint32_t clock_id,
-                               uint32_t *rate_hz) {
+int rpi_mailbox_get_clock_rate(uint64_t mailbox_base, uint32_t bus_alias,
+                               uint32_t clock_id, uint32_t *rate_hz) {
     rpi_mailbox_io_t io;
-    uintptr_t message_address = (uintptr_t)g_clock_message;
+    uintptr_t message_arm_address = (uintptr_t)g_clock_message;
 
-    if (mailbox_base == 0U || message_address > UINT32_MAX) {
+    if (mailbox_base == 0U) {
         return RPI_MAILBOX_ERR_INVAL;
     }
 
@@ -140,5 +165,6 @@ int rpi_mailbox_get_clock_rate(uint64_t mailbox_base, uint32_t clock_id,
     io.barrier = rpi_mailbox_default_barrier;
     io.context = (void *)(uintptr_t)mailbox_base;
     return rpi_mailbox_get_clock_rate_with_io(
-        &io, (uint32_t)message_address, g_clock_message, clock_id, rate_hz);
+        &io, message_arm_address, bus_alias, g_clock_message, clock_id,
+        rate_hz);
 }

@@ -69,17 +69,22 @@ uint32_t board_capabilities(void) {
 }
 
 void board_early_init(void) {
+    int mailbox_result;
+
     uart_init(RPI4_UART0_BASE);
 
-    if (rpi_mailbox_get_clock_rate(RPI4_MAILBOX_BASE,
-                                   RPI_FIRMWARE_CLOCK_EMMC2,
-                                   &g_emmc2_clock_hz) == RPI_MAILBOX_OK) {
+    mailbox_result = rpi_mailbox_get_clock_rate(
+        RPI4_MAILBOX_BASE, RPI4_MAILBOX_BUS_ALIAS,
+        RPI_FIRMWARE_CLOCK_EMMC2, &g_emmc2_clock_hz);
+    if (mailbox_result == RPI_MAILBOX_OK) {
         uart_puts("EMMC2 clock: ");
         print_dec64(g_emmc2_clock_hz);
         uart_puts("\n");
     } else {
         g_emmc2_clock_hz = 0U;
-        uart_puts("EMMC2 clock: unavailable\n");
+        uart_puts("EMMC2 clock: unavailable ");
+        print_signed32(mailbox_result);
+        uart_puts("\n");
     }
 
 #if defined(ARMONIOS_RPI4_EMMC2_PROBE)
