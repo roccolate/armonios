@@ -6,6 +6,7 @@
 - **Firmware mailbox clock protocol:** IMPLEMENTED; HOST-VERIFIED.
 - **Mailbox ARM-to-VideoCore address translation:** IMPLEMENTED; HOST-VERIFIED.
 - **RPi4 broken card-detect adapter:** IMPLEMENTED; HOST-VERIFIED.
+- **RPi4 probe failure telemetry:** IMPLEMENTED; HOST-VERIFIED.
 - **EL2 to EL1 boot entry:** IMPLEMENTED; QEMU-VERIFIED.
 - **Opt-in sector-0 probe image:** IMPLEMENTED; BUILD-VERIFIED.
 - **Normal Raspberry Pi 4 storage integration:** FAIL-CLOSED.
@@ -105,6 +106,34 @@ was active. It does not prove a card is inserted and does not provide hot-plug
 detection. A missing or unusable card must fail later through CMD0/CMD8/ACMD41
 or the transfer timeouts.
 
+## Probe failure telemetry
+
+`drivers/boards/rpi4/emmc2_probe_diag.h` extends the same probe-only adapter
+with passive MMIO observation. It records:
+
+- the last command index and argument written;
+- the last MMIO read offset;
+- the last MMIO write offset and value;
+- the raw `PRESENT_STATE`, before the two broken-CD bits are supplied;
+- current clock/reset and host-power registers;
+- current `INT_STATUS`;
+- the last non-zero `INT_STATUS`, preserved after an interrupt acknowledge.
+
+On an initialization or sector-read failure, `board.c` prints four bounded UART
+lines containing those fields. The observer does not manufacture a response,
+interrupt, register write, or sector byte. This keeps telemetry out of the
+generic SDHCI driver and out of the normal RPi4 image while making the first
+physical failure actionable.
+
+Useful interpretations are:
+
+- last command `none` with read offset `0x2c`: reset or clock stabilization;
+- last command `none` with read offset `0x24`: card/inhibit wait before CMD0;
+- read offset `0x30` after a command: response or data interrupt wait;
+- last command `17`: sector-zero transfer reached CMD17;
+- last non-zero interrupt status retains command/data timeout, CRC, end-bit,
+  index, or bus-power error bits after the driver clears the controller status.
+
 ## Opt-in physical probe
 
 `make rpi4-emmc2-probe` builds
@@ -114,18 +143,19 @@ or the transfer timeouts.
 Only that build performs the early diagnostic sequence:
 
 1. query the EMMC2 base clock through firmware;
-2. install the RPi4 broken-card-detect adapter;
+2. install the RPi4 broken-card-detect and telemetry adapter;
 3. initialize the SDHCI/card path at `RPI4_EMMC_BASE`;
 4. read exactly sector 0;
-5. print the first 16 bytes and bytes 510-511 over UART.
+5. print detailed MMIO telemetry on failure;
+6. print the first 16 bytes and bytes 510-511 on success.
 
 The probe uses static kernel buffers and the read-only controller. It does not
 advertise `BOARD_CAP_STORAGE`, does not route the device through VFS/FAT, and
 does not call a write operation. The normal `make BOARD=rpi4` image excludes
 the probe path at preprocessing time.
 
-Boot configuration, serial wiring, markers, and evidence requirements live in
-`deploy/rpi4-emmc2-probe/`.
+Boot configuration, serial wiring, markers, telemetry interpretation, and
+evidence requirements live in `deploy/rpi4-emmc2-probe/`.
 
 ## Automated regressions
 
@@ -144,6 +174,15 @@ Boot configuration, serial wiring, markers, and evidence requirements live in
   same absent native presence bits;
 - polling status enabled without signal interrupts;
 - write rejection.
+
+`bash tests/run_rpi4_emmc2_probe_diag_test.sh` compiles the probe telemetry
+adapter alone with `-Wall -Wextra -Werror` and verifies:
+
+- synthetic presence bits are returned without changing the raw register bank;
+- command index, argument, transfer word, read offset, and write offset/value
+  are captured;
+- live power, clock/reset, presence, and interrupt snapshots are refreshed;
+- the last non-zero interrupt survives a later zero/acknowledged status.
 
 `bash tests/run_rpi_mailbox_test.sh` builds the production mailbox code against
 a simulated FIFO. It verifies:
@@ -173,8 +212,9 @@ requested from firmware and passed to the controller only in the opt-in probe.
 ## Next hardware milestones
 
 1. boot the probe on a Raspberry Pi 4 and record the firmware clock marker;
-2. record EMMC2 initialization and sector-0 markers across cold boots;
-3. add finer command-stage diagnostics only where the physical log needs them;
+2. capture the complete success or failure telemetry across cold boots;
+3. add a targeted controller/board quirk only if the physical fields identify
+   a reproducible missing requirement;
 4. parse an MBR or superfloppy FAT boot sector read-only;
 5. expose `BOARD_CAP_STORAGE` only after repeatable physical reads;
 6. add four-bit mode and CMD18/CMD12 after single-block reads are stable;
