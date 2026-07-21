@@ -26,6 +26,7 @@
  */
 
 #define USB_HID_MAX_DEVICES 4U
+#define USB_HID_POLL_BUDGET USB_HID_MAX_DEVICES
 
 typedef struct {
     uint8_t device_address;
@@ -79,9 +80,8 @@ int usb_hid_poll_device(usb_hid_device_t *dev);
  * in a single call. */
 extern usb_hid_state_t g_usb_hid_state;
 
-/* Poll every registered HID device. Pushes the resulting events
- * into the global input queue. Returns the total number of events
- * pushed. */
+/* Poll at most USB_HID_POLL_BUDGET registered HID devices. Pushes the
+ * resulting events into the global input queue and returns their total. */
 int usb_hid_poll_all(void);
 
 /* Reset the kernel-wide HID state. */
@@ -89,5 +89,9 @@ void usb_hid_state_reset(void);
 
 /* Send HID SET_PROTOCOL=0 (boot) to a HID interface. */
 int usb_hid_set_protocol_boot(usb_hid_device_t *dev);
+
+#ifdef ARMONIOS_TEST
+uint8_t usb_hid_test_poll_iterations(void);
+#endif
 
 #endif

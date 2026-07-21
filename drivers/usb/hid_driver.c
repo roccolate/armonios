@@ -262,8 +262,19 @@ int usb_hid_poll_device(usb_hid_device_t *dev) {
 
 usb_hid_state_t g_usb_hid_state;
 
+#ifdef ARMONIOS_TEST
+static uint8_t g_usb_hid_test_poll_count;
+
+uint8_t usb_hid_test_poll_iterations(void) {
+    return g_usb_hid_test_poll_count;
+}
+#endif
+
 void usb_hid_state_reset(void) {
     g_usb_hid_state.count = 0;
+#ifdef ARMONIOS_TEST
+    g_usb_hid_test_poll_count = 0;
+#endif
     for (uint8_t i = 0; i < USB_HID_MAX_DEVICES; i++) {
         for (uint8_t k = 0; k < 6; k++) {
             g_usb_hid_state.devices[i].prev_keys[k] = HID_KEY_NONE;
@@ -284,7 +295,14 @@ void usb_hid_state_reset(void) {
 int usb_hid_poll_all(void) {
     int total = 0;
 
-    for (uint8_t i = 0; i < g_usb_hid_state.count; i++) {
+#ifdef ARMONIOS_TEST
+    g_usb_hid_test_poll_count = 0;
+#endif
+    for (uint8_t i = 0;
+         i < g_usb_hid_state.count && i < USB_HID_POLL_BUDGET; i++) {
+#ifdef ARMONIOS_TEST
+        g_usb_hid_test_poll_count++;
+#endif
         int n = usb_hid_poll_device(&g_usb_hid_state.devices[i]);
         if (n > 0) {
             total += n;
