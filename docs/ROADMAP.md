@@ -41,7 +41,7 @@ Chosen release defaults:
 | Phase | State | Promotion blocker |
 |---|---|---|
 | v0.1 baseline | COMPLETE | None for the recorded QEMU baseline |
-| v0.2 cleanup/hardening | IN PROGRESS / RELEASE CANDIDATE | USB/device, redraw, and global-time bounds; runtime compaction; sustained-load evidence; promotion record |
+| v0.2 cleanup/hardening | IN PROGRESS / RELEASE CANDIDATE | Redraw/global-time bounds, sustained-load evidence, promotion record |
 | v0.3 storage/VFS platform | NEXT | Depends on v0.2 promotion |
 | v0.4 real FAT | PLANNED | Depends on v0.3 filesystem interfaces |
 | v0.5 userland runtime/widgets | PLANNED | Depends on stable storage and ABI shapes |
@@ -66,8 +66,6 @@ Chosen release defaults:
    and polish belong to v0.6-v0.8.
 7. Preserve the 108000-byte kernel limit unless a deliberate release decision,
    evidence, and replacement size budget are documented. Compact first.
-8. With only 198 bytes currently remaining, the next runtime cut must reduce or
-   reuse state before introducing new persistent counters or phase flags.
 
 ## v0.1 — verified QEMU baseline
 
@@ -120,74 +118,49 @@ The post-EOI service measures:
 - input queue depth, lifetime high-water, and overflow;
 - USB HID polling operations;
 - valid virtio-net RX frames consumed;
-- redraw submissions, partial-damage batches, and full-redraw fallbacks;
-- separate input- and network-budget exhaustion.
+- redraw submissions, partial-damage batches, and full-redraw fallbacks.
 
 Phase 1B was completed through PRs #44-#48.
 
-### Landed network bound
+### Landed count bounds
 
-PR #50 introduced the first enforced class budget:
+| PR | Work class | Rule |
+|---|---|---|
+| #50 | Network RX | 16 valid frames per active post-EOI network pass; conservative requeue |
+| #52 | Shared input consumer | 16 queue events per active input pass; requeue only when work remains |
+| #55 | USB HID producer | Four registered device visits per call, even with malformed count |
+| #56 | Virtio-input producer | At most one negotiated ring length and never more than 16 descriptors per call |
 
-- `RUNTIME_WORK_NETWORK` is independent from periodic readiness;
-- active post-EOI network receive is capped at 16 valid frames per pass;
-- reaching the cap increments a network exhaustion counter;
-- network readiness is conservatively republished;
-- a seventeenth frame continues later;
-- exactly sixteen frames may produce one empty follow-up pass;
-- cooperative network polling outside the runtime service remains unbudgeted.
+Runtime state was compacted in PR #54 before the producer bounds. The latest
+validated implementation head is
+`ee92e8074ed2995a48ce22fb88a901ea02cf031d`:
 
-Evidence:
+- `Verify ArmoniOS` `29859659229`: success;
+- `CI - Tests` `29859659270`: success;
+- loadable QEMU kernel 107706 / 108000 bytes;
+- remaining margin 294 bytes;
+- USB producer merge `53c1440261267b36e813fb90e6405261ec7bbfad`;
+- virtio-input producer merge `7674b639b9a53dea4cec42bcccf84e71d7f6d10c`.
 
-- validated head `e3765864e6719c0b6373a4c9b1b7db59dfaa0202`;
-- `Verify ArmoniOS` run `29849603386`: success;
-- `CI - Tests` run `29849603374`: success;
-- loadable kernel: 107548 / 108000 bytes;
-- merge `3797f7e7cf3dfb825d927e399aa4769b27020e29`.
+Virtio-input continuation remains in the used ring and resumes on the next
+periodic tick. The deterministic host regression proves ten descriptors on an
+eight-entry negotiated ring complete as 8 + 2. USB covers every fixed supported
+slot in one bounded scan.
 
 The virtio-net path still exposes no trustworthy device-level RX-drop counter.
 This remains an explicit evidence gap.
 
-### Landed input-consumption bound
-
-PR #52 introduced the second enforced class budget:
-
-- `RUNTIME_WORK_INPUT` is independent from periodic and network readiness;
-- active post-EOI queue consumption is capped at 16 events per pass;
-- queue depth is checked without consuming at the cap;
-- exactly 16 events with an empty queue finish without requeue;
-- a seventeenth event preserves `RUNTIME_WORK_INPUT` for a later pass;
-- input-budget exhaustion is counted only when queue work remains;
-- normal timer work executes the existing periodic backend once with the input
-  phase enabled;
-- console-thread and other outside-service consumers retain prior behavior.
-
-Evidence:
-
-- validated head `ba8051cd8edbe6a66a843f80c54c96668d064a91`;
-- `Verify ArmoniOS` run `29853659559`: success;
-- `CI - Tests` run `29853659491`: success;
-- loadable kernel: 107802 / 108000 bytes;
-- remaining margin: 198 bytes;
-- merge `41f3e185ca1f75ed09416313d34279384f3d78a9`.
-
-The initial value is one quarter of the fixed 64-event queue and matches the
-network count budget. It is an engineering starting point, not a final latency
-claim.
-
 ### Remaining runtime work
 
-1. Compact runtime phase state, wrappers, and telemetry while preserving all
-   current budget and regression contracts.
-2. Split and bound USB HID/device producer polling.
-3. Bound redraw and damage work.
-4. Enforce a global generic-counter deadline.
-5. Preserve or republish every exhausted class and count each exhaustion.
-6. Add sustained-load QEMU tests proving EL0 heartbeat progress and explicit loss
+1. Bound redraw and damage work with explicit continuation.
+2. Enforce a service-wide generic-counter deadline.
+3. Preserve or republish unfinished work at redraw/deadline exhaustion.
+4. Count redraw and global-deadline exhaustion.
+5. Add sustained-load QEMU tests proving EL0 heartbeat progress and explicit loss
    accounting.
-7. Decide whether the fully bounded bottom half remains permanent or later becomes
+6. Decide whether the fully bounded bottom half remains permanent or later becomes
    a wakeable EL1 service.
-8. Create a formal v0.2 promotion/tag record with exact evidence.
+7. Create a formal v0.2 promotion/tag record with exact evidence.
 
 ### Exit criteria
 
@@ -195,9 +168,9 @@ claim.
 - no hard timer callback contains rendering, queue drains, network polling, or
   device polling;
 - every budget-relevant class and total service duration are observable;
-- input consumption, USB/device polling, network RX, redraw, and global time are
+- input producers, input consumption, USB, network, redraw, and global time are
   bounded;
-- leftover class work remains pending;
+- leftover work remains pending or retained in its native queue;
 - every exhaustion is counted;
 - sustained combined load cannot stop an EL0 heartbeat;
 - documentation states the exact post-EOI exception-context model;
@@ -246,8 +219,6 @@ Exit criteria:
 ## v0.4 — real FAT
 
 **State: PLANNED**
-
-Goal: replace the root-only FAT32 bridge with a tested filesystem driver.
 
 - FAT12/16/32 probe and mount where practical;
 - VFAT long file names and subdirectories;
