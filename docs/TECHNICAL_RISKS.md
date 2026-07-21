@@ -35,7 +35,7 @@ fail closed and no physical support claim is made.
 | RISK-014 | P1 v1 | Desktop applications | OPEN | Blocks v1 usability |
 | RISK-015 | P2 | Fault-contained user copy | OPEN | Future mapping hardening |
 | RISK-016 | P1 | Process lifecycle | CLOSED | Parent/wait correctness |
-| RISK-017 | P1 | Deferred runtime execution | OPEN; INPUT/NETWORK COUNTS BOUNDED | Blocks formal v0.2 |
+| RISK-017 | P1 | Deferred runtime execution | OPEN; COUNT BOUNDS LANDED, GLOBAL TIME OPEN | Blocks formal v0.2 |
 
 ## Open risks
 
@@ -57,7 +57,8 @@ Implementation sequence:
 - bounded shared input consumption: PR #52 / `41f3e185`;
 - runtime-state compaction: PR #54 / `39dea455`;
 - bounded USB HID device visits: PR #55 / `53c14402`;
-- bounded virtio-input descriptor draining: PR #56 / `7674b639`.
+- bounded virtio-input descriptor draining: PR #56 / `7674b639`;
+- bounded partial compositor damage: PR #58 / `fe4f2a62`.
 
 The timer callback performs fixed account/rearm/publication/scheduler work. The
 runtime backend executes after EOI but before process dispatch and `eret`.
@@ -74,37 +75,44 @@ The internal snapshot records:
 - USB HID polls reaching xHCI;
 - valid virtio-net RX frames consumed;
 - successful redraw submissions;
-- merged partial-damage rectangles and full-redraw fallbacks;
+- partial-damage rectangles, full redraws, and redraw exhaustion;
 - input/network budget exhaustion;
-- counter frequency, threshold, pending bits, and last-consumed bits.
+- counter frequency, observation threshold, pending bits, and last work.
 
 Each indexed class keeps last-pass, maximum-pass, and cumulative counts. Reports
-outside the active pass are ignored so cooperative console work is excluded.
-Production timing uses `CNTPCT_EL0`; the current approximately 10 ms timer
-interval remains an observation threshold, not an enforced global deadline.
+outside the active pass are ignored. Production timing uses `CNTPCT_EL0`; the
+approximately 10 ms timer interval remains an observation threshold, not an
+enforced deadline.
 
 #### Bounds implemented
 
 | Work class | Enforced rule | Continuation |
 |---|---|---|
-| Virtio-input producer | `min(queue_size, 16)` used descriptors/call | Used descriptors remain in ring for the next periodic tick. |
+| Virtio-input producer | `min(queue_size, 16)` used descriptors/call | Used descriptors remain in the ring for the next periodic tick. |
 | USB HID producer | Four registered device visits/call | Every supported fixed slot fits in one scan. |
 | Shared input consumer | 16 events/active input pass | Requeue only when queue depth remains nonzero. |
+| Partial compositor damage | Eight rectangles/successful redraw | Remaining ordered damage stays dirty for later periodic passes. |
 | Virtio-net RX | 16 valid frames/active network pass | Conservatively republish network readiness at cap. |
 
 The network requeue is conservative because retaining a non-consuming queue
 query crossed a linker-alignment boundary and exceeded the 108000-byte kernel
 limit. Exactly 16 frames can therefore produce one empty follow-up pass.
 
-Virtio-input now returns the number of successfully queued events instead of
-always zero, repairing input-production telemetry. A deterministic host test
-negotiates an eight-entry ring, injects ten descriptors, and proves 8 + 2
-continuation with ten events queued.
+Virtio-input returns the number of successfully queued events. A deterministic
+host test negotiates an eight-entry ring, injects ten descriptors, and proves
+8 + 2 continuation with ten events queued.
 
 USB HID polling is clamped independently of the public `count` field. A host test
-sets `count` to 255 and proves only the fixed four slots are visited. Each device
-poll enters an xHCI path with finite spin limits; the future service-wide deadline
-is still required to bound combined elapsed time.
+sets `count` to 255 and proves only four slots are visited.
+
+Partial redraw temporarily exposes only the first eight damage rectangles to the
+compositor. After successful submission, that prefix is removed and the ordered
+remainder stays dirty. A failed submission removes nothing. The deterministic
+regression proves 20 rectangles complete as 8 + 8 + 4, a failed five-rectangle
+redraw is fully preserved, and full redraw clears once.
+
+A full redraw remains one operation. The count rule does not bound its pixel
+work or elapsed time.
 
 #### Evidence boundary
 
@@ -112,28 +120,23 @@ The 16-descriptor virtio RX implementation exposes no trustworthy device counter
 for frames dropped, overwritten, or never delivered to software. Consumed-frame
 counts are not proof of zero network loss.
 
-Damage telemetry records merged rectangle count or a full-redraw sentinel after a
-successful QEMU submission. It does not measure pixels, damaged area, GPU
-completion latency, or CPU work spent on a failed submission.
-
 Cooperative network polling outside the active runtime service remains unbudgeted
 and is outside the post-EOI network guarantee.
 
 #### Validation
 
-Latest producer-bound head:
-`ee92e8074ed2995a48ce22fb88a901ea02cf031d`.
+Latest redraw-bound head:
+`8b86a8c24f25af0937f1df2e983c1c7c4f489b7d`.
 
-- `Verify ArmoniOS` run `29859659229`: success;
-- `CI - Tests` run `29859659270`: success;
-- loadable QEMU kernel: 107706 / 108000 bytes;
-- remaining margin: 294 bytes;
-- USB merge: `53c1440261267b36e813fb90e6405261ec7bbfad`;
-- virtio-input merge: `7674b639b9a53dea4cec42bcccf84e71d7f6d10c`.
+- `Verify ArmoniOS` run `29863653280`: success;
+- `CI - Tests` run `29863653209`: success;
+- loadable QEMU kernel: 107982 / 108000 bytes;
+- remaining margin: 18 bytes;
+- merge: `fe4f2a622f5633e55b0eddb2f8f6767453a9ddca`.
 
-The complete matrix proves the producer and consumer count rules while retaining
-all previous build, host, stack, FAT32, QEMU, GUI, USB, network, ABI, and RPi4
-gates.
+Two UART messages were removed from terminal scheduler idle paths to preserve the
+size ceiling. Scheduler control flow, IRQ restoration, stack freeing, and
+infinite `wfe` behavior are unchanged.
 
 #### Why the risk remains open
 
@@ -143,29 +146,31 @@ During the service pass:
 - the 288-byte frame remains on the EL1 stack;
 - nested IRQ helpers preserve the vector's prior mask state;
 - EL0 remains paused;
-- redraw/damage work has no explicit per-pass or time stop rule;
+- a full redraw may still consume significant elapsed time;
 - no service-wide generic-counter deadline is enforced;
 - cooperative network polling outside the service is unbounded;
-- no sustained-load QEMU heartbeat proves EL0 progress.
+- no sustained-load QEMU heartbeat proves EL0 progress;
+- only 18 bytes remain under the kernel ceiling.
 
 Pending state and telemetry remain non-atomic single-core structures valid only
 under the current one-consumer model.
 
-**Failure mode:** sustained redraw work or combined finite device operations can
-still extend one exception path and delay EL0. Count-bounded input/network work
-cannot loop indefinitely on queue growth, but only a global deadline can bound
-their combined elapsed time.
+**Failure mode:** every count-bounded class now stops or retains continuation,
+but their combined finite work—or one expensive full redraw—can still extend one
+exception path and delay EL0. Only a global deadline can bound complete elapsed
+time.
 
 **Remaining exit criteria:**
 
-1. bound redraw/damage work and preserve unfinished repaint state;
-2. enforce a global generic-counter deadline;
-3. count global-deadline and redraw exhaustion;
-4. add QEMU stress with an EL0 heartbeat under combined load;
-5. prove pending/native-queue work is not silently lost;
-6. retain all current subsystem gates;
-7. record a dated visible desktop pass;
-8. decide whether the fully bounded bottom half remains or later becomes a
+1. compact production code/state again without changing contracts;
+2. enforce a service-wide generic-counter deadline;
+3. preserve or republish unfinished work at deadline exhaustion;
+4. count deadline exhaustion;
+5. add QEMU stress with an EL0 heartbeat under combined load;
+6. prove pending/native-queue work is not silently lost;
+7. retain all current subsystem gates;
+8. record a dated visible desktop pass;
+9. decide whether the fully bounded bottom half remains or later becomes a
    wakeable service.
 
 RISK-017 still blocks formal v0.2 promotion.
