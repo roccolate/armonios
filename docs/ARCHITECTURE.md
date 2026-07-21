@@ -1,6 +1,6 @@
 # Architecture
 
-ArmoniOS is a compact monolithic AArch64 kernel whose verified development platform is QEMU `virt`. Raspberry Pi code exists only as an experimental future port.
+ArmoniOS is a compact monolithic AArch64 kernel whose verified development platform is QEMU `virt`. The Raspberry Pi 4 board layer and read-only EMMC2 diagnostic probe are build/host verified, but physical hardware behavior remains unverified and fail-closed.
 
 This document describes the implementation as it exists, including known architectural limitations. Operational status lives in `CURRENT_STATE.md`; active defects and exit criteria live in `TECHNICAL_RISKS.md`.
 
@@ -72,7 +72,7 @@ This provides basic EL0 separation and kernel-page W^X, but it is not a hardened
 
 Each process records a fixed set of disjoint user virtual ranges. These records are used to decide whether a syscall pointer belongs to the current process.
 
-The syscall helper layer first checks the registered process range, then walks the process page table. Input buffers require valid user-readable leaves; output buffers also require writable leaves and return `ERR_PERM` on read-only pages before writing any byte. `RISK-001` is closed for permission-aware validation, but the helpers still do direct kernel copies rather than fault-contained copy routines. Some internal syscall paths still need cleanup so lower layers operate on kernel-owned buffers instead of validated raw EL0 pointers.
+The syscall helper layer first checks the registered process range, then walks the process page table. Input buffers require valid user-readable leaves; output buffers also require writable leaves and return `ERR_PERM` on read-only pages before writing any byte. Syscall entry points now import VFS buffers, path strings, argv, IPC payloads, GUI outputs, and information outputs through kernel-owned temporaries before lower layers operate. The remaining limitation is that the final byte transfer is not fault-contained against an unexpected translation fault.
 
 ## Processes and scheduling
 
@@ -114,7 +114,7 @@ Therefore the accurate description is:
 - Other synchronous lower-EL exceptions mark the current process exited and attempt to dispatch another process.
 - An unexpected EL1 exception enters the fatal diagnostic path and waits forever.
 
-Kernel syscall bodies still dereference validated user virtual addresses directly. Permission validation now rejects known read-only output pages before writes, but the copy path is not fault-contained against unexpected translation faults.
+Lower subsystems no longer receive caller-owned EL0 pointers for the covered syscall payloads. The syscall boundary performs bounded copies after range and PTE checks. Those copies are still ordinary EL1 loads/stores and are not recoverable if an unexpected translation fault occurs after validation.
 
 ## Syscall boundary
 
@@ -128,13 +128,13 @@ x0      return value; negative values are kernel error codes
 
 Numbers are frozen in `kernel/syscall_numbers.h` and exercised by host ABI tests.
 
-Public pointer handling is centralized in `kernel/syscall_helpers.{c,h}`. The helpers provide process-range validation, page-table permission checks, c-string copying, and byte copy helpers. Fault-contained copy is still future work.
+Public pointer handling is centralized in `kernel/syscall_helpers.{c,h}`. The helpers provide process-range validation, page-table permission checks, c-string copying, argv import, and checked byte copies. State-consuming outputs validate the whole destination before dequeueing, then perform a bounded final copy. Fault-contained copy is still future work.
 
 See `SYSCALLS.md` for exact calls and current limitations.
 
 ## VFS and file descriptors
 
-The VFS is a fixed-table in-kernel facade over mounted node callbacks. It supports bootfs, tmpfs, and dynamic FAT32 root-file nodes.
+The VFS is a fixed-capacity in-kernel facade with static nodes plus a small mount table. Mount callbacks dispatch open, list, unlink, and rename without embedding FAT32 knowledge in the generic layer. It supports bootfs, tmpfs, and dynamic FAT32 root-file nodes.
 
 Current descriptor architecture:
 
@@ -145,10 +145,7 @@ Current descriptor architecture:
 
 `RISK-002` is closed for process-owned descriptors. The VFS remains a fixed-table kernel facade, not a POSIX filesystem layer.
 
-The v1 roadmap requires this layer to become a real storage platform: a
-block-device abstraction, mount table, common path resolver, filesystem driver
-interface, and structured metadata/directory ABI. Those pieces are planned, not
-current architecture.
+The current mount table and filesystem callback boundary are intentionally small. The v1 roadmap still requires a common path resolver, structured metadata/directory ABI, richer block-device metadata, and filesystem semantics beyond root-only FAT32.
 
 ## Filesystems and storage
 
@@ -171,7 +168,7 @@ The current FAT32 bridge supports:
 - dynamic `/fat/<name>` VFS nodes;
 - invalidation of dynamic nodes after rename/delete.
 
-It does not claim long-file-name support, subdirectories, arbitrary partition discovery, journaling, crash recovery, or broad compatibility testing.
+It does not claim long-file-name support, subdirectories, GPT or extended-partition discovery, journaling, crash recovery, or broad compatibility testing. A reusable MBR parser and bounded block view can locate and validate one supported primary FAT32 partition; that path is currently used by the opt-in RPi4 read-only probe, not exposed as normal writable board storage.
 
 The QEMU block path is verified through `make qemu-fs-test`. The visible desktop target also attaches the generated FAT32 block image; `tools/qemu_fb_fat_test.sh` verifies the FAT + display + panel wiring. The visible create/edit/save/rename/reopen/delete workflow has existing manual evidence from rocco on 2026-07-17; newer automated baselines must not imply a newer manual desktop pass unless one is recorded.
 
@@ -224,7 +221,7 @@ The QEMU board is the reference implementation.
 
 The board contract now exposes generic storage, display, input, IRQ, and capability entry points. QEMU implements display/input through virtio internally; generic kernel orchestration calls `board_display_*` and `board_input_*`. RPi4 returns explicit safe failures for missing display/input while still compiling and linking under `tests/run_board_build_test.sh`.
 
-The RPi4 board directory is still not a supported hardware implementation. The build-contract milestone (`RISK-006`) is closed; eMMC correctness and physical boot evidence remain under `RISK-007`.
+The RPi4 board directory is still not a supported hardware implementation. The SDHCI controller core, firmware clock query, MBR parser, bounded block view, and minimal read-only probe are implemented and host/build verified. Normal board capabilities remain zero and storage stays fail-closed until repeatable physical serial evidence closes `RISK-007`.
 
 ## Userland and KLI1
 
@@ -272,9 +269,9 @@ Release evidence must always state whether it came from:
 
 Near-term architectural priorities are:
 
-1. v0.2 cleanup: kernel-owned syscall buffers, VFS/FAT decoupling, and fail-closed RPi storage behavior;
-2. v0.3 storage platform: block devices, mount table, path resolver, and filesystem driver interface;
-3. v0.4 real FAT: long names, directories, partition discovery, and persistence tests;
+1. finish v0.2 hardening: fault-contained user copies and any remaining syscall-boundary audits;
+2. v0.3 storage platform: richer block-device metadata, common path resolution, and structured filesystem ABI;
+3. v0.4 real FAT: long names, directories, broader partition handling, and persistence tests;
 4. v0.5-v0.6 userland runtime, widgets, and useful desktop applications;
 5. v0.7 ext2 read-only support;
 6. ongoing hardening: fault-contained copies, TTBR1 kernel mappings, ASIDs, scoped TLB invalidation, and physical RPi evidence when the hardware track resumes.
