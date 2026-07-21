@@ -1,40 +1,45 @@
 # Contributing to ArmoniOS
 
-ArmoniOS is intended to remain small enough that one developer can understand the whole system. That requires disciplined scope, explicit evidence, and documentation that never upgrades intention into fact.
+ArmoniOS should remain small enough that one developer can understand the whole
+system. That requires narrow changes, explicit ownership, measurable evidence,
+and documentation that never upgrades intention into fact.
 
 ## Read first
 
 Read these documents in order:
 
-1. `DOCUMENTATION_POLICY.md` — how claims and verification are recorded;
+1. `DOCUMENTATION_POLICY.md` — evidence classes and claim rules;
 2. `CURRENT_STATE.md` — audited operational status;
 3. `TECHNICAL_RISKS.md` — active correctness and release risks;
-4. `ROADMAP.md` — work order and release exit criteria;
-5. `ARCHITECTURE.md` — current implementation model;
-6. `SYSCALLS.md` and `GUI_ABI_NOTES.md` — user/kernel ABI;
-7. `MEMORY_MAP.md` — current address and translation model;
-8. `PORTING.md` — board contract and hardware rules.
+4. `ROADMAP.md` — dependency order and milestone exit criteria;
+5. `ARCHITECTURE.md` — implemented kernel model;
+6. `RUNTIME_SERVICE.md` — exact timer/bottom-half semantics;
+7. `SYSCALLS.md` and `GUI_ABI_NOTES.md` — user/kernel ABI;
+8. `MEMORY_MAP.md` — current address-space model;
+9. `PORTING.md` — board contract and hardware evidence rules.
+
+`CURRENT_STATE.md` is authoritative for what works. `ROADMAP.md` is future intent.
 
 ## Current project rule
 
-The project has a v0.1 QEMU desktop baseline and is now moving toward a usable
-v1.0 QEMU mini desktop OS. The next work is still disciplined: v0.2 cleanup and
-hardening first, then the storage/VFS platform, real FAT support, userland
-runtime/widgets, useful apps, ext2 read-only support, and desktop polish.
+The project has a complete v0.1 QEMU desktop baseline and is in v0.2
+cleanup/runtime hardening. The next product milestone after v0.2 is the v0.3
+storage/VFS platform.
 
-- do not broaden the kernel ABI for convenience;
-- do not begin multimedia or game-engine work in the kernel;
+Do not skip dependency order:
+
+- do not polish Files/Editor around root-only FAT assumptions that v0.3-v0.4 will
+  replace;
+- do not call current application polish “v1.1” before v1.0 exists;
+- do not broaden the syscall ABI for convenience;
+- do not add multimedia, browser, audio, SMP, or game-engine scope to the kernel;
 - do not claim Raspberry Pi support;
 - do not treat a timeout-only QEMU launch as a passing test;
-- do not describe user pointers as writable unless permissions are enforced;
-- do not add more global process-visible resources;
-- do not make filesystem claims beyond the narrow current FAT32 scope unless
-  they have host image tests and QEMU evidence;
-- do not add placeholder app controls. Visible controls should perform real
-  actions or stay out of the UI.
+- do not add global process-visible resources without ownership and cleanup;
+- do not make filesystem claims without host image tests and QEMU evidence;
+- do not add visible controls that do not perform a real action.
 
-The v0.1 QEMU blockers are closed on the documented baseline. Treat new
-correctness, ABI, evidence, storage, or v1 workflow regressions as
+New correctness, ABI, runtime, storage, or evidence regressions are
 release-critical until triaged in `TECHNICAL_RISKS.md`.
 
 ## Development setup
@@ -56,61 +61,144 @@ make
 
 The default board is `qemu_virt`.
 
-## Verification levels
+## Evidence levels
 
-Use the evidence labels defined in `DOCUMENTATION_POLICY.md`.
+Use the exact evidence labels defined in `DOCUMENTATION_POLICY.md`:
 
-### Fast local checks
+- IMPLEMENTED;
+- HOST-VERIFIED;
+- BUILD-VERIFIED;
+- QEMU-VERIFIED;
+- CI-VERIFIED;
+- MANUAL-VERIFIED;
+- UNVERIFIED;
+- KNOWN-BROKEN;
+- PLANNED.
 
-For documentation-neutral pure C changes, begin with the smallest relevant test and then run:
+Never write “all tests pass” when only a subset ran. Never write “works in QEMU”
+when only host tests ran. Never convert a serial marker into a visible manual
+claim.
+
+## Verification workflow
+
+### Small pure-C change
+
+Begin with the smallest relevant test, then normally run:
 
 ```bash
-make
-make size
+make BOARD=qemu_virt
+make BOARD=qemu_virt size
 make -C tests test
 ```
 
-### Userland changes
-
-When applications or userland libraries change:
+### Userland or library change
 
 ```bash
-make
-make size
+make BOARD=qemu_virt
+make BOARD=qemu_virt size
 make -C tests test
+bash tests/run_kli1_contract_test.sh
 make stack-check
 ```
 
-Run the visible desktop when behavior can be observed only through windows or input.
+Run `make qemu-fb-visible` when behavior depends on windows, focus, keyboard,
+mouse, redraw, or visible layout.
 
-### Kernel, ABI, VFS, storage, GUI, driver, or boot changes
+### Process, syscall, or VFS change
+
+Run the focused contract first, then the full baseline. Relevant focused gates
+include:
+
+```bash
+bash tests/run_process_parent_wait_test.sh
+bash tests/run_vfs_process_fd_test.sh
+bash tests/run_user_copy_permissions_test.sh
+bash tools/qemu_usercopy_test.sh
+```
+
+### Timer, IRQ, runtime-service, input, GUI, USB, or network change
 
 Run:
 
 ```bash
-make
-make size
+bash tests/run_runtime_service_test.sh
 make -C tests test
-make stack-check
-make qemu-fs-test
+bash tools/qemu_focus_test.sh
+bash tools/qemu_marker_test.sh all
 ```
 
-Then run the relevant deterministic QEMU tests. Plain framebuffer, USB, and network launch targets are not sufficient by themselves because they do not assert final markers. Use `tools/qemu_marker_test.sh`, `tools/qemu_usercopy_test.sh`, `tools/qemu_focus_test.sh`, `tools/qemu_fb_fat_test.sh`, or `bash tools/verify.sh` for pass/fail evidence.
+A timer/IRQ change must also prove:
 
-### Raspberry Pi changes
+- the physical handler remains bounded;
+- EOI ordering is correct;
+- no blocking or unbounded backend operation is reachable from the handler;
+- pending work is not lost;
+- the exception-context assumptions remain documented;
+- latency/fairness claims have stress evidence, not only marker evidence.
 
-Before any hardware claim:
+### Storage change
 
-1. `make BOARD=rpi4` must compile and link;
-2. the exact physical board and firmware setup must be recorded;
-3. a serial milestone must be reproduced;
-4. later subsystem claims must have their own evidence.
+Run the relevant host image/parser tests and:
 
-The current RPi4 backend is experimental and should not be used as a known-good driver reference.
+```bash
+make qemu-fs-test
+bash tools/qemu_fb_fat_test.sh
+```
+
+Broader FAT, path, partition, or filesystem claims require dedicated malformed
+and persistence tests. The existing root-only smoke test is not general FAT
+evidence.
+
+### Raspberry Pi change
+
+At minimum:
+
+```bash
+make BOARD=rpi4
+make rpi4-emmc2-probe
+bash tests/run_board_build_test.sh
+```
+
+Before any physical claim, record:
+
+1. exact board revision;
+2. firmware and boot files;
+3. power, UART, and storage setup;
+4. tested image commit/hash;
+5. repeatable cold-boot serial evidence;
+6. subsystem-specific evidence.
+
+The current RPi4 backend is experimental and must not be used as a known-good
+hardware reference.
+
+### Full promotion gate
+
+Before merging code, ABI, build-contract, verified-status, or release changes:
+
+```bash
+bash tools/verify.sh
+```
+
+The current gate covers:
+
+- QEMU and RPi4 builds;
+- `.data == 0` and the 108000-byte limit;
+- RPi4 EMMC2, MBR, and block-view host checks;
+- native host tests;
+- runtime-service coalescing/requeue/EOI ordering;
+- parent/wait lifecycle;
+- process-local FDs;
+- user-copy permissions;
+- KLI1 mutable-storage contract;
+- userland stack usage;
+- FAT32 QEMU smoke;
+- usercopy and focus QEMU regressions;
+- framebuffer, USB, and DHCP marker gates;
+- visible-target FAT + GPU wiring.
 
 ## Required pull-request evidence
 
-Every PR must contain:
+Every behavior-changing PR should contain:
 
 ```text
 What changed:
@@ -118,164 +206,200 @@ Why:
 Affected contracts:
 
 Commands run:
-- command -> exact result/marker
+- command -> exact result or marker
 
 Manual checks:
-- workflow -> result and tester
+- workflow -> result, tester, environment
 
 Not run:
 - check -> reason
 
 Known limitations or follow-up:
 - item
+
+Evidence classification:
+- IMPLEMENTED / HOST / BUILD / QEMU / CI / MANUAL / HARDWARE
 ```
 
-Never write “all tests pass” when only a subset was run. Never write “works in QEMU” when only host tests ran.
+Use exact commit SHAs and workflow run IDs for promoted baselines.
 
 ## Documentation ownership
 
-The author of a behavior-changing change owns the corresponding documentation update.
-
+The author of a behavior-changing change owns the corresponding documentation.
 Update in this order:
 
-1. tests and implementation;
+1. implementation and focused tests;
 2. `TECHNICAL_RISKS.md` when risk state changes;
 3. `CURRENT_STATE.md` with exact evidence;
-4. architecture, memory, ABI, or porting documents when contracts changed;
-5. `ROADMAP.md` when ordering or exit criteria changed;
-6. `README.md` last.
+4. architecture, runtime, memory, ABI, or porting docs when contracts change;
+5. `ROADMAP.md` when ordering or exit criteria change;
+6. `AGENTS.md` when agent operating rules change;
+7. README last as a verified summary.
+
+Do not add another status or handoff document. Fix the canonical source.
 
 ## Code standards
 
 ### Language and runtime
 
-- Kernel and userland: freestanding C11.
-- Boot, exceptions, and context switching: GNU AArch64 assembly in `.S` files.
-- No C++ in the kernel or shipping userland.
-- No libc, POSIX, or hosted-runtime assumptions.
-- Keep assembly boundaries narrow and commented.
+- kernel and userland: freestanding C11;
+- boot, exceptions, and context switching: GNU AArch64 assembly in `.S` files;
+- no C++ in the kernel or shipping userland;
+- no libc, POSIX, or hosted-runtime assumptions;
+- keep assembly boundaries narrow and commented.
 
 ### Style
 
-- 4-space indentation;
+- four-space indentation;
 - braces on the same line;
 - `snake_case` functions and variables;
 - `UPPER_SNAKE_CASE` constants;
-- `_t` suffix for typedef names where useful;
+- `_t` suffix for typedefs where useful;
 - `g_` prefix for mutable file-scope globals;
-- fixed-width integer types at ABI and hardware boundaries;
-- overflow-safe range arithmetic for addresses and sizes.
+- fixed-width types at ABI and hardware boundaries;
+- overflow-safe range arithmetic;
+- explicit capacities and failure behavior.
 
-Public contracts in headers should explain ownership, valid ranges, failure behavior, and whether calls may run in IRQ context.
+Public headers should document ownership, valid ranges, context restrictions, and
+whether a call may run in IRQ/exception context.
 
-### Freestanding application rules
+## Hard-IRQ and deferred-work rules
 
-The current KLI1 contract forbids ordinary mutable `.data` and `.bss` in shipping app images:
+Hard-IRQ callbacks may:
 
-- do not add non-zero mutable file-scope application data;
-- do not rely on large zero-initialized application globals;
-- use stack storage only within the measured stack limit;
-- use anonymous mappings for large mutable application state;
-- keep `tests/run_kli1_contract_test.sh` passing when adding new storage patterns.
+- acknowledge/account the event;
+- copy a bounded device status value;
+- rearm hardware;
+- publish a bit or bounded record;
+- wake or signal later work.
 
-### Assembly
+They must not:
 
-Follow AAPCS64 and keep C/assembly layouts protected by static assertions where possible.
+- block or wait;
+- allocate from an unbounded/general heap path;
+- drain a complete queue;
+- scan every device;
+- render;
+- perform filesystem work;
+- parse arbitrary network traffic;
+- traverse large dynamic structures.
 
-Comment:
+Post-EOI work is not automatically safe. If it still runs before `eret`, it must
+have measured and enforced budgets because EL0 and normal IRQs remain paused.
 
-- exception-level assumptions;
-- register ownership;
-- stack layout;
-- page-table or TLB barriers;
-- exact saved-context layout.
+## Freestanding application rules
+
+Shipping KLI1 images forbid mutable static `.data` and `.bss`:
+
+- no non-zero mutable file-scope application state;
+- no large zero-initialized globals;
+- use stack only within the measured limit;
+- use `SYS_MMAP` for large mutable state;
+- keep `tests/run_kli1_contract_test.sh` green.
+
+Prefer reusable `libkarm`/`libkarmdesk` helpers only when they reduce duplication,
+clarify ownership, or reduce image size.
 
 ## ABI changes
 
-Syscall numbers and user-visible structures are frozen unless an intentional ABI extension is approved.
+Syscall numbers and user-visible structures are append-only before v1 unless an
+explicit incompatibility is approved.
 
 Any ABI change must update:
 
 - kernel constants and dispatch;
 - userland wrappers;
 - host ABI tests;
-- shipping applications affected;
+- affected applications;
 - `SYSCALLS.md` or `GUI_ABI_NOTES.md`;
-- `CURRENT_STATE.md` if behavior or evidence changed.
+- `CURRENT_STATE.md` and risk state when behavior changes.
 
 Planned filesystem calls such as `SYS_MKDIR`, `SYS_TRUNCATE`, `SYS_STATX`,
-`SYS_READDIRX`, and `SYS_FSINFO` are roadmap items, not current ABI. When they
-are implemented, assign new numbers append-only and land kernel code, wrappers,
-host tests, app updates, and `SYSCALLS.md` together.
+`SYS_READDIRX`, and `SYS_FSINFO` are not current ABI.
 
 Do not silently change:
 
-- syscall numbers;
-- argument registers;
+- syscall numbers or argument registers;
 - event IDs;
-- struct field order or width;
+- public struct layout;
 - KLI1 header layout;
-- descriptor semantics.
+- descriptor ownership;
+- path or filesystem semantics.
 
 ## Board abstraction rules
 
-Generic kernel code should not contain board physical addresses.
+Generic kernel code must not contain board physical addresses or assume every
+board provides virtio.
 
-A board implementation must satisfy the complete generic contract or return explicit safe failures for unsupported optional capabilities. Do not leave required symbols missing.
+A board implementation must satisfy the generic contract or return an explicit
+safe failure for unsupported optional capabilities. Missing symbols and silent
+success stubs are not acceptable.
 
-Prefer capability-neutral generic names. New generic code should not assume that every physical board exposes virtio-mmio or virtio-input.
+Capabilities may be enabled only with matching runtime evidence.
 
-## Commit messages
+## Assembly rules
 
-Use conventional commits:
+Follow AAPCS64 and protect shared C/assembly layouts with static assertions where
+possible.
+
+Comment:
+
+- exception-level assumptions;
+- IRQ mask behavior;
+- register ownership;
+- stack layout and frame size;
+- page-table and TLB barriers;
+- exact saved-context layout;
+- return semantics.
+
+## Commit and PR discipline
+
+Use focused conventional commits:
 
 ```text
 type(scope): concise description
 ```
 
-Common types:
+Common types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`.
 
-- `feat`
-- `fix`
-- `docs`
-- `refactor`
-- `test`
-- `chore`
-
-Keep commits focused. Documentation recovery and behavior changes may be separate commits, but a PR cannot merge with contradictory final documentation.
+A PR may contain multiple focused commits, but its final tree must have coherent
+code, tests, and documentation.
 
 ## PR checklist
 
-- [ ] Scope is small enough to review.
-- [ ] No unrelated files are included.
-- [ ] `make` result recorded.
-- [ ] `make size` result recorded for kernel or embedded-app changes.
-- [ ] Relevant host tests recorded.
-- [ ] `make stack-check` recorded for userland changes.
-- [ ] Relevant deterministic QEMU evidence recorded.
-- [ ] Manual UI or hardware steps name the tester and environment.
-- [ ] Unrun checks are listed explicitly.
-- [ ] New risks or changed risk status are recorded.
-- [ ] `CURRENT_STATE.md` was updated when evidence changed.
-- [ ] ABI documents match the code.
-- [ ] README claims remain a summary of verified documents.
+- [ ] Scope is reviewable and contains no unrelated files.
+- [ ] Smallest relevant tests are recorded.
+- [ ] Build and size result are recorded when applicable.
+- [ ] Stack/KLI1 gates are recorded for userland changes.
+- [ ] Deterministic QEMU evidence is recorded for runtime changes.
+- [ ] Manual UI/hardware checks name tester and environment.
+- [ ] Unrun checks are listed with reasons.
+- [ ] Runtime/IRQ changes document execution context and budgets.
+- [ ] Risk state is updated.
+- [ ] `CURRENT_STATE.md` matches the final tree.
+- [ ] ABI and architecture documents match code.
+- [ ] README remains a summary rather than an independent source of truth.
 
 ## Changes that will not be accepted
 
 - unsupported hardware claims;
-- code-present-equals-working documentation;
-- timeout-only tests presented as passing subsystem tests;
-- new global process-visible state without ownership and cleanup design;
-- unsafe user-pointer dereferences without a documented boundary;
-- broad rewrites without staged tests;
+- “code exists” presented as runtime evidence;
+- timeout-only launches presented as tests;
+- unowned global process-visible state;
+- raw user-pointer use in lower subsystems;
+- heavy or unbounded work in IRQ context;
 - hidden ABI breaks;
-- speculative POSIX/libc or large runtime additions;
-- filesystem or app claims that exceed current evidence;
+- broad rewrites without staged tests;
+- speculative POSIX/libc scope;
+- general filesystem claims based on the root-only FAT bridge;
+- placeholder UI controls;
 - temporary hacks without a tracked risk or issue.
 
 ## Communication
 
-Use issues for defects and scoped work. Use pull requests for reviewable changes. Keep repository code and technical documentation in English so one canonical set of contracts exists.
+Use issues for defects and scoped work. Use pull requests for reviewable changes.
+Keep repository code and technical documentation in English so one canonical set
+of contracts exists.
 
 ## License
 
