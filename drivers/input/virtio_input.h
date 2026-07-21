@@ -12,6 +12,8 @@ typedef struct {
     uint8_t ready;
 } virtio_input_device_t;
 
+#define VIRTIO_INPUT_POLL_BUDGET 16U
+
 #define VIRTIO_INPUT_CFG_UNSET     0
 #define VIRTIO_INPUT_CFG_ID_NAME  1
 #define VIRTIO_INPUT_CFG_ID_SERIAL 2
@@ -137,6 +139,8 @@ int virtio_input_probe(uint64_t base);
 int virtio_input_probe_range(uint64_t base, uint64_t size, uint64_t stride,
                              uint64_t *found_base);
 int virtio_input_init(virtio_input_device_t *device, uint64_t base);
+/* Processes at most min(queue_size, VIRTIO_INPUT_POLL_BUDGET) descriptors and
+ * returns the number of input events successfully queued. */
 int virtio_input_poll(virtio_input_device_t *device);
 int virtio_input_has_events(virtio_input_device_t *device);
 
@@ -144,5 +148,11 @@ int virtio_input_has_events(virtio_input_device_t *device);
  * kernel's shared input key space. Exposed for host tests. */
 uint32_t virtio_input_key_to_input_key(uint16_t code, uint8_t shifted,
                                        uint8_t ctrl);
+
+#ifdef ARMONIOS_TEST
+void virtio_input_test_set_used_idx(uint16_t used_idx);
+void virtio_input_test_set_event(uint16_t used_slot, uint32_t desc_id,
+                                 uint16_t type, uint16_t code, int32_t value);
+#endif
 
 #endif
