@@ -13,6 +13,12 @@
 
 #define IRQ_HANDLER_SLOTS 64U
 
+enum {
+    RUNTIME_PHASE_ACTIVE = 1U << 0,
+    RUNTIME_PHASE_INPUT = 1U << 1,
+    RUNTIME_PHASE_NETWORK = 1U << 2,
+};
+
 typedef struct {
     irq_handler_fn_t handler;
     void *context;
@@ -21,11 +27,7 @@ typedef struct {
 static irq_handler_entry_t g_irq_handlers[IRQ_HANDLER_SLOTS];
 static volatile uint32_t g_runtime_work_pending;
 static runtime_service_stats_t g_runtime_stats;
-static uint32_t g_runtime_network_frames;
-static uint8_t g_runtime_service_active;
-static uint8_t g_runtime_input_phase_active;
-static uint8_t g_runtime_network_phase_active;
-static uint8_t g_runtime_network_budget_exhausted;
+static uint8_t g_runtime_phase;
 
 __attribute__((weak)) void kernel_on_timer_tick(void) {
 }
@@ -42,11 +44,7 @@ void runtime_service_reset(void) {
     uint64_t budget = g_runtime_stats.budget_ticks;
 
     g_runtime_work_pending = 0;
-    g_runtime_network_frames = 0;
-    g_runtime_service_active = 0;
-    g_runtime_input_phase_active = 0;
-    g_runtime_network_phase_active = 0;
-    g_runtime_network_budget_exhausted = 0;
+    g_runtime_phase = 0;
     g_runtime_stats = (runtime_service_stats_t){0};
     g_runtime_stats.counter_frequency_hz = frequency;
     g_runtime_stats.budget_ticks = budget;
@@ -61,7 +59,7 @@ void runtime_service_configure_timing(uint64_t counter_frequency_hz,
 void runtime_service_report_metric(uint32_t metric, uint32_t value) {
     uint32_t current;
 
-    if (g_runtime_service_active == 0U || metric >= RUNTIME_METRIC_COUNT ||
+    if (g_runtime_phase == 0U || metric >= RUNTIME_METRIC_COUNT ||
         value == 0U) {
         return;
     }
@@ -91,7 +89,7 @@ void runtime_service_report_redraw(void) {
 
 void runtime_service_report_input_queue(uint32_t depth, uint32_t high_water,
                                         uint64_t overflow_count) {
-    if (g_runtime_service_active == 0U) {
+    if (g_runtime_phase == 0U) {
         return;
     }
     if (depth > g_runtime_stats.max_input_queue_depth) {
@@ -125,57 +123,55 @@ void runtime_service_request(uint32_t work) {
     g_runtime_work_pending |= accepted;
 }
 
-int runtime_service_input_poll(struct input_event *event) {
-    if (g_runtime_service_active != 0U) {
-        if (g_runtime_input_phase_active == 0U) {
-            return -1;
-        }
-        if (g_runtime_stats.metric_last[RUNTIME_METRIC_INPUT_CONSUMED] >=
-            RUNTIME_INPUT_EVENT_BUDGET) {
-            if (input_queue_available() > 0 &&
-                (g_runtime_work_pending & RUNTIME_WORK_INPUT) == 0U) {
-                g_runtime_stats.input_budget_exhaustion_count++;
-                runtime_service_request(RUNTIME_WORK_INPUT);
-            }
-            return -1;
-        }
+static void runtime_service_requeue_budget(uint32_t work, uint64_t *counter) {
+    if ((g_runtime_work_pending & work) == 0U) {
+        (*counter)++;
+        runtime_service_request(work);
     }
+}
 
-    return input_queue_poll((input_event_t *)event);
+int runtime_service_input_poll(struct input_event *event) {
+    if (g_runtime_phase == 0U) {
+        return input_queue_poll((input_event_t *)event);
+    }
+    if ((g_runtime_phase & RUNTIME_PHASE_INPUT) == 0U) {
+        return -1;
+    }
+    if (g_runtime_stats.metric_last[RUNTIME_METRIC_INPUT_CONSUMED] <
+        RUNTIME_INPUT_EVENT_BUDGET) {
+        return input_queue_poll((input_event_t *)event);
+    }
+    if (input_queue_available() > 0) {
+        runtime_service_requeue_budget(
+            RUNTIME_WORK_INPUT,
+            &g_runtime_stats.input_budget_exhaustion_count);
+    }
+    return -1;
 }
 
 void runtime_service_net_poll(void) {
-    if (g_runtime_service_active != 0U &&
-        g_runtime_network_phase_active == 0U) {
-        return;
+    if (g_runtime_phase == 0U ||
+        (g_runtime_phase & RUNTIME_PHASE_NETWORK) != 0U) {
+        net_poll();
     }
-    net_poll();
 }
 
 int runtime_service_virtio_net_recv(virtio_net_device_t *device, void *data,
                                     uint32_t max_len) {
-    int len;
-
-    if (g_runtime_service_active != 0U) {
-        if (g_runtime_network_phase_active == 0U) {
-            return 0;
-        }
-        if (g_runtime_network_frames >= RUNTIME_NETWORK_FRAME_BUDGET) {
-            if (g_runtime_network_budget_exhausted == 0U) {
-                g_runtime_network_budget_exhausted = 1U;
-                g_runtime_stats.network_budget_exhaustion_count++;
-                runtime_service_request(RUNTIME_WORK_NETWORK);
-            }
-            return 0;
-        }
+    if (g_runtime_phase == 0U) {
+        return virtio_net_recv(device, data, max_len);
     }
-
-    len = virtio_net_recv(device, data, max_len);
-    if (len > 0 && g_runtime_service_active != 0U &&
-        g_runtime_network_phase_active != 0U) {
-        g_runtime_network_frames++;
+    if ((g_runtime_phase & RUNTIME_PHASE_NETWORK) == 0U) {
+        return 0;
     }
-    return len;
+    if (g_runtime_stats.metric_last[RUNTIME_METRIC_NETWORK_FRAMES] >=
+        RUNTIME_NETWORK_FRAME_BUDGET) {
+        runtime_service_requeue_budget(
+            RUNTIME_WORK_NETWORK,
+            &g_runtime_stats.network_budget_exhaustion_count);
+        return 0;
+    }
+    return virtio_net_recv(device, data, max_len);
 }
 
 uint32_t runtime_service_run_pending(void) {
@@ -185,10 +181,7 @@ uint32_t runtime_service_run_pending(void) {
 
     g_runtime_work_pending = 0;
     g_runtime_stats.last_work = work;
-    g_runtime_network_frames = 0;
-    g_runtime_input_phase_active = 0;
-    g_runtime_network_phase_active = 0;
-    g_runtime_network_budget_exhausted = 0;
+    g_runtime_phase = 0;
     for (uint32_t i = 0; i < RUNTIME_METRIC_COUNT; i++) {
         g_runtime_stats.metric_last[i] = 0;
     }
@@ -199,24 +192,18 @@ uint32_t runtime_service_run_pending(void) {
     }
 
     started = runtime_service_counter_now();
-    g_runtime_service_active = 1U;
-    if ((work & RUNTIME_WORK_PERIODIC) != 0U) {
+    g_runtime_phase = RUNTIME_PHASE_ACTIVE;
+    if ((work & (RUNTIME_WORK_PERIODIC | RUNTIME_WORK_INPUT)) != 0U) {
         if ((work & RUNTIME_WORK_INPUT) != 0U) {
-            g_runtime_input_phase_active = 1U;
+            g_runtime_phase |= RUNTIME_PHASE_INPUT;
         }
         kernel_on_timer_tick();
-        g_runtime_input_phase_active = 0U;
-    } else if ((work & RUNTIME_WORK_INPUT) != 0U) {
-        g_runtime_input_phase_active = 1U;
-        kernel_on_timer_tick();
-        g_runtime_input_phase_active = 0U;
     }
     if ((work & RUNTIME_WORK_NETWORK) != 0U) {
-        g_runtime_network_phase_active = 1U;
+        g_runtime_phase = RUNTIME_PHASE_ACTIVE | RUNTIME_PHASE_NETWORK;
         kernel_io_poll_network();
-        g_runtime_network_phase_active = 0U;
     }
-    g_runtime_service_active = 0U;
+    g_runtime_phase = 0;
     duration = runtime_service_counter_now() - started;
 
     g_runtime_stats.run_count++;
