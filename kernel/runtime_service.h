@@ -26,6 +26,7 @@ enum {
     RUNTIME_METRIC_DEVICE_POLLS,
     RUNTIME_METRIC_DAMAGE_ITEMS,
     RUNTIME_METRIC_FULL_REDRAWS,
+    RUNTIME_METRIC_REDRAW_EXHAUSTIONS,
     RUNTIME_METRIC_COUNT,
 };
 
@@ -41,7 +42,6 @@ typedef struct {
     uint64_t over_budget_count;
     uint64_t input_budget_exhaustion_count;
     uint64_t network_budget_exhaustion_count;
-    uint64_t redraw_budget_exhaustion_count;
     uint64_t counter_frequency_hz;
     uint64_t budget_ticks;
 
