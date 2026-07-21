@@ -5,6 +5,7 @@
 - **Controller core:** IMPLEMENTED; HOST-VERIFIED.
 - **Firmware mailbox clock protocol:** IMPLEMENTED; HOST-VERIFIED.
 - **Mailbox ARM-to-VideoCore address translation:** IMPLEMENTED; HOST-VERIFIED.
+- **RPi4 broken card-detect adapter:** IMPLEMENTED; HOST-VERIFIED.
 - **EL2 to EL1 boot entry:** IMPLEMENTED; QEMU-VERIFIED.
 - **Opt-in sector-0 probe image:** IMPLEMENTED; BUILD-VERIFIED.
 - **Normal Raspberry Pi 4 storage integration:** FAIL-CLOSED.
@@ -80,6 +81,30 @@ board capabilities or makes storage reachable.
 The physical firmware response remains unverified until a real Raspberry Pi 4
 serial boot records the marker.
 
+## Broken card-detect policy
+
+The Raspberry Pi 4 Device Tree declares the SD-card controller with
+`broken-cd`. The native EMMC2 card-detect indication therefore must not gate the
+first command. This matches the generic SDHCI policy used by Linux: a host with
+broken card detection is treated as present while the protocol itself decides
+whether a card answers.
+
+ArmoniOS keeps this quirk outside the generic controller. The opt-in RPi4 probe
+installs a board-specific `emmc_io_t` adapter that:
+
+- reads the real 32-bit EMMC2 register;
+- ORs `CARD_PRESENT` and `CARD_STABLE` only when the offset is
+  `PRESENT_STATE`;
+- leaves command/data inhibit bits from that same register untouched;
+- leaves all resets, clocks, interrupts, arguments, responses, and data as real
+  MMIO;
+- is not compiled into the normal RPi4 path.
+
+The UART marker `EMMC2 probe: broken-cd assume-present` records that this policy
+was active. It does not prove a card is inserted and does not provide hot-plug
+detection. A missing or unusable card must fail later through CMD0/CMD8/ACMD41
+or the transfer timeouts.
+
 ## Opt-in physical probe
 
 `make rpi4-emmc2-probe` builds
@@ -89,9 +114,10 @@ serial boot records the marker.
 Only that build performs the early diagnostic sequence:
 
 1. query the EMMC2 base clock through firmware;
-2. initialize the SDHCI/card path at `RPI4_EMMC_BASE`;
-3. read exactly sector 0;
-4. print the first 16 bytes and bytes 510-511 over UART.
+2. install the RPi4 broken-card-detect adapter;
+3. initialize the SDHCI/card path at `RPI4_EMMC_BASE`;
+4. read exactly sector 0;
+5. print the first 16 bytes and bytes 510-511 over UART.
 
 The probe uses static kernel buffers and the read-only controller. It does not
 advertise `BOARD_CAP_STORAGE`, does not route the device through VFS/FAT, and
@@ -113,6 +139,9 @@ Boot configuration, serial wiring, markers, and evidence requirements live in
 - 512-byte PIO data transfer;
 - repeated CMD17 reads for a two-sector request;
 - rejection of invalid LBA/count ranges before a command is issued;
+- native card detection times out without presence bits and emits no command;
+- a broken-CD read adapter reaches CMD0 and completes initialization with the
+  same absent native presence bits;
 - polling status enabled without signal interrupts;
 - write rejection.
 
@@ -152,4 +181,5 @@ requested from firmware and passed to the controller only in the opt-in probe.
 7. implement writes only after read-only FAT mounting and disposable-card tests
    are repeatable.
 
-No physical clock, card-read, FAT-mount, or write claim is made by this file.
+No physical clock, card-read, FAT-mount, hot-plug, or write claim is made by
+this file.
