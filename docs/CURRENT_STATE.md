@@ -35,17 +35,20 @@ Raspberry Pi operating system.
 - **Primary verified platform:** QEMU `virt`, Cortex-A72 CPU model
 - **Merged input/redraw telemetry baseline:**
   `a3b9b447839b310c26ba99b8777d2b26a40eba09`
-- **Network metric candidate:** PR #46
-- **Candidate code/test head before documentation:**
-  `f5b5b69888a9734d482c329d64224b60d62c03d9`
+- **Network metric PR:** #46
+- **Validated code/test/documentation tree:**
+  `02fb1c0f5d5d6274f5c8fe88c754cd7298ebda94`
 - **Tracking issue:** #43
-- **Hosted candidate runs:**
-  - `Verify ArmoniOS` run `29832730156`: result must be recorded before merge
-  - `CI - Tests` run `29832730340`: result must be recorded before merge
+- **Hosted validation:**
+  - `Verify ArmoniOS` run `29833200802`: success
+  - `CI - Tests` run `29833200753`: success
+- **Loadable QEMU kernel size:** 107262 bytes; limit 108000; margin 738 bytes
 
-The final code, tests, and documentation tree must receive hosted validation
-before merge. A merge commit is not an independent execution unless a workflow
-runs against that exact SHA.
+Those runs validate code, tests, verification scripts, README, AGENTS, current
+state, runtime documentation, and risk documentation. Later evidence-only
+commits that record the successful run IDs do not change kernel behavior. A
+merge commit is not an independent execution unless a workflow runs against
+that exact SHA.
 
 ## Release phases
 
@@ -66,10 +69,10 @@ runs against that exact SHA.
 
 | Check | Evidence class | Result and scope |
 |---|---|---|
-| QEMU build and size | BUILD-VERIFIED on merged baseline; candidate pending final record | `.data == 0`; kernel ceiling remains 108000 bytes. |
+| QEMU build and size | BUILD-VERIFIED | `.data == 0`; loadable kernel 107262 bytes under the 108000-byte ceiling. |
 | RPi4 build/probe gates | BUILD/HOST-VERIFIED | Normal and diagnostic images build; unsupported normal capabilities fail closed. |
-| Native host suite | HOST-VERIFIED | Kernel, memory, VFS, FAT32, GUI, parser, driver, and ABI tests pass on the merged baseline. |
-| Runtime service regression | HOST-VERIFIED on merged baseline; candidate extends it | Timing, EOI order, coalescing, requeue, reset, indexed last/max/total metrics, inactive-report rejection, queue pressure, and network-frame accumulation. |
+| Native host suite | HOST-VERIFIED | Kernel, memory, VFS, FAT32, GUI, parser, driver, and ABI tests pass. |
+| Runtime service regression | HOST-VERIFIED | Timing, EOI order, coalescing, requeue, reset, indexed input/redraw/network last/max/total, inactive-report rejection, queue pressure, and static network wiring pass. |
 | Input queue telemetry | HOST-VERIFIED | Zero state, 64-entry high-water, full-queue overflow, draining, and reset. |
 | Process/VFS/user-copy/KLI1 | HOST-VERIFIED | Parent/wait, local FDs, permission-aware copy, and mutable-storage contracts. |
 | Stack check | HOST-VERIFIED | Editor maximum remains 368 bytes against 3072. |
