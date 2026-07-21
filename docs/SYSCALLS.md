@@ -49,7 +49,7 @@ The current limit is eight open descriptors per process, backed by a fixed globa
 | 2 | `sys_yield` | none | 0/current result | Voluntarily dispatch another ready EL0 process when available. |
 | 3 | `sys_getpid` | none | PID | Return the current process ID. |
 | 4 | `sys_spawn` | `x0=path, x1=entry_index` | PID/error | Load one KLI1 image from VFS and create a ready process. |
-| 6 | `sys_wait` | `x0=pid` | exit code/error | Non-blocking: succeeds only for an existing zombie process, then reclaims it. |
+| 6 | `sys_wait` | `x0=pid` | exit code/error | Non-blocking: succeeds only when `pid` is a zombie child of the caller, then returns its exit code and reclaims it. Foreign children return `ERR_PERM`. |
 | 7 | `sys_kill` | `x0=pid` | 0/error | Mark another live process exited with the kernel kill code. |
 | 8 | `sys_spawn_argv` | `x0=path, x1=entry_index, x2=argv_ptr, x3=argc` | PID/error | Import argv into a pointer-free kernel block, then build the child argv on its new stack. |
 

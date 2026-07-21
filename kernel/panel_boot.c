@@ -45,7 +45,7 @@ typedef struct {
 static uint64_t g_spawn_memory_base;
 static uint64_t g_spawn_memory_size;
 static panel_map_mmio_fn_t g_spawn_map_mmio;
-static uint32_t g_next_spawn_pid = PANEL_BOOT_PID_BASE + 1U;
+static uint32_t g_next_spawn_pid;
 
 uint64_t el0_return_address(void) {
     return (uint64_t)(uintptr_t)user_enter_el0_return;
@@ -242,6 +242,7 @@ static int place_argv_on_stack(uint64_t stack_paddr, uint32_t slot,
 int app_spawn_vfs(const char *path, uint32_t entry_index,
                   const panel_boot_argv_t *argv, uint32_t argc) {
     process_t *process;
+    process_t *parent;
     user_image_t image;
     panel_user_storage_t storage = {0};
     uint32_t slot;
@@ -267,10 +268,12 @@ int app_spawn_vfs(const char *path, uint32_t entry_index,
     }
 
     (void)process_reclaim_zombies();
+    parent = process_current();
     process = process_alloc(g_next_spawn_pid++, app_name);
     if (process == 0) {
         return -1;
     }
+    process->parent_pid = parent != 0 ? parent->pid : 0U;
     /*
      * process_alloc initializes slots as READY for normal direct unit-test
      * setup, but a spawned EL0 app is not runnable until its image, stack,
@@ -328,6 +331,9 @@ uint64_t panel_boot_run(uint64_t memory_base, uint64_t memory_size,
     panel_user_storage_t storage = {0};
     uint32_t slot;
 
+    if (g_next_spawn_pid == 0U) {
+        g_next_spawn_pid = PANEL_BOOT_PID_BASE + 1U;
+    }
     (void)process_reclaim_zombies();
     panel = process_alloc(PANEL_BOOT_PID_BASE, PANEL_BOOT_APP);
     if (panel == 0) {

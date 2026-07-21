@@ -28,7 +28,7 @@ int64_t sys_spawn(process_t *process, uint64_t path_ptr, uint64_t entry_index);
 int64_t sys_spawn_argv(process_t *process, uint64_t path_ptr,
                        uint64_t entry_index, uint64_t argv_ptr,
                        uint64_t argc);
-int64_t sys_wait(uint64_t pid);
+int64_t sys_wait(process_t *process, uint64_t pid);
 int64_t sys_kill(uint64_t pid);
 int64_t sys_munmap(process_t *process, uint64_t addr, uint64_t size);
 int64_t sys_mmap(process_t *process, uint64_t hint, uint64_t size,

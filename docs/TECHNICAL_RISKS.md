@@ -29,6 +29,7 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 | RISK-013 | P1 for v1 | Storage/VFS | OPEN | Current VFS/FAT path is too narrow for the v1 filesystem target. |
 | RISK-014 | P1 for v1 | Desktop apps | OPEN | Current apps are useful demos, not complete daily-use tools. |
 | RISK-015 | P2 hardening | Fault-contained copy | OPEN | User-copy transfers remain ordinary EL1 loads/stores without exception recovery. |
+| RISK-016 | P1 | Process lifecycle | CLOSED | Child zombies remain waitable by their parent; only kernel-owned or orphaned zombies are auto-reclaimed. |
 
 ## Open risks
 
@@ -90,6 +91,12 @@ manual evidence is recorded.
 ## Closed risks
 
 Closed risks remain summarized here so the current release claim can be audited without carrying old branch or PR history into the new first commit.
+
+### RISK-016 — Parent-owned zombie lifecycle
+
+Spawn records a parent PID. `sys_wait` accepts only a zombie child of the caller, and later spawns cannot reclaim that child before its exit code is collected. The automatic reaper is restricted to kernel-owned or orphaned zombies so the fixed table can recover abandoned slots without violating wait semantics.
+
+**Evidence:** standalone parent/wait lifecycle regression in `tests/run_process_parent_wait_test.sh`, plus the normal kernel build and complete verification matrix.
 
 ### RISK-012 — Kernel-owned syscall buffers
 
