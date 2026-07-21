@@ -4,8 +4,9 @@
 
 - **Controller core:** IMPLEMENTED; HOST-VERIFIED.
 - **Firmware mailbox clock protocol:** IMPLEMENTED; HOST-VERIFIED.
+- **Mailbox ARM-to-VideoCore address translation:** IMPLEMENTED; HOST-VERIFIED.
 - **EL2 to EL1 boot entry:** IMPLEMENTED; QEMU-VERIFIED.
-- **Opt-in sector-0 probe image:** IMPLEMENTED; BUILD-VERIFIED when CI passes.
+- **Opt-in sector-0 probe image:** IMPLEMENTED; BUILD-VERIFIED.
 - **Normal Raspberry Pi 4 storage integration:** FAIL-CLOSED.
 - **Physical clock response, card initialization, and sector reads:** UNVERIFIED.
 - **Writes:** intentionally disabled.
@@ -47,13 +48,37 @@ transaction needed to request the EMMC2 base clock:
 - validates both the global firmware status and the per-tag response length;
 - rejects zero or malformed rates and bounded-poll timeouts.
 
-`board_early_init()` performs this query immediately after UART initialization,
-before normal MMU bring-up. A successful response is printed as
-`EMMC2 clock: <rate>`; a failure prints `EMMC2 clock: unavailable` and does not
-change board capabilities or make storage reachable.
+### BCM2711 address translation
 
-The physical mailbox address translation and firmware response remain
-unverified until a real Raspberry Pi 4 serial boot records the marker.
+The firmware consumes a VideoCore/DMA bus address, not the raw ARM physical
+address of the message buffer. BCM2711 defines the common `/soc` DMA window so
+ARM physical RAM from `0x00000000` through `0x3fffffff` is visible to devices at
+`0xc0000000` through `0xffffffff`.
+
+The board therefore passes `RPI4_MAILBOX_BUS_ALIAS = 0xc0000000` to the mailbox
+layer. The mailbox code:
+
+1. requires both the ARM address and alias to be 16-byte aligned;
+2. adds the board alias to the ARM physical address;
+3. rejects overflow beyond the 32-bit mailbox address field;
+4. consequently rejects buffers at or above `0x40000000` with the BCM2711
+   alias;
+5. sends the translated bus address plus property channel 8.
+
+`board_early_init()` performs this transaction immediately after UART
+initialization, before normal MMU and cache bring-up. That ordering keeps the
+static message buffer identity-addressed and avoids a hidden cache-maintenance
+requirement. This API must not be reused later with an arbitrary virtual or
+cached buffer without adding explicit physical-address and cache-coherency
+handling.
+
+A successful response is printed as `EMMC2 clock: <rate>`. A failure prints
+`EMMC2 clock: unavailable <status>`, where `-1` is validation, `-2` is timeout,
+and `-3` is a malformed or rejected firmware response. The result never changes
+board capabilities or makes storage reachable.
+
+The physical firmware response remains unverified until a real Raspberry Pi 4
+serial boot records the marker.
 
 ## Opt-in physical probe
 
@@ -94,11 +119,13 @@ Boot configuration, serial wiring, markers, and evidence requirements live in
 `bash tests/run_rpi_mailbox_test.sh` builds the production mailbox code against
 a simulated FIFO. It verifies:
 
+- ARM physical to VideoCore bus alias translation;
 - the exact property message and EMMC2 clock ID;
 - property channel and aligned message address encoding;
 - global and per-tag firmware response handling;
 - write-FIFO and response-FIFO timeout paths;
-- invalid clock IDs and misaligned addresses.
+- rejection of misaligned addresses and aliases;
+- rejection of buffers that overflow the BCM2711 lower-1-GiB DMA window.
 
 `tests/run_board_build_test.sh` builds both the normal RPi4 image and the
 opt-in `kernel8.img`, enforcing the configured kernel-size limit on both.
