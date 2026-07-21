@@ -14,7 +14,6 @@
 #include "kernel/console.h"
 #include "kernel/gui.h"
 #include "kernel/io_service.h"
-#include "kernel/net/dhcp.h"
 #include "kernel/process.h"
 #include "kernel/sched/sched.h"
 #include "kernel/syscall_helpers.h"
@@ -140,7 +139,7 @@ void syscall_dispatch(exception_frame_t *frame) {
     process_t *current = process_current();
 
     syscall_pump_input(frame->x[8]);
-    net_poll();
+    kernel_io_poll_network();
 
     if (current != 0) {
         process_save_context(current, frame->x, frame->elr, frame->spsr,
