@@ -4,21 +4,24 @@ This file is the live entry point for agents working in this repository.
 
 ## Current project classification
 
-ArmoniOS is a **v0.1 QEMU desktop baseline** with most of the original v0.2
-cleanup work already implemented. It is a real freestanding AArch64 operating
-system, not a Linux application or distribution.
+ArmoniOS is a **v0.1 QEMU desktop baseline** and an active **v0.2
+cleanup/runtime-hardening candidate**. It is a real freestanding AArch64
+operating system, not a Linux application or distribution.
 
-The validated runtime tree from PR #41 was merged into `main` by commit
-`ea13f0e`. The exact PR head validated by GitHub Actions was `fedb070`:
+Most original v0.2 cleanup goals are implemented. The current candidate adds the
+first aggregate runtime-service telemetry: accepted/coalesced requests, runs,
+empty invocations, requeues, last/maximum/cumulative generic-counter duration,
+and passes exceeding one timer interval.
 
-- `Verify ArmoniOS` run `29824050151`: success;
-- `CI - Tests` run `29824050165`: success.
+That instrumentation does not complete v0.2. The deferred service still has no
+input, device, network, redraw, or global time budget and no sustained-load QEMU
+proof of EL0 progress. Track the remaining work in issue #43 and RISK-017.
 
-Those runs validate the code tree that was merged. The merge commit itself did
-not receive a separate workflow run. Do not describe it as independently
-retested.
+Issue #2 is the **v0.6 useful desktop applications** milestone. Do not treat it
+as v1.1 work or use it to bypass v0.3 storage/VFS, v0.4 real FAT, and v0.5 shared
+runtime/widget foundations.
 
-The current release claim applies only to QEMU `virt`. Raspberry Pi 4 remains
+The release claim applies only to QEMU `virt`. Raspberry Pi 4 remains
 build-verified, fail-closed scaffolding without physical boot, storage, display,
 or input evidence.
 
@@ -48,9 +51,15 @@ future intent and must never be used as evidence that a feature exists.
 - Timer-originated GUI, input, device, and network work runs in one post-EOI
   bottom half.
 - EOI does **not** mean exception return: IRQs remain masked and EL0 remains
-  paused while the current runtime-service pass executes.
-- The runtime pending mask is valid under the current single-core, one-consumer
-  model. It is not an SMP-safe work queue.
+  paused while the runtime-service pass executes.
+- The timer callback is bounded; the complete exception path is measured but not
+  yet bounded.
+- Runtime duration uses `CNTPCT_EL0`; `CNTFRQ_EL0` supplies the conversion
+  frequency; one timer interval is only an observation threshold.
+- Runtime telemetry is kernel-internal and must not be exposed by copying the
+  internal structure directly into a syscall ABI.
+- The runtime pending mask and telemetry are valid under the current single-core,
+  one-consumer model. They are not SMP-safe synchronization or snapshots.
 - User-copy permission validation exists, but the final copy is not
   fault-recoverable.
 - Each process still carries kernel mappings in TTBR0; TTBR1, ASIDs, and scoped
@@ -67,13 +76,14 @@ gate before merging code or changing a verified claim:
 bash tools/verify.sh
 ```
 
-The current baseline includes:
+The baseline includes:
 
 - QEMU and RPi4 build contracts;
 - `.data == 0` and the 108000-byte kernel limit;
 - RPi4 EMMC2 diagnostic, MBR, and block-view host gates;
 - native kernel, VFS, filesystem, GUI, driver-parser, and ABI tests;
-- deferred runtime-service ordering/coalescing checks;
+- deferred runtime-service EOI ordering, coalescing, deterministic timing,
+  max/total duration, overrun, requeue, snapshot, and reset checks;
 - parent/wait lifecycle and process-local FD isolation;
 - user-copy and KLI1 contracts;
 - userland stack checking;
@@ -94,14 +104,16 @@ validation.
 
 ## Change discipline
 
-### Kernel or driver changes
+### Runtime and interrupt changes
 
-- Keep hard-IRQ handlers bounded.
+- Keep hard-IRQ callbacks bounded.
 - Do not add blocking operations, unbounded queue drains, complete device scans,
-  or rendering to an IRQ callback.
+  or rendering to a hard-IRQ callback.
+- Treat aggregate timing as measurement, not proof of a bound.
+- Per-class budget work must preserve or republish pending work when exhausted.
+- Add focused host tests and a deterministic QEMU progress regression when work
+  crosses exception, device, scheduler, process, or user/kernel boundaries.
 - Preserve `.data == 0`, W^X mappings, kernel-size, and stack limits.
-- Add focused host tests and a QEMU regression when behavior crosses an
-  exception, device, process, or user/kernel boundary.
 
 ### Syscall or ABI changes
 
@@ -110,6 +122,8 @@ validation.
   the same change.
 - Import caller data into kernel-owned buffers before lower layers use it.
 - Validate the entire output destination before consuming queued state.
+- Define a deliberate versioned diagnostic ABI before exposing runtime telemetry
+  to Monitor or another application.
 
 ### Storage changes
 
@@ -124,6 +138,7 @@ validation.
 - Put large mutable state in `SYS_MMAP`, not the fixed process stack.
 - Keep the stack gate green.
 - Prefer shared helpers only when they reduce duplication or image size.
+- Respect the milestone order: platform foundations before broad v0.6 app work.
 
 ## Documentation rules
 
@@ -132,6 +147,7 @@ validation.
 - Use exact commits and workflow run IDs for promoted baselines.
 - Separate IMPLEMENTED, HOST-VERIFIED, BUILD-VERIFIED, QEMU-VERIFIED,
   CI-VERIFIED, MANUAL-VERIFIED, and physical-hardware evidence.
+- A validated PR tree is not automatically a separately tested merge commit.
 - Keep README, `CURRENT_STATE.md`, `ROADMAP.md`, `TECHNICAL_RISKS.md`, and this
   guide synchronized whenever release state changes.
 - Do not add archive, historical handoff, or duplicate status documents.
