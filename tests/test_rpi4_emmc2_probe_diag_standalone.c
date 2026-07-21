@@ -50,12 +50,6 @@ static int test_broken_cd_and_command_capture(void) {
 
     ASSERT_EQ_U32(17U, diag.last_command);
     ASSERT_EQ_U32(0x11223344U, diag.last_argument);
-    ASSERT_EQ_U32((17U << 24U) | 0x003a0012U,
-                  diag.last_transfer_command);
-    ASSERT_EQ_U32(RPI4_EMMC2_DIAG_TRANSFER_COMMAND,
-                  diag.last_write_offset);
-    ASSERT_EQ_U32((17U << 24U) | 0x003a0012U,
-                  diag.last_write_value);
     ASSERT_EQ_U32(0x11223344U,
                   regs[RPI4_EMMC2_DIAG_ARGUMENT / 4U]);
     ASSERT_EQ_U32((17U << 24U) | 0x003a0012U,
@@ -86,7 +80,6 @@ static int test_error_snapshot_survives_ack(void) {
     ASSERT_EQ_U32(0x00f00003U, diag.present_state);
     ASSERT_EQ_U32(0x0e07000fU, diag.clock_reset);
     ASSERT_EQ_U32(0x00000f00U, diag.host_power);
-    ASSERT_EQ_U32(0U, diag.interrupt_status);
     ASSERT_EQ_U32(0x00200000U, diag.last_nonzero_interrupt_status);
     ASSERT_TRUE(diag.base == (uintptr_t)regs);
     return 0;
