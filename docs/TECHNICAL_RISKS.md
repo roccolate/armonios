@@ -26,9 +26,9 @@ Status and evidence terminology follows `DOCUMENTATION_POLICY.md`.
 | RISK-010 | P2 | Scheduling documentation | CLOSED | EL0 processes are preemptive; EL1 helper threads are cooperative. |
 | RISK-011 | P1 | Verification infrastructure | CLOSED | Local and hosted verification gates have evidence for the v0.1 baseline. |
 | RISK-012 | P1 for v0.2 | Syscall buffer ownership | CLOSED | VFS, argv, IPC, GUI, and information syscall payloads cross through bounded kernel-owned temporaries. |
-| RISK-015 | P2 hardening | Fault-contained copy | OPEN | User-copy transfers remain ordinary EL1 loads/stores without exception recovery. |
 | RISK-013 | P1 for v1 | Storage/VFS | OPEN | Current VFS/FAT path is too narrow for the v1 filesystem target. |
 | RISK-014 | P1 for v1 | Desktop apps | OPEN | Current apps are useful demos, not complete daily-use tools. |
+| RISK-015 | P2 hardening | Fault-contained copy | OPEN | User-copy transfers remain ordinary EL1 loads/stores without exception recovery. |
 
 ## Open risks
 
@@ -55,12 +55,6 @@ Permission-aware validation and kernel-owned buffer boundaries are implemented. 
 This is distinct from buffer ownership: lower subsystems no longer operate on caller pointers, but the boundary copy itself is not hardened against a mapping changing unexpectedly after validation.
 
 **Exit criteria:** add fault-recoverable copyin/copyout primitives, targeted exception-path tests, and preserve the current `ERR_INVAL`/`ERR_PERM` contracts without crashing EL1.
-
-### RISK-012 — Kernel-owned syscall buffers
-
-VFS buffers and paths, argv, IPC messages, GUI output, and system-information output are copied through bounded kernel-owned temporaries before lower layers use them. Invalid or read-only destinations are rejected before state-consuming receives dequeue data.
-
-**Evidence:** host user-copy boundary regressions plus the complete `tools/verify.sh` matrix recorded with the closing change.
 
 ### RISK-013 — Storage and VFS are too narrow for v1
 
@@ -93,9 +87,15 @@ helpers and widgets; Files, Editor, Shell, Settings, Monitor, Panel, and Clock
 support the v1 manual workflow; persistence survives a QEMU reboot; visible
 manual evidence is recorded.
 
-## Closed v0.1 risks
+## Closed risks
 
 Closed risks remain summarized here so the current release claim can be audited without carrying old branch or PR history into the new first commit.
+
+### RISK-012 — Kernel-owned syscall buffers
+
+VFS buffers and paths, argv, IPC messages, GUI output, and system-information output are copied through bounded kernel-owned temporaries before lower layers use them. Invalid or read-only destinations are rejected before state-consuming receives dequeue data.
+
+**Evidence:** host user-copy boundary regressions plus the complete `tools/verify.sh` matrix recorded with the closing change.
 
 ### RISK-001 — User-copy permissions
 

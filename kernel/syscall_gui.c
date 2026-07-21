@@ -375,7 +375,6 @@ int64_t sys_window_state(process_t *process, uint64_t window_id,
     gui_desktop_t *desktop = gui_desktop();
     gui_window_t *window;
     uint32_t state = 0;
-    int64_t status;
 
     if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
         return ERR_INVAL;
