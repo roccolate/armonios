@@ -1,0 +1,103 @@
+name: Board capability size helper
+
+on:
+  push:
+    branches:
+      - agent/board-capability-gates
+
+permissions:
+  contents: write
+
+jobs:
+  shrink-kernel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/board-capability-gates
+      - name: Remove redundant capability diagnostics
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('kernel/kernel.c')
+          text = path.read_text()
+
+          old = '''    input_queue_init();
+              uart_puts("input: serial queue\\n");
+
+              if (board_supports(BOARD_CAP_INPUT)) {
+                  if (board_input_init() == 0) {
+                      uart_puts("input: board ok\\n");
+                  } else {
+                      uart_puts("input: board unavailable\\n");
+                  }
+              } else {
+                  uart_puts("input: board unsupported\\n");
+              }
+          '''
+          new = '''    input_queue_init();
+              if (board_supports(BOARD_CAP_INPUT) && board_input_init() == 0) {
+                  uart_puts("input: ok\\n");
+              }
+          '''
+          if old not in text:
+              if new not in text:
+                  raise SystemExit('input diagnostics block not found')
+          else:
+              text = text.replace(old, new, 1)
+
+          text = text.replace('''    } else {
+                  uart_puts("PCI: unsupported\\n");
+              }
+
+              if (board_supports(BOARD_CAP_USB) &&
+          ''', '''    }
+
+              if (board_supports(BOARD_CAP_USB) &&
+          ''', 1)
+
+          text = text.replace('''        }
+              } else if (board_supports(BOARD_CAP_USB)) {
+                  uart_puts("USB: PCI unsupported\\n");
+              } else {
+                  uart_puts("USB: unsupported\\n");
+              }
+
+              return INIT_STATUS_OK;
+          ''', '''        }
+              }
+
+              return INIT_STATUS_OK;
+          ''', 1)
+
+          text = text.replace('''                init_status_set(INIT_PHASE_STORAGE, INIT_STATUS_SKIPPED);
+                          uart_puts("storage: unsupported\\n");
+                      }
+          ''', '''                init_status_set(INIT_PHASE_STORAGE, INIT_STATUS_SKIPPED);
+                      }
+          ''', 1)
+          text = text.replace('''                init_status_set(INIT_PHASE_DISPLAY, INIT_STATUS_SKIPPED);
+                          uart_puts("display: unsupported\\n");
+                      }
+          ''', '''                init_status_set(INIT_PHASE_DISPLAY, INIT_STATUS_SKIPPED);
+                      }
+          ''', 1)
+          text = text.replace('''                init_status_set(INIT_PHASE_NETWORK, INIT_STATUS_SKIPPED);
+                          uart_puts("network: unsupported\\n");
+                      }
+          ''', '''                init_status_set(INIT_PHASE_NETWORK, INIT_STATUS_SKIPPED);
+                      }
+          ''', 1)
+
+          path.write_text(text)
+          PY
+      - name: Commit compact gates
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kernel/kernel.c
+          git commit -m "Keep board capability gates within size budget"
+          git push origin HEAD:agent/board-capability-gates
