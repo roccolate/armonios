@@ -138,17 +138,10 @@ int64_t sys_copy_from_user(const process_t *process, void *out, uint64_t ptr,
     return 0;
 }
 
-void sys_copy_to_user_validated(uint64_t ptr, const void *input, uint64_t len) {
-    uint8_t *dst = (uint8_t *)(uintptr_t)ptr;
-    const uint8_t *src = (const uint8_t *)input;
-
-    for (uint64_t i = 0; i < len; i++) {
-        dst[i] = src[i];
-    }
-}
-
 int64_t sys_copy_to_user(const process_t *process, uint64_t ptr,
                          const void *input, uint64_t len) {
+    uint8_t *dst = (uint8_t *)(uintptr_t)ptr;
+    const uint8_t *src = (const uint8_t *)input;
     int64_t status;
 
     if (input == 0 && len != 0) {
@@ -160,7 +153,9 @@ int64_t sys_copy_to_user(const process_t *process, uint64_t ptr,
         return status;
     }
 
-    sys_copy_to_user_validated(ptr, input, len);
+    for (uint64_t i = 0; i < len; i++) {
+        dst[i] = src[i];
+    }
     return 0;
 }
 
