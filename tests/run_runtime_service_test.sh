@@ -35,6 +35,7 @@ ${HOST_CC:-cc} "${common_flags[@]}" \
 ${HOST_CC:-cc} "${common_flags[@]}" \
     "${repo_root}/tests/runtime_redraw_budget_test.c" \
     "${repo_root}/kernel/irq.c" \
+    "${repo_root}/kernel/kstring.c" \
     -o "${redraw_binary}"
 
 "${binary}"
