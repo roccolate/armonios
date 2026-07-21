@@ -297,10 +297,10 @@ int64_t sys_window_get_bounds(process_t *process, uint64_t window_id,
                               uint64_t out_ptr) {
     gui_desktop_t *desktop;
     gui_window_t *window;
-    uint32_t *out = (uint32_t *)(uintptr_t)out_ptr;
+    uint32_t out[4];
     int64_t status;
 
-    status = sys_user_buf_out(process, out_ptr, sizeof(uint32_t) * 4U);
+    status = sys_user_buf_out(process, out_ptr, sizeof(out));
     if (status != 0) {
         return status;
     }
@@ -312,7 +312,7 @@ int64_t sys_window_get_bounds(process_t *process, uint64_t window_id,
     out[1] = window->y;
     out[2] = window->w;
     out[3] = window->h;
-    return 0;
+    return sys_copy_to_user(process, out_ptr, out, sizeof(out));
 }
 
 int64_t sys_window_set_bounds(process_t *process, uint64_t window_id,
@@ -377,11 +377,10 @@ int64_t sys_window_state(process_t *process, uint64_t window_id,
                          uint64_t out_ptr) {
     gui_desktop_t *desktop = gui_desktop();
     gui_window_t *window;
-    uint32_t *out = (uint32_t *)(uintptr_t)out_ptr;
     uint32_t state = 0;
     int64_t status;
 
-    status = sys_user_buf_out(process, out_ptr, sizeof(uint32_t));
+    status = sys_user_buf_out(process, out_ptr, sizeof(state));
     if (status != 0) {
         return status;
     }
@@ -402,14 +401,14 @@ int64_t sys_window_state(process_t *process, uint64_t window_id,
         (window->flags & GUI_WINDOW_NO_FOCUS) == 0U) {
         state |= 0x2U;
     }
-    *out = state;
-    return 0;
+    return sys_copy_to_user(process, out_ptr, &state, sizeof(state));
 }
 
 int64_t sys_window_event(process_t *process, uint64_t window_id,
                          uint64_t buf_ptr, uint64_t buf_count) {
     gui_window_t *window;
-    uint32_t *out = (uint32_t *)(uintptr_t)buf_ptr;
+    uint32_t out[64U * 3U];
+    uint64_t n = 0;
     int64_t status;
 
     if (process == 0 || window_id >= GUI_MAX_WINDOWS ||
@@ -425,12 +424,10 @@ int64_t sys_window_event(process_t *process, uint64_t window_id,
     if (status != 0) {
         return status;
     }
-
     if (window->event_count == 0) {
         return ERR_AGAIN;
     }
 
-    uint64_t n = 0;
     while (n < buf_count && window->event_count > 0) {
         gui_event_t ev;
         if (gui_window_pop_event(window, &ev) != 0) {
@@ -441,5 +438,8 @@ int64_t sys_window_event(process_t *process, uint64_t window_id,
         out[n * 3U + 2U] = (uint32_t)ev.data2;
         n++;
     }
-    return (int64_t)n;
+
+    status = sys_copy_to_user(process, buf_ptr, out,
+                              n * 3U * sizeof(uint32_t));
+    return status == 0 ? (int64_t)n : status;
 }
