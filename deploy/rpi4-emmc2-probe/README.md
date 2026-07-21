@@ -65,12 +65,22 @@ EMMC2 probe: first16 <32 hexadecimal digits>
 EMMC2 probe: signature <4 hexadecimal digits>
 ```
 
+The clock query translates the early ARM physical message buffer through the
+BCM2711 `/soc` DMA alias (`+ 0xc0000000`) before sending property channel 8.
+The buffer is static, 16-byte aligned, below 1 GiB, and queried before normal
+MMU/cache bring-up.
+
 `55AA` is common for an MBR or boot sector signature, but the probe records the
 actual bytes and does not treat a different value as a driver failure.
 
 Failure localization is explicit:
 
-- `EMMC2 clock: unavailable` means the firmware mailbox transaction failed;
+- `EMMC2 clock: unavailable -1` means local address, alias, or argument
+  validation failed;
+- `EMMC2 clock: unavailable -2` means the mailbox FIFO or matching firmware
+  response timed out;
+- `EMMC2 clock: unavailable -3` means firmware returned a malformed, rejected,
+  or zero clock response;
 - `EMMC2 probe: init <negative>` means SDHCI/card initialization failed;
 - `EMMC2 probe: read0 <negative>` means initialization succeeded but sector-0
   transfer failed.
