@@ -1,0 +1,38 @@
+name: Apply compact GUI output copies
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/el0-gui-info-usercopy
+
+      - name: Apply compact GUI copies
+        run: |
+          if [[ -f tools/apply_compact_gui_copy.py ]]; then
+            python3 tools/apply_compact_gui_copy.py
+          else
+            echo "compact GUI copies already applied"
+          fi
+
+      - name: Commit generated GUI changes
+        run: |
+          if git diff --quiet; then
+            echo "no generated changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Compact GUI syscall output copies"
+          git push origin HEAD:agent/el0-gui-info-usercopy
