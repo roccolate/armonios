@@ -22,6 +22,7 @@ run_gate build make BOARD=qemu_virt
 run_gate size make BOARD=qemu_virt size
 run_gate board-rpi4 bash tests/run_board_build_test.sh
 run_gate emmc-sdhci-host bash tests/run_emmc_sdhci_test.sh
+run_gate rpi-mailbox-host bash tests/run_rpi_mailbox_test.sh
 run_gate host-tests make -C tests test
 run_gate process-fd-isolation bash tests/run_vfs_process_fd_test.sh
 run_gate usercopy-host bash tests/run_user_copy_permissions_test.sh

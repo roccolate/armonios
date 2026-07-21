@@ -1,29 +1,12 @@
 #include "boards/rpi4/board.h"
 
+#include "firmware/rpi_mailbox.h"
 #include "irq/gicv2.h"
-#include "kernel/kernel_compiler.h"
 #include "kernel/mm/vmm.h"
+#include "kernel/print.h"
 #include "uart/pl011.h"
 
-static volatile uint32_t *mailbox_reg(uint32_t offset) {
-    return (volatile uint32_t *)(RPI4_MAILBOX_BASE + offset);
-}
-
-KERNEL_UNUSED static int mailbox_call(uint32_t channel, uint32_t *data) {
-    uint32_t r;
-
-    *mailbox_reg(0x20) = 0;
-    *mailbox_reg(0x10) = ((uint32_t)((uintptr_t)data) & ~0xF) | (channel & 0xF);
-
-    for (uint32_t i = 0; i < 1000000; i++) {
-        r = *mailbox_reg(0x18);
-        if (r & 0x40000000) {
-            return (r & 0xF) == channel ? 0 : -1;
-        }
-    }
-
-    return -1;
-}
+static uint32_t g_emmc2_clock_hz;
 
 const char *board_name(void) {
     return "rpi4-bcm2711";
@@ -31,15 +14,26 @@ const char *board_name(void) {
 
 uint32_t board_capabilities(void) {
     /*
-     * The RPi4 backend is a serial-only build target until physical hardware
-     * evidence exists. In particular, the current eMMC code is experimental
-     * scaffolding and must not be advertised to generic kernel code.
+     * The RPi4 backend remains a serial-only build target until physical
+     * hardware evidence exists. The EMMC2 controller core is host-tested, but
+     * storage must not be advertised before repeatable card reads on hardware.
      */
     return 0U;
 }
 
 void board_early_init(void) {
     uart_init(RPI4_UART0_BASE);
+
+    if (rpi_mailbox_get_clock_rate(RPI4_MAILBOX_BASE,
+                                   RPI_FIRMWARE_CLOCK_EMMC2,
+                                   &g_emmc2_clock_hz) == RPI_MAILBOX_OK) {
+        uart_puts("EMMC2 clock: ");
+        print_dec64(g_emmc2_clock_hz);
+        uart_puts("\n");
+    } else {
+        g_emmc2_clock_hz = 0U;
+        uart_puts("EMMC2 clock: unavailable\n");
+    }
 }
 
 void board_irq_init(void) {
@@ -107,9 +101,9 @@ int board_map_mmio(uint64_t *pgd) {
 }
 
 /*
- * Storage intentionally fails closed. These entry points remain only to keep
- * the board contract link-complete while the BCM2711 eMMC path is rewritten
- * and validated on physical hardware.
+ * Storage intentionally fails closed. The clock query is diagnostic only;
+ * EMMC2 MMIO is not mapped and the generic storage path cannot invoke the
+ * host-tested controller until physical read evidence exists.
  */
 int board_emmc_read(uint32_t lba, uint32_t count, void *buffer) {
     (void)lba;
