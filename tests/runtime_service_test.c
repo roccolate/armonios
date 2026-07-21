@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "kernel/gui_compositor.h"
 #include "kernel/irq.h"
 #include "kernel/process.h"
 #include "kernel/runtime_service.h"
@@ -9,18 +10,21 @@
 static uint32_t g_eoi_seen;
 static uint32_t g_backend_calls;
 static uint32_t g_requeue_once;
+static uint32_t g_use_redraw_helper;
 static uint64_t g_counter_now;
 static uint64_t g_counter_step;
 static uint32_t g_metrics[RUNTIME_METRIC_COUNT];
 static uint32_t g_queue_depth;
 static uint32_t g_queue_high_water;
 static uint64_t g_queue_overflow;
+static gui_desktop_t g_desktop;
 
 uint32_t board_irq_ack(void) { return 5U; }
 void board_irq_end(uint32_t irq) { assert(irq == 5U); g_eoi_seen = 1U; }
 int board_irq_is_spurious(uint32_t irq) { (void)irq; return 0; }
 void uart_puts(const char *text) { (void)text; }
 process_t *process_current(void) { return 0; }
+gui_desktop_t *gui_desktop(void) { return &g_desktop; }
 
 void process_save_context(process_t *process, const uint64_t regs[31],
                           uint64_t pc, uint64_t pstate, uint64_t sp) {
@@ -45,6 +49,9 @@ void kernel_on_timer_tick(void) {
     for (uint32_t i = 0; i < RUNTIME_METRIC_COUNT; i++) {
         runtime_service_report_metric(i, g_metrics[i]);
     }
+    if (g_use_redraw_helper != 0U) {
+        runtime_service_report_redraw();
+    }
     runtime_service_report_input_queue(g_queue_depth, g_queue_high_water,
                                        g_queue_overflow);
     if (g_requeue_once != 0U) {
@@ -65,11 +72,14 @@ static void prepare(uint64_t step) {
     g_eoi_seen = 1U;
     g_backend_calls = 0U;
     g_requeue_once = 0U;
+    g_use_redraw_helper = 0U;
     g_counter_now = 100U;
     g_counter_step = step;
     g_queue_depth = 0U;
     g_queue_high_water = 0U;
     g_queue_overflow = 0U;
+    g_desktop.damage_count = 0U;
+    g_desktop.damage_full = 0U;
     for (uint32_t i = 0; i < RUNTIME_METRIC_COUNT; i++) g_metrics[i] = 0U;
 }
 
@@ -125,6 +135,8 @@ static void work_metrics(void) {
     g_metrics[RUNTIME_METRIC_REDRAW] = 1U;
     g_metrics[RUNTIME_METRIC_NETWORK_FRAMES] = 3U;
     g_metrics[RUNTIME_METRIC_DEVICE_POLLS] = 2U;
+    g_metrics[RUNTIME_METRIC_DAMAGE_ITEMS] = 4U;
+    g_metrics[RUNTIME_METRIC_FULL_REDRAWS] = 0U;
     g_queue_depth = 6U;
     g_queue_high_water = 7U;
     g_queue_overflow = 2U;
@@ -137,21 +149,27 @@ static void work_metrics(void) {
     assert(stats.metric_last[RUNTIME_METRIC_REDRAW] == 1U);
     assert(stats.metric_last[RUNTIME_METRIC_NETWORK_FRAMES] == 3U);
     assert(stats.metric_last[RUNTIME_METRIC_DEVICE_POLLS] == 2U);
+    assert(stats.metric_last[RUNTIME_METRIC_DAMAGE_ITEMS] == 4U);
+    assert(stats.metric_last[RUNTIME_METRIC_FULL_REDRAWS] == 0U);
     assert(stats.metric_total[RUNTIME_METRIC_INPUT_PRODUCED] == 5U);
     assert(stats.metric_total[RUNTIME_METRIC_NETWORK_FRAMES] == 3U);
     assert(stats.metric_total[RUNTIME_METRIC_DEVICE_POLLS] == 2U);
+    assert(stats.metric_total[RUNTIME_METRIC_DAMAGE_ITEMS] == 4U);
     assert(stats.metric_max[RUNTIME_METRIC_INPUT_CONSUMED] == 4U);
     assert(stats.metric_max[RUNTIME_METRIC_NETWORK_FRAMES] == 3U);
     assert(stats.metric_max[RUNTIME_METRIC_DEVICE_POLLS] == 2U);
+    assert(stats.metric_max[RUNTIME_METRIC_DAMAGE_ITEMS] == 4U);
     assert(stats.max_input_queue_depth == 6U);
     assert(stats.input_queue_high_water == 7U);
     assert(stats.input_queue_overflow_count == 2U);
 
     g_metrics[RUNTIME_METRIC_INPUT_PRODUCED] = 2U;
     g_metrics[RUNTIME_METRIC_INPUT_CONSUMED] = 6U;
-    g_metrics[RUNTIME_METRIC_REDRAW] = 0U;
+    g_metrics[RUNTIME_METRIC_REDRAW] = 1U;
     g_metrics[RUNTIME_METRIC_NETWORK_FRAMES] = 7U;
     g_metrics[RUNTIME_METRIC_DEVICE_POLLS] = 5U;
+    g_metrics[RUNTIME_METRIC_DAMAGE_ITEMS] = 0U;
+    g_metrics[RUNTIME_METRIC_FULL_REDRAWS] = 1U;
     g_queue_depth = 3U;
     g_queue_overflow = 4U;
     runtime_service_request(RUNTIME_WORK_PERIODIC);
@@ -164,16 +182,48 @@ static void work_metrics(void) {
     assert(stats.metric_last[RUNTIME_METRIC_INPUT_CONSUMED] == 6U);
     assert(stats.metric_total[RUNTIME_METRIC_INPUT_CONSUMED] == 10U);
     assert(stats.metric_max[RUNTIME_METRIC_INPUT_CONSUMED] == 6U);
-    assert(stats.metric_last[RUNTIME_METRIC_REDRAW] == 0U);
-    assert(stats.metric_total[RUNTIME_METRIC_REDRAW] == 1U);
+    assert(stats.metric_last[RUNTIME_METRIC_REDRAW] == 1U);
+    assert(stats.metric_total[RUNTIME_METRIC_REDRAW] == 2U);
     assert(stats.metric_last[RUNTIME_METRIC_NETWORK_FRAMES] == 7U);
     assert(stats.metric_total[RUNTIME_METRIC_NETWORK_FRAMES] == 10U);
     assert(stats.metric_max[RUNTIME_METRIC_NETWORK_FRAMES] == 7U);
     assert(stats.metric_last[RUNTIME_METRIC_DEVICE_POLLS] == 5U);
     assert(stats.metric_total[RUNTIME_METRIC_DEVICE_POLLS] == 7U);
     assert(stats.metric_max[RUNTIME_METRIC_DEVICE_POLLS] == 5U);
+    assert(stats.metric_last[RUNTIME_METRIC_DAMAGE_ITEMS] == 0U);
+    assert(stats.metric_total[RUNTIME_METRIC_DAMAGE_ITEMS] == 4U);
+    assert(stats.metric_max[RUNTIME_METRIC_DAMAGE_ITEMS] == 4U);
+    assert(stats.metric_last[RUNTIME_METRIC_FULL_REDRAWS] == 1U);
+    assert(stats.metric_total[RUNTIME_METRIC_FULL_REDRAWS] == 1U);
+    assert(stats.metric_max[RUNTIME_METRIC_FULL_REDRAWS] == 1U);
     assert(stats.max_input_queue_depth == 6U);
     assert(stats.input_queue_overflow_count == 4U);
+}
+
+static void redraw_batch_helper(void) {
+    runtime_service_stats_t stats;
+
+    prepare(2U);
+    g_use_redraw_helper = 1U;
+    g_desktop.damage_count = 3U;
+    runtime_service_request(RUNTIME_WORK_PERIODIC);
+    assert(runtime_service_run_pending() == RUNTIME_WORK_PERIODIC);
+    stats = snapshot();
+    assert(stats.metric_last[RUNTIME_METRIC_REDRAW] == 1U);
+    assert(stats.metric_last[RUNTIME_METRIC_DAMAGE_ITEMS] == 3U);
+    assert(stats.metric_last[RUNTIME_METRIC_FULL_REDRAWS] == 0U);
+
+    g_desktop.damage_count = 0U;
+    g_desktop.damage_full = 1U;
+    runtime_service_request(RUNTIME_WORK_PERIODIC);
+    assert(runtime_service_run_pending() == RUNTIME_WORK_PERIODIC);
+    stats = snapshot();
+    assert(stats.metric_last[RUNTIME_METRIC_REDRAW] == 1U);
+    assert(stats.metric_last[RUNTIME_METRIC_DAMAGE_ITEMS] == 0U);
+    assert(stats.metric_last[RUNTIME_METRIC_FULL_REDRAWS] == 1U);
+    assert(stats.metric_total[RUNTIME_METRIC_REDRAW] == 2U);
+    assert(stats.metric_total[RUNTIME_METRIC_DAMAGE_ITEMS] == 3U);
+    assert(stats.metric_total[RUNTIME_METRIC_FULL_REDRAWS] == 1U);
 }
 
 static void requeue_and_reset(void) {
@@ -196,6 +246,8 @@ static void requeue_and_reset(void) {
     assert(stats.metric_total[RUNTIME_METRIC_INPUT_CONSUMED] == 0U);
     assert(stats.metric_total[RUNTIME_METRIC_NETWORK_FRAMES] == 0U);
     assert(stats.metric_total[RUNTIME_METRIC_DEVICE_POLLS] == 0U);
+    assert(stats.metric_total[RUNTIME_METRIC_DAMAGE_ITEMS] == 0U);
+    assert(stats.metric_total[RUNTIME_METRIC_FULL_REDRAWS] == 0U);
     assert(stats.counter_frequency_hz == 1000U);
     assert(stats.budget_ticks == 10U);
 }
@@ -214,8 +266,9 @@ int main(void) {
     timing_and_coalescing();
     maximum_and_overrun();
     work_metrics();
+    redraw_batch_helper();
     requeue_and_reset();
     eoi_order();
-    puts("deferred runtime service device/network telemetry: ok");
+    puts("deferred runtime service damage telemetry: ok");
     return 0;
 }
