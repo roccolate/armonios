@@ -1,10 +1,10 @@
 /*
- * Host-side stub for pl011.c.
+ * Host-side stubs for platform services not exercised by the native suite.
  *
- * The real pl011.c uses aarch64 `yield` instructions in its spin
- * loops which the host gcc does not understand. The test binary
- * only needs uart_puts and uart_putc to silence the linker when
- * usb_core.c prints its debug messages; we route them to stdout.
+ * The real pl011.c uses aarch64 `yield` instructions in its spin loops which
+ * host gcc does not understand. The runtime network wrapper also references the
+ * real DHCP poll symbol, while the broad host suite tests only the virtio driver
+ * and runtime mechanics. These stubs satisfy those platform edges.
  */
 
 #include <stdint.h>
@@ -19,4 +19,7 @@ void uart_puts(const char *s) {
         fputc(*s, stdout);
         s++;
     }
+}
+
+void net_poll(void) {
 }
