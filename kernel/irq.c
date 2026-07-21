@@ -4,10 +4,10 @@
 
 #include "board.h"
 #include "kernel/gui_compositor.h"
+#include "net/virtio_net.h"
 #include "kernel/net/dhcp.h"
 #include "kernel/process.h"
 #include "kernel/runtime_service.h"
-#include "net/virtio_net.h"
 #include "uart/pl011.h"
 
 #define IRQ_HANDLER_SLOTS 64U
