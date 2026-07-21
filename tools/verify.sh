@@ -24,6 +24,8 @@ run_gate board-rpi4 bash tests/run_board_build_test.sh
 run_gate rpi4-probe-package bash tools/package_rpi4_emmc2_probe.sh
 run_gate emmc-sdhci-host bash tests/run_emmc_sdhci_test.sh
 run_gate rpi4-emmc2-diag-host bash tests/run_rpi4_emmc2_probe_diag_test.sh
+run_gate mbr-fat32-host bash tests/run_mbr_fat32_test.sh
+run_gate block-view-fat32-host bash tests/run_block_view_fat32_test.sh
 run_gate rpi-mailbox-host bash tests/run_rpi_mailbox_test.sh
 run_gate host-tests make -C tests test
 run_gate process-fd-isolation bash tests/run_vfs_process_fd_test.sh

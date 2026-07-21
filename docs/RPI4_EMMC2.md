@@ -7,6 +7,9 @@
 - **Mailbox ARM-to-VideoCore address translation:** IMPLEMENTED; HOST-VERIFIED.
 - **RPi4 broken card-detect adapter:** IMPLEMENTED; HOST-VERIFIED.
 - **RPi4 probe failure telemetry:** IMPLEMENTED; HOST-VERIFIED.
+- **Primary FAT32 MBR discovery:** IMPLEMENTED; HOST-VERIFIED.
+- **Bounded partition block views:** IMPLEMENTED; HOST-VERIFIED.
+- **Read-only FAT layout probe:** IMPLEMENTED; BUILD-VERIFIED.
 - **EL2 to EL1 boot entry:** IMPLEMENTED; QEMU-VERIFIED.
 - **Opt-in sector-0 probe image:** IMPLEMENTED; BUILD-VERIFIED.
 - **Normal Raspberry Pi 4 storage integration:** FAIL-CLOSED.
@@ -149,9 +152,11 @@ Only that build performs the early diagnostic sequence:
 1. query the EMMC2 base clock through firmware;
 2. install the RPi4 broken-card-detect and telemetry adapter;
 3. initialize the SDHCI/card path at `RPI4_EMMC_BASE`;
-4. read exactly sector 0;
-5. print compact MMIO telemetry on failure;
-6. print the first 16 bytes and bytes 510-511 on success.
+4. read sector 0 and print a compact raw summary;
+5. try the existing FAT32 validator at LBA 0;
+6. otherwise locate the first supported primary FAT32 MBR partition;
+7. apply a bounded block view and validate that partition's BPB;
+8. print compact MMIO telemetry on I/O failure or FAT geometry on success.
 
 The probe uses static kernel buffers and the read-only controller. It does not
 advertise `BOARD_CAP_STORAGE`, does not route the device through VFS/FAT, and
@@ -187,6 +192,12 @@ adapter alone with `-Wall -Wextra -Werror` and verifies:
 - live power, clock/reset, and presence snapshots are refreshed;
 - the last non-zero interrupt survives a later zero/acknowledged status.
 
+`bash tests/run_mbr_fat32_test.sh` verifies MBR signature handling, supported
+primary FAT32 type bytes, boot flags, non-zero ranges, and 32-bit overflow
+rejection. `bash tests/run_block_view_fat32_test.sh` mounts a synthetic FAT32
+volume at a non-zero physical LBA and proves that root-directory reads stay
+relative to the bounded view.
+
 `bash tests/run_rpi_mailbox_test.sh` builds the production mailbox code against
 a simulated FIFO. It verifies:
 
@@ -219,7 +230,7 @@ requested from firmware and passed to the controller only in the opt-in probe.
 2. capture the complete success or failure telemetry across cold boots;
 3. add a targeted controller/board quirk only if the physical fields identify
    a reproducible missing requirement;
-4. parse an MBR or superfloppy FAT boot sector read-only;
+4. validate the reported superfloppy or MBR FAT geometry on physical media;
 5. expose `BOARD_CAP_STORAGE` only after repeatable physical reads;
 6. add four-bit mode and CMD18/CMD12 after single-block reads are stable;
 7. implement writes only after read-only FAT mounting and disposable-card tests
