@@ -26,6 +26,7 @@ typedef struct {
 static irq_handler_entry_t g_irq_handlers[IRQ_HANDLER_SLOTS];
 static volatile uint32_t g_runtime_work_pending;
 static runtime_service_stats_t g_runtime_stats;
+static uint8_t g_runtime_service_active;
 
 /*
  * The normal kernel provides strong implementations in kernel.c and timer.c.
@@ -59,6 +60,7 @@ void runtime_service_reset(void) {
     uint64_t budget_ticks = g_runtime_stats.budget_ticks;
 
     g_runtime_work_pending = 0;
+    g_runtime_service_active = 0;
     g_runtime_stats = (runtime_service_stats_t){0};
     g_runtime_stats.counter_frequency_hz = counter_frequency_hz;
     g_runtime_stats.budget_ticks = budget_ticks;
@@ -70,8 +72,12 @@ void runtime_service_configure_timing(uint64_t counter_frequency_hz,
     g_runtime_stats.budget_ticks = budget_ticks;
 }
 
+int runtime_service_is_active(void) {
+    return g_runtime_service_active != 0U;
+}
+
 void runtime_service_report_work(const runtime_service_work_report_t *report) {
-    if (report == 0) {
+    if (report == 0 || g_runtime_service_active == 0U) {
         return;
     }
 
@@ -96,8 +102,11 @@ void runtime_service_report_work(const runtime_service_work_report_t *report) {
                    &g_runtime_stats.max_input_queue_depth);
     update_max_u32(report->input_queue_high_water,
                    &g_runtime_stats.input_queue_high_water);
-    g_runtime_stats.input_queue_overflow_count +=
-        report->input_queue_overflow_delta;
+    if (report->input_queue_overflow_count >
+        g_runtime_stats.input_queue_overflow_count) {
+        g_runtime_stats.input_queue_overflow_count =
+            report->input_queue_overflow_count;
+    }
 
     g_runtime_stats.last_redraw_count += report->redraw_count;
     g_runtime_stats.total_redraw_count += report->redraw_count;
@@ -154,11 +163,13 @@ uint32_t runtime_service_run_pending(void) {
     }
 
     started = runtime_service_counter_now();
+    g_runtime_service_active = 1U;
 
     if ((work & RUNTIME_WORK_PERIODIC) != 0U) {
         kernel_on_timer_tick();
     }
 
+    g_runtime_service_active = 0U;
     finished = runtime_service_counter_now();
     duration = finished - started;
 
