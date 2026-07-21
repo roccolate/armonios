@@ -51,6 +51,17 @@ typedef struct {
     } data;
 } input_event_t;
 
+/*
+ * Internal producer-queue telemetry. accepted_push_count excludes rejected
+ * full-queue pushes; overflow_count records those rejected pushes explicitly.
+ */
+typedef struct {
+    uint64_t accepted_push_count;
+    uint64_t overflow_count;
+    uint32_t current_depth;
+    uint32_t high_water;
+} input_queue_stats_t;
+
 void input_queue_init(void);
 int input_queue_push(const input_event_t *event);
 int input_queue_poll(input_event_t *event);
@@ -62,6 +73,7 @@ int input_queue_poll(input_event_t *event);
 int input_queue_peek(input_event_t *event);
 int input_queue_poll_char(void);
 int input_queue_available(void);
+void input_queue_get_stats(input_queue_stats_t *stats);
 
 int input_uart_poll(void);
 /*
