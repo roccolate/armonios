@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   apply:
-    if: ${{ !contains(github.event.pull_request.head.sha || github.sha, '[process-lifecycle-applied]') }}
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out lifecycle branch
@@ -22,16 +22,29 @@ jobs:
           ref: agent/process-parent-wait-lifecycle
           fetch-depth: 0
 
-      - name: Apply lifecycle patch
-        run: python3 .github/scripts/apply_process_lifecycle_patch.py
-
-      - name: Remove temporary patch machinery
+      - name: Apply and commit lifecycle patch
+        shell: bash
         run: |
+          set +e
+          python3 .github/scripts/apply_process_lifecycle_patch.py \
+            > .github/process-lifecycle-patch.log 2>&1
+          status=$?
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            cat .github/process-lifecycle-patch.log
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/process-lifecycle-patch.log
+            git commit -m "Capture process lifecycle patch failure [patch-diagnostic]"
+            git push origin HEAD:agent/process-parent-wait-lifecycle
+            exit "$status"
+          fi
+
+          rm -f .github/process-lifecycle-patch.log
           rm -f .github/scripts/apply_process_lifecycle_patch.py
           rm -f .github/workflows/apply-process-lifecycle.yml
 
-      - name: Commit patched tree
-        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
