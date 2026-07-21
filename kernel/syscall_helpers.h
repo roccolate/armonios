@@ -32,6 +32,7 @@ int64_t sys_user_buf_in(const process_t *process, uint64_t ptr, uint64_t len);
 int64_t sys_user_buf_out(const process_t *process, uint64_t ptr, uint64_t len);
 int64_t sys_copy_from_user(const process_t *process, void *out, uint64_t ptr,
                            uint64_t len);
+void sys_copy_to_user_validated(uint64_t ptr, const void *input, uint64_t len);
 int64_t sys_copy_to_user(const process_t *process, uint64_t ptr,
                          const void *input, uint64_t len);
 int64_t sys_user_copy_cstr(const process_t *process, uint64_t ptr,
