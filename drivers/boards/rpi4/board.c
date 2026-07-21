@@ -3,11 +3,7 @@
 #include "irq/gicv2.h"
 #include "kernel/kernel_compiler.h"
 #include "kernel/mm/vmm.h"
-#include "storage/emmc.h"
 #include "uart/pl011.h"
-
-static emmc_device_t g_emmc_dev;
-static int g_emmc_initialized = 0;
 
 static volatile uint32_t *mailbox_reg(uint32_t offset) {
     return (volatile uint32_t *)(RPI4_MAILBOX_BASE + offset);
@@ -34,7 +30,12 @@ const char *board_name(void) {
 }
 
 uint32_t board_capabilities(void) {
-    return BOARD_CAP_STORAGE;
+    /*
+     * The RPi4 backend is a serial-only build target until physical hardware
+     * evidence exists. In particular, the current eMMC code is experimental
+     * scaffolding and must not be advertised to generic kernel code.
+     */
+    return 0U;
 }
 
 void board_early_init(void) {
@@ -94,14 +95,6 @@ int board_map_mmio(uint64_t *pgd) {
         return status;
     }
 
-    status = vmm_map_range(pgd, RPI4_VIRTIO_MMIO_BASE,
-                           RPI4_VIRTIO_MMIO_BASE,
-                           RPI4_VIRTIO_MMIO_SIZE,
-                           VMM_FLAG_READ | VMM_FLAG_WRITE | VMM_FLAG_DEVICE);
-    if (status != 0) {
-        return status;
-    }
-
     status = vmm_map_range(pgd, RPI4_MAILBOX_BASE,
                            RPI4_MAILBOX_BASE,
                            RPI4_MAILBOX_SIZE,
@@ -110,54 +103,44 @@ int board_map_mmio(uint64_t *pgd) {
         return status;
     }
 
-    status = vmm_map_range(pgd, RPI4_EMMC_BASE,
-                           RPI4_EMMC_BASE,
-                           0x1000,
-                           VMM_FLAG_READ | VMM_FLAG_WRITE | VMM_FLAG_DEVICE);
-    if (status != 0) {
-        return status;
-    }
-
     return 0;
 }
 
+/*
+ * Storage intentionally fails closed. These entry points remain only to keep
+ * the board contract link-complete while the BCM2711 eMMC path is rewritten
+ * and validated on physical hardware.
+ */
 int board_emmc_read(uint32_t lba, uint32_t count, void *buffer) {
-    if (!g_emmc_initialized) {
-        if (emmc_init(&g_emmc_dev, RPI4_EMMC_BASE) != 0) {
-            return -1;
-        }
-        g_emmc_initialized = 1;
-    }
-
-    return emmc_read_sector(&g_emmc_dev, lba, count, buffer);
+    (void)lba;
+    (void)count;
+    (void)buffer;
+    return -1;
 }
 
 int board_emmc_write(uint32_t lba, uint32_t count, const void *buffer) {
-    if (!g_emmc_initialized) {
-        if (emmc_init(&g_emmc_dev, RPI4_EMMC_BASE) != 0) {
-            return -1;
-        }
-        g_emmc_initialized = 1;
-    }
-
-    return emmc_write_sector(&g_emmc_dev, lba, count, buffer);
+    (void)lba;
+    (void)count;
+    (void)buffer;
+    return -1;
 }
 
 int board_storage_read(uint32_t lba, uint32_t count, void *buffer) {
-    return board_emmc_read(lba, count, buffer);
+    (void)lba;
+    (void)count;
+    (void)buffer;
+    return -1;
 }
 
 int board_storage_write(uint32_t lba, uint32_t count, const void *buffer) {
-    return board_emmc_write(lba, count, buffer);
+    (void)lba;
+    (void)count;
+    (void)buffer;
+    return -1;
 }
 
 int board_storage_init(void) {
-    if (emmc_init(&g_emmc_dev, RPI4_EMMC_BASE) != 0) {
-        g_emmc_initialized = 0;
-        return -1;
-    }
-    g_emmc_initialized = 1;
-    return 0;
+    return -1;
 }
 
 int board_display_init(board_display_draw_fn_t draw, void *context) {
