@@ -8,19 +8,6 @@ static void store_u64(uint8_t *dst, uint64_t value) {
     }
 }
 
-static int argv_string_is_bounded(const panel_boot_argv_t *argv,
-                                  uint16_t offset) {
-    if (offset >= argv->bytes_used) {
-        return 0;
-    }
-    for (uint16_t i = offset; i < argv->bytes_used; i++) {
-        if (argv->bytes[i] == '\0') {
-            return 1;
-        }
-    }
-    return 0;
-}
-
 int panel_boot_place_argv_on_stack(uint8_t *stack, uint64_t stack_base,
                                    uint64_t stack_size,
                                    const panel_boot_argv_t *argv,
@@ -45,7 +32,7 @@ int panel_boot_place_argv_on_stack(uint8_t *stack, uint64_t stack_base,
         return -1;
     }
     for (uint32_t i = 0; i < argc; i++) {
-        if (!argv_string_is_bounded(argv, argv->offsets[i])) {
+        if (argv->offsets[i] >= argv->bytes_used) {
             return -1;
         }
     }
