@@ -1,0 +1,180 @@
+name: Readdir test edit helper
+
+on:
+  push:
+    branches:
+      - agent/readdir-kernel-buffer
+
+permissions:
+  contents: write
+
+jobs:
+  edit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/readdir-kernel-buffer
+      - name: Apply exact test updates
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/test_vfs.c')
+          text = path.read_text()
+          old = '''static int test_list_static(void *context, uint8_t *buffer, uint64_t capacity,
+                                      uint64_t *bytes_written) {
+              const char *text = (const char *)context;
+              uint64_t count = 0;
+
+              if (bytes_written != 0) {
+                  *bytes_written = 0;
+              }
+              if (text == 0 || buffer == 0 || bytes_written == 0) {
+                  return -1;
+              }
+
+              while (text[count] != '\\0' && count < capacity) {
+                  buffer[count] = (uint8_t)text[count];
+                  count++;
+              }
+              *bytes_written = count;
+              return 0;
+          }
+          '''
+          new = '''static int test_list_static(void *context, uint64_t offset,
+                                      uint8_t *buffer, uint64_t capacity,
+                                      uint64_t *bytes_written) {
+              const char *text = (const char *)context;
+              uint64_t length = 0;
+              uint64_t count = 0;
+
+              if (bytes_written != 0) {
+                  *bytes_written = 0;
+              }
+              if (text == 0 || buffer == 0 || bytes_written == 0) {
+                  return -1;
+              }
+
+              while (text[length] != '\\0') {
+                  length++;
+              }
+              if (offset > length) {
+                  return 0;
+              }
+              while (offset + count < length && count < capacity) {
+                  buffer[count] = (uint8_t)text[offset + count];
+                  count++;
+              }
+              *bytes_written = count;
+              return 0;
+          }
+          '''
+          if old not in text:
+              if new not in text:
+                  raise SystemExit('test_list_static block not found')
+          else:
+              text = text.replace(old, new, 1)
+
+          old = '''    for (uint64_t i = 0; i < bytes_written; i++) {
+                  TEST_ASSERT_EQUAL_UINT64((uint64_t)((const uint8_t *)"/boot/us")[i],
+                                           buffer[i]);
+              }
+          }
+          '''
+          new = '''    for (uint64_t i = 0; i < bytes_written; i++) {
+                  TEST_ASSERT_EQUAL_UINT64((uint64_t)((const uint8_t *)"/boot/us")[i],
+                                           buffer[i]);
+              }
+
+              for (uint64_t i = 0; i < sizeof(buffer); i++) {
+                  buffer[i] = 0;
+              }
+              bytes_written = 0;
+              TEST_ASSERT_EQUAL_UINT64(0,
+                                       (uint64_t)vfs_list_at("/", 6, buffer, 4,
+                                                             &bytes_written));
+              TEST_ASSERT_EQUAL_UINT64(4, bytes_written);
+              TEST_ASSERT_EQUAL_UINT64('u', buffer[0]);
+              TEST_ASSERT_EQUAL_UINT64('s', buffer[1]);
+              TEST_ASSERT_EQUAL_UINT64('e', buffer[2]);
+              TEST_ASSERT_EQUAL_UINT64('r', buffer[3]);
+          }
+          '''
+          if old not in text:
+              if new not in text:
+                  raise SystemExit('root list assertion block not found')
+          else:
+              text = text.replace(old, new, 1)
+
+          old = '''    TEST_ASSERT_EQUAL_UINT64('o', buffer[0]);
+              TEST_ASSERT_EQUAL_UINT64('k', buffer[1]);
+              TEST_ASSERT_EQUAL_UINT64('\\n', buffer[2]);
+          }
+          '''
+          new = '''    TEST_ASSERT_EQUAL_UINT64('o', buffer[0]);
+              TEST_ASSERT_EQUAL_UINT64('k', buffer[1]);
+              TEST_ASSERT_EQUAL_UINT64('\\n', buffer[2]);
+
+              bytes_written = 0;
+              TEST_ASSERT_EQUAL_UINT64(0,
+                                       (uint64_t)vfs_list_at("/fat", 1, buffer, 2,
+                                                             &bytes_written));
+              TEST_ASSERT_EQUAL_UINT64(2, bytes_written);
+              TEST_ASSERT_EQUAL_UINT64('k', buffer[0]);
+              TEST_ASSERT_EQUAL_UINT64('\\n', buffer[1]);
+          }
+          '''
+          if old not in text:
+              if new not in text:
+                  raise SystemExit('mount list assertion block not found')
+          else:
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+
+          path = Path('tests/test_fat32.c')
+          text = path.read_text()
+          old = '''    for (uint64_t i = 0; i < bytes_written; i++) {
+                  TEST_ASSERT_EQUAL_UINT64(expected[i], buffer[i]);
+              }
+          }
+
+          void test_fat32_mount_vfs_root_lists_through_vfs(void) {
+          '''
+          new = '''    for (uint64_t i = 0; i < bytes_written; i++) {
+                  TEST_ASSERT_EQUAL_UINT64(expected[i], buffer[i]);
+              }
+
+              for (uint64_t i = 0; i < sizeof(buffer); i++) {
+                  buffer[i] = 0;
+              }
+              bytes_written = 0;
+              TEST_ASSERT_EQUAL_UINT64(0,
+                                       (uint64_t)fat32_list_root_at(
+                                           &fs, 6, buffer, 4, &bytes_written));
+              TEST_ASSERT_EQUAL_UINT64(4, bytes_written);
+              TEST_ASSERT_EQUAL_UINT64('T', buffer[0]);
+              TEST_ASSERT_EQUAL_UINT64('X', buffer[1]);
+              TEST_ASSERT_EQUAL_UINT64('T', buffer[2]);
+              TEST_ASSERT_EQUAL_UINT64('\\n', buffer[3]);
+          }
+
+          void test_fat32_mount_vfs_root_lists_through_vfs(void) {
+          '''
+          if old not in text:
+              if new not in text:
+                  raise SystemExit('FAT32 list assertion block not found')
+          else:
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+      - name: Commit exact updates
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/test_vfs.c tests/test_fat32.c
+          git commit -m "Update listing tests for offset-aware callbacks"
+          git push origin HEAD:agent/readdir-kernel-buffer
