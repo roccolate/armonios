@@ -6,7 +6,7 @@ This document describes the implementation as it exists, including known archite
 
 ## Privilege model
 
-- **EL1:** kernel, drivers, VFS, GUI compositor, exception handling, syscall dispatch, and cooperative helper threads.
+- **EL1:** kernel, drivers, VFS, GUI compositor, exception handling, syscall dispatch, the post-EOI deferred runtime service, and cooperative helper threads.
 - **EL0:** freestanding KLI1 applications.
 - **EL2/EL3:** not used by the verified QEMU path. A physical board may enter at EL2 and needs a deliberate transition before normal kernel initialization.
 
@@ -31,7 +31,7 @@ kernel_main
   -> console and heap
   -> VMM/MMU identity mapping
   -> VFS, bootfs, tmpfs
-  -> timer, IRQs, EL0 dispatch
+  -> timer, IRQs, EL0 dispatch, deferred-runtime state
   -> optional storage and FAT32
   -> optional virtio GPU
   -> optional network
@@ -93,21 +93,28 @@ EL0 dispatch uses `process_dispatch_next()` and a round-robin scan of ready slot
 EL0 processes are preemptive in the current architecture:
 
 - IRQ entry saves the interrupted process frame;
-- timer handling runs;
+- the physical timer callback accounts/rearms and publishes one coalescible periodic-work bit;
+- the generic IRQ dispatcher sends EOI and runs one deferred runtime-service pass;
 - the dispatcher may select another ready process;
 - the selected process TTBR0 and trap frame are activated before exception return.
 
 Voluntary yield and exit/fault paths share the same process activation logic.
 
+### Deferred runtime service
+
+Timer-originated device, GUI, and network work is represented by a zero-initialized pending bitmask. Repeated periodic requests coalesce. The consumer clears its snapshot before invoking the backend, so work published during a pass remains pending for a later pass rather than being lost.
+
+The current consumer runs after `board_irq_end()` and before EL0 dispatch. This removes subsystem polling from the physical timer callback and makes the hard-IRQ handler bounded, but it is still a non-preemptible EL1 bottom half. It is not yet a separately scheduled kernel thread. `RISK-017` tracks duration measurement, per-pass budgets, starvation resistance, and the later decision to promote it into a wakeable thread. See `RUNTIME_SERVICE.md` for the exact contract and verification boundary.
+
 ### EL1 helper threads
 
-The scheduler under `kernel/sched/` is cooperative. It is used for EL1 helper work such as console/input polling. The timer updates scheduler counters but does not preempt an executing EL1 helper thread.
+The scheduler under `kernel/sched/` is cooperative. It is used for EL1 helper work such as console input. The timer updates scheduler counters but does not preempt an executing EL1 helper thread. The deferred runtime service is separate from this scheduler because the current helper-thread model does not interleave a wakeable EL1 service while the long-lived panel executes in EL0.
 
 Therefore the accurate description is:
 
-> preemptive EL0 processes with cooperative EL1 helper threads.
+> preemptive EL0 processes, a post-EOI deferred runtime bottom half, and cooperative EL1 helper threads.
 
-`RISK-010` tracks this documentation and future-design distinction.
+`RISK-010` tracks the helper-thread scheduling distinction; `RISK-017` tracks deferred-runtime budgeting.
 
 ## Exceptions and faults
 
@@ -194,6 +201,8 @@ Windows carry an owner PID. Most mutating syscalls require ownership. A small se
 
 Normal application wrappers request focus after creating a window. The kernel still enforces `GUI_WINDOW_NO_FOCUS`, and `tools/qemu_focus_test.sh` verifies the focus syscall path. The files-to-editor focus workflow has existing manual confirmation from rocco on 2026-07-17.
 
+Timer-originated GUI event routing and dirty redraw now execute through the deferred runtime service after EOI. Syscalls may still mark compositor state dirty immediately, but the timer callback itself does not render or drain GUI input. The current service pass can still process an unbounded queue and a full redraw; that limitation is tracked by `RISK-017`.
+
 ## Input and device polling
 
 Input events enter one shared queue from:
@@ -202,13 +211,17 @@ Input events enter one shared queue from:
 - virtio-input;
 - directly attached USB boot-protocol HID devices.
 
-The kernel polls several devices from both the timer path and helper loop. This is intentionally simple but should be treated carefully if concurrency, SMP, or more EL1 threads are introduced.
+The physical timer callback no longer invokes UART, board-input, USB-HID, GUI, or network routines. It publishes `RUNTIME_WORK_PERIODIC`; after EOI, the single deferred runtime service polls board/USB producers, routes queued GUI events, flushes dirty redraw, and polls the network. The serial-console helper and syscall boundary retain their explicit input servicing paths for compatibility, but timer-originated periodic work has one consumer and one coalescing pending state.
+
+The service currently drains all available input events in one pass. There is no event budget, duration metric, or sustained-load progress proof yet. Those limits are explicit under `RISK-017` rather than being hidden inside the IRQ path.
 
 USB support is currently a basic QEMU xHCI path with directly attached keyboard/mouse devices. USB hubs are not supported.
 
 ## Networking
 
 The network code is a small direct stack over virtio-net containing enough Ethernet, ARP, IPv4, UDP, and DHCP behavior to obtain a QEMU user-network lease.
+
+Timer-originated `net_poll()` execution is deferred until after EOI through the runtime service. The service does not yet cap receive work per pass or expose a socket scheduler; network load can therefore contribute to the open runtime-budget risk.
 
 There is no application socket ABI, TCP, general UDP API, DNS query implementation, or HTTP client.
 
@@ -255,7 +268,7 @@ Monitor while preserving the KLI1 storage contract.
 
 Native host tests exercise pure-C contracts and mocked driver paths. They provide good regression coverage for logic, but they cannot prove device MMIO or full exception-return behavior.
 
-`qemu-fs-test`, `tools/qemu_marker_test.sh`, `tools/qemu_focus_test.sh`, `tools/qemu_usercopy_test.sh`, and `tools/qemu_fb_fat_test.sh` are deterministic because they capture guest serial output and check required markers. They do not replace visible manual workflow evidence.
+`tests/run_runtime_service_test.sh` verifies coalescing, requeue preservation, post-EOI ordering, and a static forbidden-call boundary for `kernel/timer/timer.c`. `qemu-fs-test`, `tools/qemu_marker_test.sh`, `tools/qemu_focus_test.sh`, `tools/qemu_usercopy_test.sh`, and `tools/qemu_fb_fat_test.sh` capture guest serial output and check required markers. They do not replace visible manual workflow evidence or sustained-load latency tests.
 
 Release evidence must always state whether it came from:
 
@@ -270,9 +283,10 @@ Release evidence must always state whether it came from:
 
 Near-term architectural priorities are:
 
-1. finish v0.2 hardening: fault-contained user copies and any remaining syscall-boundary audits;
-2. v0.3 storage platform: richer block-device metadata, common path resolution, and structured filesystem ABI;
-3. v0.4 real FAT: long names, directories, broader partition handling, and persistence tests;
-4. v0.5-v0.6 userland runtime, widgets, and useful desktop applications;
-5. v0.7 ext2 read-only support;
-6. ongoing hardening: fault-contained copies, TTBR1 kernel mappings, ASIDs, scoped TLB invalidation, and physical RPi evidence when the hardware track resumes.
+1. bound the deferred runtime service: duration instrumentation, per-pass work budgets, preserved pending work, and EL0-progress stress tests;
+2. finish v0.2 hardening: fault-contained user copies and any remaining syscall-boundary audits;
+3. v0.3 storage platform: richer block-device metadata, common path resolution, and structured filesystem ABI;
+4. v0.4 real FAT: long names, directories, broader partition handling, and persistence tests;
+5. v0.5-v0.6 userland runtime, widgets, and useful desktop applications;
+6. v0.7 ext2 read-only support;
+7. ongoing hardening: TTBR1 kernel mappings, ASIDs, scoped TLB invalidation, and physical RPi evidence when the hardware track resumes.
