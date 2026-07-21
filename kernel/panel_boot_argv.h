@@ -6,18 +6,20 @@
 #define PANEL_BOOT_ARGV_MAX_STRINGS 8U
 #define PANEL_BOOT_ARGV_MAX_BYTES   256U
 
+typedef struct {
+    uint16_t offsets[PANEL_BOOT_ARGV_MAX_STRINGS];
+    uint16_t bytes_used;
+    char bytes[PANEL_BOOT_ARGV_MAX_BYTES];
+} panel_boot_argv_t;
+
 /*
- * Pack kernel-owned argv strings and the argv pointer array into a new EL0
- * stack. Syscall callers must copy the pointer array and every string across
- * the EL0 boundary before invoking the app loader.
- *
- * `stack` is the kernel-accessible backing memory for the user stack, mapped
- * at `stack_base` for the process. The returned argv vaddr is also the initial
- * SP for argc > 0 and is always 16-byte aligned for AArch64.
+ * Pack a kernel-owned argv byte block into a new EL0 stack. Each offset names
+ * one NUL-terminated string inside `bytes`; no source pointers cross into the
+ * loader.
  */
 int panel_boot_place_argv_on_stack(uint8_t *stack, uint64_t stack_base,
                                    uint64_t stack_size,
-                                   const uint64_t *argv_ptr,
+                                   const panel_boot_argv_t *argv,
                                    uint32_t argc,
                                    uint64_t *out_argv_vaddr);
 
