@@ -564,10 +564,26 @@ int vfs_stat(const char *path, vfs_stat_t *stat) {
     return vfs_node_size(node, &stat->size);
 }
 
-int vfs_list(const char *path, uint8_t *buffer, uint64_t capacity,
-             uint64_t *bytes_written) {
+static int vfs_list_emit_byte(uint64_t offset, uint8_t *buffer,
+                              uint64_t capacity, uint64_t *position,
+                              uint64_t *out, uint8_t value) {
+    if (*position >= offset) {
+        if (*out >= capacity) {
+            return -1;
+        }
+        buffer[*out] = value;
+        (*out)++;
+    }
+    (*position)++;
+    return 0;
+}
+
+int vfs_list_at(const char *path, uint64_t offset, uint8_t *buffer,
+                uint64_t capacity, uint64_t *bytes_written) {
     vfs_mount_t *mount;
+    uint64_t position = 0;
     uint64_t out = 0;
+    int status;
 
     if (bytes_written != 0) {
         *bytes_written = 0;
@@ -580,8 +596,13 @@ int vfs_list(const char *path, uint8_t *buffer, uint64_t capacity,
 
     mount = vfs_find_mount_exact(path);
     if (mount != 0 && mount->ops.list != 0) {
-        return mount->ops.list(mount->context, buffer, capacity,
-                               bytes_written);
+        status = mount->ops.list(mount->context, offset, buffer, capacity,
+                                 bytes_written);
+        if (status != 0 || *bytes_written > capacity) {
+            *bytes_written = 0;
+            return status != 0 ? status : -1;
+        }
+        return 0;
     }
 
     if (!kstreq(path, "/")) {
@@ -596,22 +617,28 @@ int vfs_list(const char *path, uint8_t *buffer, uint64_t capacity,
         }
 
         while (*node_path != '\0') {
-            if (out >= capacity) {
+            if (vfs_list_emit_byte(offset, buffer, capacity, &position, &out,
+                                   (uint8_t)*node_path) != 0) {
                 *bytes_written = out;
                 return 0;
             }
-            buffer[out++] = (uint8_t)*node_path++;
+            node_path++;
         }
 
-        if (out >= capacity) {
+        if (vfs_list_emit_byte(offset, buffer, capacity, &position, &out,
+                               (uint8_t)'\n') != 0) {
             *bytes_written = out;
             return 0;
         }
-        buffer[out++] = (uint8_t)'\n';
     }
 
     *bytes_written = out;
     return 0;
+}
+
+int vfs_list(const char *path, uint8_t *buffer, uint64_t capacity,
+             uint64_t *bytes_written) {
+    return vfs_list_at(path, 0, buffer, capacity, bytes_written);
 }
 
 int vfs_open_flags(const char *path, uint32_t flags) {
