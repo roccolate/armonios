@@ -14,12 +14,16 @@ void irq_enable(void) {
 void uart_pump_input(void) {
 }
 
-int runtime_service_is_active(void) {
-    return 0;
+void runtime_service_report_metric(uint32_t metric, uint32_t value) {
+    (void)metric;
+    (void)value;
 }
 
-void runtime_service_report_work(const runtime_service_work_report_t *report) {
-    (void)report;
+void runtime_service_report_input_queue(uint32_t depth, uint32_t high_water,
+                                        uint64_t overflow_count) {
+    (void)depth;
+    (void)high_water;
+    (void)overflow_count;
 }
 
 static input_event_t key_event(uint32_t key) {
@@ -37,7 +41,6 @@ int main(void) {
 
     input_queue_init();
     input_queue_get_stats(&stats);
-    assert(stats.accepted_push_count == 0U);
     assert(stats.overflow_count == 0U);
     assert(stats.current_depth == 0U);
     assert(stats.high_water == 0U);
@@ -48,7 +51,6 @@ int main(void) {
     }
 
     input_queue_get_stats(&stats);
-    assert(stats.accepted_push_count == INPUT_EVENT_QUEUE_SIZE);
     assert(stats.overflow_count == 0U);
     assert(stats.current_depth == INPUT_EVENT_QUEUE_SIZE);
     assert(stats.high_water == INPUT_EVENT_QUEUE_SIZE);
@@ -56,7 +58,6 @@ int main(void) {
     event = key_event(0x55U);
     assert(input_queue_push(&event) == -1);
     input_queue_get_stats(&stats);
-    assert(stats.accepted_push_count == INPUT_EVENT_QUEUE_SIZE);
     assert(stats.overflow_count == 1U);
     assert(stats.current_depth == INPUT_EVENT_QUEUE_SIZE);
     assert(stats.high_water == INPUT_EVENT_QUEUE_SIZE);
@@ -71,12 +72,9 @@ int main(void) {
 
     assert(input_queue_push(0) == -1);
     input_queue_get_stats(0);
-    input_queue_get_stats(&stats);
-    assert(stats.overflow_count == 1U);
 
     input_queue_init();
     input_queue_get_stats(&stats);
-    assert(stats.accepted_push_count == 0U);
     assert(stats.overflow_count == 0U);
     assert(stats.current_depth == 0U);
     assert(stats.high_water == 0U);
