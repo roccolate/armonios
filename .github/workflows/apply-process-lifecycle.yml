@@ -25,6 +25,24 @@ jobs:
       - name: Apply and commit lifecycle patch
         shell: bash
         run: |
+          rm -f .github/process-lifecycle-patch.log
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/apply_process_lifecycle_patch.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''    "(void)process_reclaim_zombies();",
+              "(void)process_reclaim_orphan_zombies();",
+              2,
+          )'''
+          new = '''    "(void)process_reclaim_zombies();",
+              "(void)process_reclaim_orphan_zombies();",
+              3,
+          )'''
+          if text.count(old) != 1:
+              raise SystemExit('unable to locate lifecycle occurrence count')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
           set +e
           python3 .github/scripts/apply_process_lifecycle_patch.py \
             > .github/process-lifecycle-patch.log 2>&1
