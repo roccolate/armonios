@@ -88,7 +88,8 @@ static void twenty_rectangles_complete_as_eight_eight_four(void) {
     assert(g_clear_calls == 0U);
     assert(stats.metric_last[RUNTIME_METRIC_REDRAW] == 1U);
     assert(stats.metric_last[RUNTIME_METRIC_DAMAGE_ITEMS] == 8U);
-    assert(stats.redraw_budget_exhaustion_count == 1U);
+    assert(stats.metric_last[RUNTIME_METRIC_REDRAW_EXHAUSTIONS] == 1U);
+    assert(stats.metric_total[RUNTIME_METRIC_REDRAW_EXHAUSTIONS] == 1U);
 
     runtime_service_request(RUNTIME_WORK_PERIODIC);
     assert(runtime_service_run_pending() == RUNTIME_WORK_PERIODIC);
@@ -100,7 +101,8 @@ static void twenty_rectangles_complete_as_eight_eight_four(void) {
     assert(g_clear_calls == 0U);
     assert(stats.metric_last[RUNTIME_METRIC_DAMAGE_ITEMS] == 8U);
     assert(stats.metric_total[RUNTIME_METRIC_DAMAGE_ITEMS] == 16U);
-    assert(stats.redraw_budget_exhaustion_count == 2U);
+    assert(stats.metric_last[RUNTIME_METRIC_REDRAW_EXHAUSTIONS] == 1U);
+    assert(stats.metric_total[RUNTIME_METRIC_REDRAW_EXHAUSTIONS] == 2U);
 
     runtime_service_request(RUNTIME_WORK_PERIODIC);
     assert(runtime_service_run_pending() == RUNTIME_WORK_PERIODIC);
@@ -112,7 +114,8 @@ static void twenty_rectangles_complete_as_eight_eight_four(void) {
     assert(stats.metric_last[RUNTIME_METRIC_DAMAGE_ITEMS] == 4U);
     assert(stats.metric_total[RUNTIME_METRIC_DAMAGE_ITEMS] == 20U);
     assert(stats.metric_total[RUNTIME_METRIC_REDRAW] == 3U);
-    assert(stats.redraw_budget_exhaustion_count == 2U);
+    assert(stats.metric_last[RUNTIME_METRIC_REDRAW_EXHAUSTIONS] == 0U);
+    assert(stats.metric_total[RUNTIME_METRIC_REDRAW_EXHAUSTIONS] == 2U);
 }
 
 static void failed_redraw_preserves_all_damage(void) {
@@ -131,7 +134,7 @@ static void failed_redraw_preserves_all_damage(void) {
     assert(g_clear_calls == 0U);
     assert(stats.metric_total[RUNTIME_METRIC_REDRAW] == 0U);
     assert(stats.metric_total[RUNTIME_METRIC_DAMAGE_ITEMS] == 0U);
-    assert(stats.redraw_budget_exhaustion_count == 0U);
+    assert(stats.metric_total[RUNTIME_METRIC_REDRAW_EXHAUSTIONS] == 0U);
 
     g_draw_success = 1U;
     runtime_service_request(RUNTIME_WORK_PERIODIC);
@@ -160,17 +163,17 @@ static void full_redraw_is_one_successful_operation(void) {
     assert(stats.metric_last[RUNTIME_METRIC_REDRAW] == 1U);
     assert(stats.metric_last[RUNTIME_METRIC_FULL_REDRAWS] == 1U);
     assert(stats.metric_last[RUNTIME_METRIC_DAMAGE_ITEMS] == 0U);
-    assert(stats.redraw_budget_exhaustion_count == 0U);
+    assert(stats.metric_last[RUNTIME_METRIC_REDRAW_EXHAUSTIONS] == 0U);
 }
 
 static void reset_clears_redraw_exhaustion(void) {
     prepare(20U, 0U, 1U);
     runtime_service_request(RUNTIME_WORK_PERIODIC);
     (void)runtime_service_run_pending();
-    assert(snapshot().redraw_budget_exhaustion_count == 1U);
+    assert(snapshot().metric_total[RUNTIME_METRIC_REDRAW_EXHAUSTIONS] == 1U);
 
     runtime_service_reset();
-    assert(snapshot().redraw_budget_exhaustion_count == 0U);
+    assert(snapshot().metric_total[RUNTIME_METRIC_REDRAW_EXHAUSTIONS] == 0U);
 }
 
 int main(void) {
