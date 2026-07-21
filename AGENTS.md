@@ -8,14 +8,27 @@ ArmoniOS is a **v0.1 QEMU desktop baseline** and an active **v0.2
 cleanup/runtime-hardening candidate**. It is a real freestanding AArch64
 operating system, not a Linux application or distribution.
 
-The runtime foundation measures requests, coalescing, requeues,
-last/maximum/cumulative generic-counter duration, interval overruns, input
-produced/consumed, successful redraws, consumed virtio-net RX frames, and input
-queue depth/high-water/overflow.
+Runtime measurement Phase 1B is complete for the work classes currently
+observable on QEMU. The kernel records:
 
-Measurement does not complete v0.2. The service still has no class budgets,
-global deadline, reliable network device-drop signal, or sustained-load QEMU
-proof of EL0 progress. Track remaining work in issue #43 and RISK-017.
+- runtime requests, coalescing, requeue, non-empty and empty passes;
+- last, maximum, and cumulative generic-counter duration;
+- one-timer-interval overruns;
+- input events produced and consumed;
+- shared input queue depth, lifetime high-water, and overflow;
+- USB HID polling operations that reach xHCI;
+- valid virtio-net RX frames consumed;
+- successful redraw submissions;
+- merged partial-damage rectangles and full-redraw fallbacks.
+
+Measurement does not complete v0.2. No work class has a per-pass budget, there
+is no global deadline, budget-exhausted work has no class-specific pending-bit
+rule, and no sustained-load QEMU test proves EL0 progress. Track this work in
+issue #43 and `RISK-017`.
+
+The virtio-net path has 16 RX descriptors but exposes no trustworthy device-drop
+or ring-overflow counter. Do not invent one or infer “no drops” from consumed
+frame counts.
 
 Issue #2 is the **v0.6 useful desktop applications** milestone. Do not treat it
 as v1.1 work or use it to bypass v0.3 storage/VFS, v0.4 real FAT, and v0.5 shared
@@ -46,31 +59,29 @@ must never be used as evidence that a feature exists.
 
 - EL0 processes are preemptive.
 - EL1 helper threads are cooperative.
-- Timer-originated GUI, input, device, and network work runs in one post-EOI
-  bottom half.
+- Timer-originated input, GUI, USB, and network work runs in one post-EOI bottom
+  half.
 - EOI is not exception return: EL0 remains paused and the vector's IRQ-mask state
   is preserved while the pass executes.
-- `irq_disable()`/`irq_enable()` are nested state-preserving helpers; do not
-  replace them with unconditional DAIF clear/set pairs.
+- `irq_disable()` and `irq_enable()` are nested state-preserving helpers; do not
+  replace them with unconditional DAIF operations.
 - The timer callback is bounded; the complete exception path is measured but not
-  yet bounded.
-- Timing uses `CNTPCT_EL0`; `CNTFRQ_EL0` supplies conversion; one timer interval
-  is only an observation threshold.
-- Work-class reports are accepted only during the active runtime pass so console
-  thread activity is not mixed into bottom-half telemetry.
+  bounded.
+- Timing uses `CNTPCT_EL0`; `CNTFRQ_EL0` supplies conversion. One timer interval
+  is an observation threshold, not the final budget.
+- Work-class reports are accepted only during the active runtime pass, excluding
+  cooperative console-thread work.
 - Input overflow is counted but not prevented.
-- Consumed network frames are measured, but the 16-descriptor virtio RX path has
-  no reliable device-drop/ring-overflow counter.
-- Device operations and compositor damage/full-redraw batches are not yet
-  measured.
-- Runtime telemetry is kernel-internal. Do not expose the internal structure
-  directly as a syscall ABI.
+- Network frames consumed are measurable; device-level RX loss is not.
+- Redraw submissions, partial-damage items, and full redraws are separate metrics.
+- Runtime telemetry is kernel-internal. Do not copy its internal structure into a
+  syscall ABI.
 - Pending state and telemetry assume one CPU and one consumer; they are not
   SMP-safe synchronization.
 - User-copy permission validation exists, but final copies are not
   fault-recoverable.
-- Each process still carries kernel mappings in TTBR0; TTBR1, ASIDs, and scoped
-  TLB invalidation are future hardening.
+- Every process still carries kernel mappings in TTBR0; TTBR1, ASIDs, and scoped
+  TLB invalidation remain future hardening.
 - FAT32 is root-directory 8.3 only.
 - QEMU is the only verified runtime platform.
 
@@ -88,9 +99,9 @@ The baseline includes:
 - `.data == 0` and the 108000-byte kernel limit;
 - RPi4 EMMC2 diagnostic, MBR, and block-view gates;
 - native kernel, VFS, filesystem, GUI, parser, driver, and ABI tests;
-- runtime EOI/coalescing/timing/requeue/reset and indexed input/redraw/network
-  metric checks;
-- static network metric wiring validation;
+- runtime EOI/coalescing/timing/requeue/reset checks;
+- indexed input, network, USB-poll, redraw, damage, and full-redraw metrics;
+- direct partial/full redraw-helper regression and static wiring checks;
 - input queue depth/high-water/overflow regression;
 - parent/wait and process-local FD isolation;
 - user-copy and KLI1 contracts;
@@ -117,12 +128,14 @@ Serial markers are not visible manual validation.
 - Do not add blocking operations, unbounded scans, queue drains, or rendering to a
   hard-IRQ callback.
 - Treat timing and work counts as measurement, not proof of a bound.
-- Keep reports compact and count completed work, not polling attempts.
-- Do not infer “no drops” from consumed-frame counts.
-- Preserve or republish pending work when future budgets expire.
-- Add host tests and deterministic QEMU progress tests for exception/scheduler
-  boundary changes.
+- Count completed work or actual device operations, not generic polling attempts.
+- Do not infer absence of loss from consumption counters.
+- The next runtime changes must split work classes and preserve or republish the
+  relevant pending bit whenever a budget expires.
+- Add budget-exhaustion counters and deterministic EL0 progress tests.
 - Preserve `.data == 0`, W^X, kernel-size, and stack limits.
+- Do not raise the 108000-byte ceiling to make instrumentation fit; compact or
+  redesign first.
 
 ### Syscall or ABI changes
 
@@ -151,11 +164,11 @@ Serial markers are not visible manual validation.
 
 - Keep technical documentation in English.
 - Update from evidence, not intent.
-- Use exact commits and run IDs for promoted baselines.
+- Use exact commits and workflow run IDs for promoted baselines.
 - Separate IMPLEMENTED, HOST-, BUILD-, QEMU-, CI-, MANUAL-, and physical-hardware
   evidence.
 - A validated PR tree is not automatically a separately tested merge commit.
-- Synchronize README, current state, roadmap, risks, and this guide when release
-  state changes.
+- Synchronize README, current state, roadmap, risks, runtime contract, and this
+  guide when release state changes.
 - Do not add archive, historical handoff, duplicate status, or obsolete pre-reset
   references.

@@ -35,7 +35,7 @@ fail closed and no physical support claim is made.
 | RISK-014 | P1 v1 | Desktop applications | OPEN | Blocks v1 usability |
 | RISK-015 | P2 | Fault-contained user copy | OPEN | Future mapping hardening |
 | RISK-016 | P1 | Process lifecycle | CLOSED | Parent/wait correctness |
-| RISK-017 | P1 | Deferred runtime execution | OPEN; INPUT/REDRAW/NETWORK METRICS CANDIDATE | Blocks formal v0.2 |
+| RISK-017 | P1 | Deferred runtime execution | OPEN; MEASUREMENT COMPLETE, BUDGETS ABSENT | Blocks formal v0.2 |
 
 ## Open risks
 
@@ -44,57 +44,67 @@ fail closed and no physical support claim is made.
 **Severity:** P1 runtime hardening  
 **Affected scope:** interrupt-to-EL0 latency, responsiveness, fairness,
 exception-stack occupancy, and v0.2 promotion  
-**Tracking:** issue #43  
-**Aggregate implementation:** PR #44 / `b3fd013`  
-**Input/redraw implementation:** PR #45 / `a3b9b44`  
-**Network frame candidate:** PR #46
+**Tracking:** issue #43
+
+Implementation sequence:
+
+- aggregate timing and request telemetry: PR #44 / `b3fd013`;
+- input, redraw-submission, and input-queue telemetry: PR #45 / `a3b9b44`;
+- consumed network frames: PR #46 / `f60ab28`;
+- USB HID polling operations: PR #47 / `7a6780d`;
+- partial damage and full redraws: PR #48 / `f327868`.
 
 The timer callback performs fixed account/rearm/publication/scheduler work. The
 runtime backend executes after EOI but before process dispatch and `eret`.
 
-#### Measurements implemented or under final validation
+#### Measurements implemented
 
 The internal snapshot records:
 
-- requests, coalescing, non-empty/empty passes, and requeues;
+- requests, coalescing, non-empty and empty passes, and requeues;
 - last, maximum, and cumulative generic-counter duration;
 - passes exceeding one timer interval;
-- input produced by virtio-input and direct USB HID;
-- input consumed from the shared queue during the active bottom half;
-- successful display redraw submissions;
-- valid virtio-net RX frames consumed during the active pass;
+- input events produced by virtio-input and direct USB HID;
+- input events consumed from the shared queue;
 - maximum input queue depth, lifetime high-water, and full-queue overflow;
+- USB HID polling operations that reach xHCI;
+- valid virtio-net RX frames consumed;
+- successful QEMU redraw submissions;
+- merged partial-damage rectangles;
+- full-redraw fallbacks;
 - counter frequency, threshold, pending bits, and last-consumed bits.
 
-Each work class keeps last-pass, maximum-pass, and cumulative counts. Reports
-outside the active pass are ignored so console-thread work is excluded.
+Each indexed class keeps last-pass, maximum-pass, and cumulative counts. Reports
+outside the active pass are ignored so cooperative console work is excluded.
 
 Production timing uses `CNTPCT_EL0`; `CNTFRQ_EL0` provides conversion. At 100 Hz
 the current threshold is approximately 10 ms. It is an observation threshold,
 not the accepted final budget.
 
-#### Network evidence boundary
+#### Evidence boundary
 
-`virtio_net_recv()` reports one network metric only after it returns a valid
-non-empty RX frame during the active runtime pass. This counts completed software
-consumption, not polling attempts.
+The 16-descriptor virtio RX implementation exposes no trustworthy device counter
+for frames dropped, overwritten, or never delivered to software. Consumed-frame
+counts are therefore not proof of zero network loss. This is a documented
+measurement limitation, not a reason to fabricate a counter.
 
-The current 16-descriptor virtio RX implementation exposes no reliable device
-counter for frames dropped, overwritten, or never delivered to software. The
-network metric must not be interpreted as proof that the receive ring lost
-nothing. RX drop/ring-pressure evidence remains open.
+Damage telemetry records merged rectangle count or a full-redraw sentinel after a
+successful QEMU submission. It does not measure pixels, damaged area, GPU
+completion latency, or CPU work spent on a failed submission.
 
-#### Candidate validation
+#### Validation
 
-PR #46 code/test head before documentation:
-`f5b5b69888a9734d482c329d64224b60d62c03d9`.
+Latest validated Phase 1B head:
+`6634c3a6f527433643a56f2c90cc6af8bad62c1d`.
 
-- `Verify ArmoniOS` run `29832730156`: final result must be recorded before merge;
-- `CI - Tests` run `29832730340`: final result must be recorded before merge.
+- `Verify ArmoniOS` run `29840410727`: success;
+- `CI - Tests` run `29840411044`: success;
+- loadable QEMU kernel: 107370 bytes against the 108000-byte ceiling.
 
-The candidate extends the deterministic metric regression with network
-last/max/total and reset checks, and statically verifies the driver wiring. The
-final code/documentation tree must be green before merge.
+The matrix covers deterministic last/max/total accumulation for every current
+class, direct partial/full helper execution, inactive-report rejection, queue
+pressure, static wiring, complete native tests, QEMU/RPi4 builds, stack, FAT32,
+usercopy, focus, framebuffer, USB, and network markers.
 
 #### Why the risk remains open
 
@@ -105,11 +115,12 @@ During the service pass:
 - nested IRQ helpers preserve the vector's prior mask state;
 - EL0 remains paused;
 - the entire input queue may still be drained;
-- USB/device work has no operation budget;
-- network frames are measured but not limited;
-- network device drops/ring overflow are not measurable;
-- redraw damage/full-screen fallback is not measured or bounded;
+- every registered USB HID device may be polled;
+- all available network frames may be drained;
+- redraw work has no batch or time limit;
+- only one periodic pending bit exists;
 - no class or global deadline is enforced;
+- no class-budget or global-deadline exhaustion counter exists;
 - no budget-exhaustion pending-bit rule exists;
 - no sustained-load QEMU heartbeat proves EL0 progress.
 
@@ -118,16 +129,18 @@ only under the current one-consumer model.
 
 **Failure mode:** sustained input, USB, redraw, or network traffic can extend one
 exception path and delay EL0 and other normal IRQ handling. Shared input loss is
-countable; network device loss is not yet observable.
+countable; device-level network loss is not observable through the current
+interface.
 
 **Remaining exit criteria:**
 
-1. measure device operations, damage batches, full-redraw fallbacks, and any
-   honest network RX-drop/ring-pressure signal;
-2. choose independent class limits from measured evidence;
+1. split periodic work into independently pending input, GUI, network, and device
+   classes;
+2. bound network receive, input consumption, USB polling, and redraw work;
 3. enforce a global generic-counter deadline;
-4. preserve or republish specific pending bits when a class/deadline expires;
-5. count every exhaustion and observable loss path;
+4. preserve or republish the relevant pending bit when a class or deadline
+   expires;
+5. count every class and global exhaustion;
 6. add QEMU stress with an EL0 heartbeat under combined load;
 7. retain all current subsystem gates;
 8. record a dated visible desktop pass;
@@ -163,8 +176,8 @@ malformed-image tests, and QEMU nested-directory/persistence gates.
 
 The seven EL0 apps are real, but Files is root-only, Editor is a 512-byte
 caret-line viewport, Shell lacks normal file-management workflows, settings are
-narrow, Monitor is informational, and no shared heap/widget layer or final
-reboot workflow exists.
+narrow, Monitor is informational, and no shared heap/widget layer or final reboot
+workflow exists.
 
 Issue #2 is intentionally v0.6, not v1.1. It depends on v0.3 paths/metadata,
 v0.4 real FAT, and v0.5 shared runtime/widgets.
@@ -181,7 +194,8 @@ ordinary EL1 loads/stores; no exception fixup converts an unexpected translation
 fault into a syscall error.
 
 **Exit criteria:** recoverable copy helpers, exception/fixup tests, preserved
-`ERR_INVAL`/`ERR_PERM`, and proof that bad/racy addresses cannot enter fatal EL1.
+`ERR_INVAL`/`ERR_PERM`, and proof that bad or racy addresses cannot enter fatal
+EL1.
 
 ### RISK-007 — Raspberry Pi storage lacks physical evidence
 
