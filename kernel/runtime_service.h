@@ -6,6 +6,7 @@
 /* Initial count budgets derived from fixed queue/ring capacities. */
 #define RUNTIME_INPUT_EVENT_BUDGET 16U
 #define RUNTIME_NETWORK_FRAME_BUDGET 16U
+#define RUNTIME_REDRAW_DAMAGE_BUDGET 8U
 
 /* Deferred work published from hard IRQ and consumed after EOI. */
 enum {
@@ -40,6 +41,7 @@ typedef struct {
     uint64_t over_budget_count;
     uint64_t input_budget_exhaustion_count;
     uint64_t network_budget_exhaustion_count;
+    uint64_t redraw_budget_exhaustion_count;
     uint64_t counter_frequency_hz;
     uint64_t budget_ticks;
 
@@ -54,6 +56,7 @@ typedef struct {
     uint32_t last_work;
 } runtime_service_stats_t;
 
+struct fb;
 struct input_event;
 
 void runtime_service_request(uint32_t work);
@@ -68,9 +71,11 @@ void runtime_service_report_input_queue(uint32_t depth, uint32_t high_water,
                                         uint64_t overflow_count);
 void runtime_service_get_stats(runtime_service_stats_t *stats);
 
-/* Input and network wrappers used by kernel orchestration and tests. */
+/* Wrappers used by kernel orchestration and deterministic host tests. */
 int runtime_service_input_poll(struct input_event *event);
 void runtime_service_net_poll(void);
+void runtime_service_gui_render(struct fb *fb, void *context);
+void runtime_service_gui_clear_dirty(void);
 
 /* Weak zero clock in irq.c; strong CNTPCT_EL0 implementation in timer.c. */
 uint64_t runtime_service_counter_now(void);
