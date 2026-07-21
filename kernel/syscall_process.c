@@ -35,7 +35,7 @@ int64_t sys_spawn(process_t *process, uint64_t path_ptr,
 int64_t sys_spawn_argv(process_t *process, uint64_t path_ptr,
                        uint64_t entry_index, uint64_t argv_ptr,
                        uint64_t argc) {
-    syscall_kernel_argv_t kernel_argv;
+    panel_boot_argv_t kernel_argv;
     char path[VFS_MAX_PATH];
     int64_t status;
     int pid;
@@ -52,7 +52,7 @@ int64_t sys_spawn_argv(process_t *process, uint64_t path_ptr,
     }
 
     pid = app_spawn_vfs(path, (uint32_t)entry_index,
-                        argc == 0U ? 0 : kernel_argv.pointers,
+                        argc == 0U ? 0 : &kernel_argv,
                         (uint32_t)argc);
     if (pid < 0) {
         return ERR_NOENT;
