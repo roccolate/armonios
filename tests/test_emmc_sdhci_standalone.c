@@ -26,7 +26,7 @@
 #define INT_DATA_AVAIL           0x00000020U
 #define INT_ERROR_MASK           0xffff8000U
 #define INT_POLL_MASK            (INT_RESPONSE | INT_DATA_END | \
-                                  INT_DATA_AVAIL | INT_ERROR_MASK)
+                                   INT_DATA_AVAIL | INT_ERROR_MASK)
 
 #define CMD_GO_IDLE              0U
 #define CMD_ALL_SEND_CID         2U
@@ -80,6 +80,15 @@ static uint32_t fake_read32(void *context, uint32_t offset) {
         return value;
     }
     return fake->regs[offset / 4U];
+}
+
+static uint32_t fake_read32_broken_cd(void *context, uint32_t offset) {
+    uint32_t value = fake_read32(context, offset);
+
+    if (offset == REG_PRESENT_STATE) {
+        value |= PRESENT_CARD | PRESENT_STABLE;
+    }
+    return value;
 }
 
 static void fake_issue_command(fake_sdhci_t *fake, uint32_t value) {
@@ -254,11 +263,42 @@ static int test_old_card_uses_byte_address(void) {
     return 0;
 }
 
+static int test_broken_card_detect_policy(void) {
+    fake_sdhci_t native_fake;
+    fake_sdhci_t broken_cd_fake;
+    emmc_device_t dev;
+    emmc_io_t io;
+
+    memset(&native_fake, 0, sizeof(native_fake));
+    memset(&dev, 0, sizeof(dev));
+    io.read32 = fake_read32;
+    io.write32 = fake_write32;
+    io.delay_us = fake_delay;
+    io.context = &native_fake;
+
+    ASSERT_EQ_U32(EMMC_ERR_TIMEOUT,
+                  emmc_init_with_io(&dev, &io, 100000000U));
+    ASSERT_EQ_U32(0U, native_fake.command_count);
+
+    memset(&broken_cd_fake, 0, sizeof(broken_cd_fake));
+    memset(&dev, 0, sizeof(dev));
+    io.read32 = fake_read32_broken_cd;
+    io.context = &broken_cd_fake;
+
+    ASSERT_EQ_U32(EMMC_OK, emmc_init_with_io(&dev, &io, 100000000U));
+    ASSERT_TRUE(dev.ready != 0U);
+    ASSERT_EQ_U32(CMD_GO_IDLE, broken_cd_fake.command_log[0]);
+    return 0;
+}
+
 int main(void) {
     if (test_init_and_read() != 0) {
         return 1;
     }
     if (test_old_card_uses_byte_address() != 0) {
+        return 1;
+    }
+    if (test_broken_card_detect_policy() != 0) {
         return 1;
     }
     puts("emmc-sdhci-test: PASS");
