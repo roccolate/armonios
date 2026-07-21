@@ -39,8 +39,8 @@ if grep -Eq 'uart_pump_input|kernel_on_timer_tick|kernel_io_poll_|board_input_po
     exit 1
 fi
 
-if grep -Eq 'g_runtime_(service_active|input_phase_active|network_phase_active|network_budget_exhausted|network_frames)' "${runtime_source}"; then
-    echo "runtime compaction reintroduced duplicate phase or budget state" >&2
+if grep -Eq 'g_runtime_(work_pending|service_active|input_phase_active|network_phase_active|network_budget_exhausted|network_frames)' "${runtime_source}"; then
+    echo "runtime compaction reintroduced duplicate pending, phase, or budget state" >&2
     exit 1
 fi
 
