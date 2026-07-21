@@ -14,6 +14,7 @@ typedef struct {
     uint8_t data[TEST_IO_SIZE];
     uint32_t read_calls;
     uint32_t write_calls;
+    uint32_t list_calls;
     uintptr_t user_start;
     uintptr_t user_end;
 } syscall_vfs_test_file_t;
@@ -84,6 +85,29 @@ static int test_file_write(void *context, uint64_t offset,
     return 0;
 }
 
+static int test_file_list(void *context, uint64_t offset, uint8_t *buffer,
+                          uint64_t capacity, uint64_t *bytes_written) {
+    syscall_vfs_test_file_t *file = (syscall_vfs_test_file_t *)context;
+    uint64_t count;
+
+    if (file == 0 || buffer == 0 || bytes_written == 0 ||
+        offset > sizeof(file->data)) {
+        return -1;
+    }
+    CHECK_TRUE(!buffer_overlaps_user(file, buffer, capacity));
+
+    count = sizeof(file->data) - offset;
+    if (count > capacity) {
+        count = capacity;
+    }
+    for (uint64_t i = 0; i < count; i++) {
+        buffer[i] = file->data[offset + i];
+    }
+    *bytes_written = count;
+    file->list_calls++;
+    return 0;
+}
+
 static void test_syscall_vfs_uses_kernel_owned_chunks(void) {
     void *pmm_memory = 0;
     uint8_t *user_page = 0;
@@ -128,6 +152,7 @@ static void test_syscall_vfs_uses_kernel_owned_chunks(void) {
     vfs_reset();
     process_set_current(&process);
     CHECK_EQ(0, vfs_mount_static(&node, 1));
+    CHECK_EQ(0, vfs_mount_list("/list", test_file_list, &file));
     fd = vfs_open_flags("/tmp/syscall-copy", VFS_O_RDWR);
     CHECK_TRUE(fd >= 0);
 
@@ -147,6 +172,25 @@ static void test_syscall_vfs_uses_kernel_owned_chunks(void) {
     CHECK_EQ(3U, file.read_calls);
     for (uint64_t i = 0; i < TEST_IO_SIZE; i++) {
         CHECK_EQ(file.data[i], user_page[1024U + i]);
+    }
+
+    {
+        static const char path[] = "/list";
+
+        for (uint64_t i = 0; i < sizeof(path); i++) {
+            user_page[2800U + i] = (uint8_t)path[i];
+        }
+        for (uint64_t i = 0; i < TEST_IO_SIZE; i++) {
+            user_page[2048U + i] = 0;
+        }
+
+        CHECK_EQ(TEST_IO_SIZE,
+                 sys_readdir(&process, base + 2800U, base + 2048U,
+                             TEST_IO_SIZE));
+        CHECK_EQ(3U, file.list_calls);
+        for (uint64_t i = 0; i < TEST_IO_SIZE; i++) {
+            CHECK_EQ(file.data[i], user_page[2048U + i]);
+        }
     }
 
     {

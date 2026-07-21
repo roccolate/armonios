@@ -109,9 +109,11 @@ static int test_rw_file_stat(void *context, vfs_stat_t *stat) {
     return 0;
 }
 
-static int test_list_static(void *context, uint8_t *buffer, uint64_t capacity,
+static int test_list_static(void *context, uint64_t offset,
+                            uint8_t *buffer, uint64_t capacity,
                             uint64_t *bytes_written) {
     const char *text = (const char *)context;
+    uint64_t length = 0;
     uint64_t count = 0;
 
     if (bytes_written != 0) {
@@ -121,8 +123,14 @@ static int test_list_static(void *context, uint8_t *buffer, uint64_t capacity,
         return -1;
     }
 
-    while (text[count] != '\0' && count < capacity) {
-        buffer[count] = (uint8_t)text[count];
+    while (text[length] != '\0') {
+        length++;
+    }
+    if (offset > length) {
+        return 0;
+    }
+    while (offset + count < length && count < capacity) {
+        buffer[count] = (uint8_t)text[offset + count];
         count++;
     }
     *bytes_written = count;
@@ -623,6 +631,19 @@ void test_vfs_list_truncates_to_capacity(void) {
         TEST_ASSERT_EQUAL_UINT64((uint64_t)((const uint8_t *)"/boot/us")[i],
                                  buffer[i]);
     }
+
+    for (uint64_t i = 0; i < sizeof(buffer); i++) {
+        buffer[i] = 0;
+    }
+    bytes_written = 0;
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)vfs_list_at("/", 6, buffer, 4,
+                                                   &bytes_written));
+    TEST_ASSERT_EQUAL_UINT64(4, bytes_written);
+    TEST_ASSERT_EQUAL_UINT64('u', buffer[0]);
+    TEST_ASSERT_EQUAL_UINT64('s', buffer[1]);
+    TEST_ASSERT_EQUAL_UINT64('e', buffer[2]);
+    TEST_ASSERT_EQUAL_UINT64('r', buffer[3]);
 }
 
 void test_vfs_mount_list_validates_paths_and_duplicates(void) {
@@ -662,6 +683,14 @@ void test_vfs_mount_list_validates_paths_and_duplicates(void) {
     TEST_ASSERT_EQUAL_UINT64('o', buffer[0]);
     TEST_ASSERT_EQUAL_UINT64('k', buffer[1]);
     TEST_ASSERT_EQUAL_UINT64('\n', buffer[2]);
+
+    bytes_written = 0;
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)vfs_list_at("/fat", 1, buffer, 2,
+                                                   &bytes_written));
+    TEST_ASSERT_EQUAL_UINT64(2, bytes_written);
+    TEST_ASSERT_EQUAL_UINT64('k', buffer[0]);
+    TEST_ASSERT_EQUAL_UINT64('\n', buffer[1]);
 }
 
 void test_vfs_seek_sets_descriptor_offset(void) {

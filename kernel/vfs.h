@@ -37,7 +37,7 @@ typedef int (*vfs_write_fn_t)(void *context, uint64_t offset,
                               const uint8_t *buffer, uint64_t size,
                               uint64_t *bytes_written);
 typedef int (*vfs_stat_fn_t)(void *context, vfs_stat_t *stat);
-typedef int (*vfs_list_fn_t)(void *context, uint8_t *buffer,
+typedef int (*vfs_list_fn_t)(void *context, uint64_t offset, uint8_t *buffer,
                              uint64_t capacity, uint64_t *bytes_written);
 
 typedef struct {
@@ -86,6 +86,8 @@ int vfs_read(const char *path, uint64_t offset, uint8_t *buffer,
 int vfs_write(const char *path, uint64_t offset, const uint8_t *buffer,
               uint64_t size, uint64_t *bytes_written);
 int vfs_stat(const char *path, vfs_stat_t *stat);
+int vfs_list_at(const char *path, uint64_t offset, uint8_t *buffer,
+                uint64_t capacity, uint64_t *bytes_written);
 int vfs_list(const char *path, uint8_t *buffer, uint64_t capacity,
              uint64_t *bytes_written);
 int vfs_open(const char *path);
