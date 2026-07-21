@@ -34,7 +34,7 @@ EL0 process
        -> poll virtio/USB input producers
        -> drain input queue into GUI routing
        -> flush one dirty redraw when needed
-       -> poll network
+       -> drain available virtio-net RX frames
        -> end active measurement pass
        -> read CNTPCT_EL0 and update duration telemetry
   -> process_dispatch_next()
@@ -87,81 +87,74 @@ At 100 Hz this is approximately 10 ms. Exceeding it means one service pass used
 more than a complete nominal timer interval. It is an observation threshold, not
 the final accepted latency budget.
 
-The internal snapshot records:
-
-- accepted and coalesced requests;
-- non-empty and empty consumer invocations;
-- passes that left work requeued;
-- last, maximum, and cumulative duration ticks;
-- passes exceeding the configured threshold;
-- counter frequency and threshold;
-- pending and last-consumed work bits.
+The internal snapshot records requests, coalescing, non-empty/empty passes,
+requeues, last/max/total duration, interval overruns, counter frequency,
+threshold, pending work, and last-consumed work.
 
 ## Per-class work telemetry
 
-Phase 1B adds compact indexed work classes:
+Compact indexed classes currently are:
 
 ```text
 RUNTIME_METRIC_INPUT_PRODUCED
 RUNTIME_METRIC_INPUT_CONSUMED
 RUNTIME_METRIC_REDRAW
+RUNTIME_METRIC_NETWORK_FRAMES
 ```
 
-For each class the snapshot records:
+Each class records:
 
 - work reported by the last non-empty pass;
 - maximum work reported by any pass;
 - cumulative work reported since reset.
 
 Reports are accepted only while `runtime_service_run_pending()` has marked the
-backend active. The same queue and device functions may run from the cooperative
-console thread, but work outside the active bottom-half pass is ignored. This
-prevents console servicing from contaminating runtime-service measurements.
+backend active. Work performed by the cooperative console thread is ignored, so
+it cannot contaminate bottom-half measurements.
 
 ### Input produced
 
-`RUNTIME_METRIC_INPUT_PRODUCED` counts successful input events returned by:
-
-- QEMU virtio-input polling;
-- directly attached USB HID keyboard/mouse polling.
-
-UART input is interrupt-driven and the timer pass calls
-`kernel_io_poll_input_sources(0)`, so UART bytes are not part of this producer
-metric.
+`RUNTIME_METRIC_INPUT_PRODUCED` counts successful events returned by QEMU
+virtio-input and directly attached USB HID keyboard/mouse polling. UART input is
+interrupt-driven and is not part of this producer metric.
 
 ### Input consumed
 
-`RUNTIME_METRIC_INPUT_CONSUMED` increments for each successful shared input-queue
-pop during an active service pass. The GUI path currently drains the queue until
-empty, so this measurement exposes the exact unbounded behavior that the later
-budget must limit.
+`RUNTIME_METRIC_INPUT_CONSUMED` increments for every successful shared queue pop
+during the active runtime pass. The GUI path still drains until empty, so this
+measurement exposes the unbounded behavior that the future budget must limit.
 
 ### Input queue pressure
 
-The shared 64-event input queue now records:
+The shared 64-event queue records current depth, lifetime high-water, and
+rejected full-queue pushes. During an active pass, successful pops report the
+depth before removal, high-water, and cumulative overflow. Runtime telemetry
+retains maximum observed depth, high-water, and overflow.
 
-- current depth;
-- lifetime high-water mark;
-- rejected pushes caused by a full queue.
-
-During an active pass, successful pops report the depth observed before removal,
-the global high-water mark, and cumulative overflow count. Runtime telemetry
-retains maximum observed depth, high-water, and overflow count.
-
-Overflow is now explicit evidence rather than silent loss. The implementation
-still does not prevent overflow under sustained producer pressure.
+Overflow is explicit evidence rather than silent loss, but the implementation
+does not yet prevent it under sustained producer pressure.
 
 ### Redraw
 
-`RUNTIME_METRIC_REDRAW` counts successful QEMU display redraw submissions made
-while the runtime pass is active. It does not yet count damage rectangles,
-full-screen fallbacks, pixels, or GPU completion latency.
+`RUNTIME_METRIC_REDRAW` counts successful QEMU display redraw submissions during
+the active pass. It does not yet count damage rectangles, full-screen fallback,
+pixels, or GPU completion latency.
 
-### Network
+### Network frames
 
-Network receive frames are **not yet measured**. `net_poll()` still has a void
-interface and may drain multiple frames. Network frame count, receive high-water,
-and overflow/drop information remain part of the next measurement cut.
+`RUNTIME_METRIC_NETWORK_FRAMES` increments for each valid virtio-net RX frame
+returned by `virtio_net_recv()` during the active runtime pass. The indexed
+snapshot therefore exposes frames last pass, maximum frames in one pass, and
+cumulative frames since reset.
+
+This measures completed frame consumption, not calls to `net_poll()`. Frames
+received outside the active runtime pass do not count.
+
+The current virtio-net interface does not expose a reliable device-drop,
+overwrite, or receive-ring overflow counter. The driver has 16 RX descriptors,
+but this metric must not be interpreted as proof that no frame was dropped
+before software consumed it. Receive drops and hardware-ring pressure remain an
+explicit evidence gap.
 
 ## Snapshot and reset contract
 
@@ -170,23 +163,18 @@ and overflow/drop information remain part of the next measurement cut.
 preserving counter frequency and timing threshold.
 
 All state remains zero-initialized, preserving `.data == 0`. No syscall or
-user-visible struct exposes the internal layout. A future Monitor integration
-must define a deliberate versioned diagnostic ABI rather than copying this
-structure directly to EL0.
+user-visible structure exposes the internal layout. Any later Monitor integration
+must define a deliberate versioned diagnostic ABI.
 
 ## Current correctness assumptions
 
-The implementation assumes:
+The implementation assumes one CPU core, one runtime-service consumer,
+state-preserving nested IRQ helpers, no concurrent SMP writer, and coalesced
+readiness rather than exact timer publication counts.
 
-- one CPU core;
-- one runtime-service consumer;
-- nested IRQ helpers restore the prior DAIF IRQ-mask state;
-- no concurrent SMP writer;
-- coalesced readiness rather than exact timer publication counts.
-
-The pending word and telemetry counters are not SMP-safe atomic data structures.
-Before SMP or concurrent publishers, they require atomics, per-CPU state, or a
-scheduler-owned queue.
+The pending word and telemetry are not SMP-safe atomic structures. Before SMP or
+concurrent publishers they require atomics, per-CPU state, or a scheduler-owned
+queue.
 
 ## Guarantees implemented
 
@@ -195,26 +183,24 @@ scheduler-owned queue.
 - Runtime work begins only after `board_irq_end()`.
 - Requests coalesce and backend requeue survives.
 - Aggregate generic-counter duration and interval overruns are measured.
-- Input produced, input consumed, successful redraws, queue depth/high-water, and
-  queue overflow are measurable.
-- Lower-layer reports outside the active bottom-half pass are ignored.
-- Queue overflow is counted explicitly.
-- The instrumentation preserves `.data == 0`, the 108000-byte kernel ceiling,
-  and the existing user ABI.
+- Input produced, input consumed, successful redraws, and consumed network
+  frames are measurable as last/max/total values.
+- Input queue depth, high-water, and overflow are measurable.
+- Reports outside the active bottom-half pass are ignored.
+- Instrumentation preserves `.data == 0`, the kernel size ceiling, and user ABI.
 
 ## Guarantees not implemented
 
 ArmoniOS does not yet guarantee:
 
 - maximum service or interrupt-to-EL0 latency;
-- a maximum number of input events per pass;
+- maximum input events or network frames per pass;
 - bounded USB/device polling;
-- bounded redraw work;
-- measured or bounded network frames;
+- bounded redraw or damage work;
+- measured network device drops or RX-ring overflow;
 - fairness among work classes and EL0;
 - no queue overflow under sustained load;
-- pending-bit preservation after a budget expires, because budgets do not yet
-  exist;
+- pending-bit preservation after future budget exhaustion;
 - SMP-safe publication or snapshots;
 - a separately schedulable runtime thread.
 
@@ -222,42 +208,32 @@ Measurement does not close `RISK-017`.
 
 ## Verification
 
-`tests/run_runtime_service_test.sh` uses a deterministic counter and verifies:
+`tests/run_runtime_service_test.sh` verifies with a deterministic counter:
 
-- request coalescing;
-- EOI-before-backend order;
+- request coalescing and EOI-before-backend order;
 - requeue preservation;
 - last/max/total timing and interval overruns;
-- indexed metric last/max/total accumulation;
+- indexed input, redraw, and network last/max/total accumulation;
 - inactive report rejection;
 - queue pressure accumulation;
-- reset and snapshot behavior.
+- reset and snapshot behavior;
+- static wiring of network frame reporting in `virtio_net_recv()`.
 
-`tests/run_input_queue_stats_test.sh` verifies:
+`tests/run_input_queue_stats_test.sh` verifies zero state, a 64-entry high-water,
+full-queue overflow counting, depth reduction while draining, and reset.
 
-- depth begins at zero;
-- filling all 64 entries reaches a high-water mark of 64;
-- an additional push is rejected and increments overflow;
-- consuming entries decreases current depth without reducing high-water;
-- reset clears queue telemetry.
-
-The complete matrix continues to exercise build/size, RPi4 fail-closed paths,
-host tests, FAT32 QEMU smoke, usercopy/focus, framebuffer, USB, network, and
-visible FAT+GPU wiring.
-
-The compact implementation produces a 107204-byte QEMU kernel binary against the
-108000-byte ceiling on the validated candidate build.
+The complete matrix also covers build/size, RPi4 fail-closed paths, native host
+tests, FAT32 QEMU smoke, usercopy/focus, framebuffer, USB, network, and visible
+FAT+GPU wiring.
 
 ## Remaining measurement work
 
 Before selecting budgets, add:
 
-- network frames processed per pass;
-- network receive/drop/high-water information;
-- USB/device poll or completion counts distinct from generated input events;
+- network receive drop/ring-pressure information if it can be measured honestly;
+- USB/device operation counts distinct from generated input events;
 - damage rectangles and full-redraw fallback counts;
-- per-class budget-exhaustion counters;
-- global deadline exhaustion;
+- per-class and global deadline exhaustion counters;
 - pending work retained because a budget expired;
 - EL0 heartbeat/progress under sustained synthetic load.
 
@@ -286,15 +262,11 @@ Values must come from measurements and QEMU stress evidence rather than guesswor
 
 ## RISK-017 exit criteria
 
-The risk remains open until deterministic QEMU tests prove:
-
-- EL0 heartbeat progress under sustained input;
-- EL0 progress under sustained network traffic;
-- combined input/network/redraw pressure does not stall dispatch;
-- budget-exhausted work remains pending;
-- queued work is delivered or loss is explicitly counted;
-- maximum pass duration remains below a documented final threshold;
-- all existing subsystem gates remain green.
+The risk remains open until deterministic QEMU tests prove EL0 heartbeat under
+sustained input and network traffic, combined pressure does not stall dispatch,
+budget-exhausted work remains pending, loss is absent or explicitly counted,
+maximum pass duration remains below a documented threshold, and existing gates
+remain green.
 
 A later scheduler may promote this work into a wakeable EL1 service, but the
 current bottom half must first become explicitly bounded and non-blocking.

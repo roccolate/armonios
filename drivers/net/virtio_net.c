@@ -5,6 +5,7 @@
 
 #include "kernel/kernel_compiler.h"
 #include "kernel/kstring.h"
+#include "kernel/runtime_service.h"
 
 #define VIRTIO_MMIO_MAGIC_VALUE 0x000
 #define VIRTIO_MMIO_VERSION     0x004
@@ -108,7 +109,6 @@ static void virtio_barrier(void) {
     __sync_synchronize();
 #endif
 }
-
 
 static int virtio_net_device_ready(const virtio_net_device_t *device) {
     return device != NULL && device->ready != 0 && device->base != 0 &&
@@ -369,9 +369,11 @@ int virtio_net_recv(virtio_net_device_t *device, void *data, uint32_t max_len) {
     virtio_barrier();
 
     *virtio_reg(device->base, VIRTIO_MMIO_QUEUE_NOTIFY) = 0;
-
     device->last_used_idx++;
 
+    if (copy_len > 0U) {
+        runtime_service_report_metric(RUNTIME_METRIC_NETWORK_FRAMES, 1U);
+    }
     return (int)copy_len;
 }
 

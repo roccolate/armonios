@@ -34,11 +34,12 @@ Most original v0.2 cleanup work is implemented. The runtime path now measures:
 - input events produced by virtio-input and direct USB HID;
 - input events consumed during the active bottom-half pass;
 - successful redraw submissions;
+- valid virtio-net RX frames consumed during the active pass;
 - shared input queue depth, high-water, and overflow.
 
 This is measurement, not completion. The bottom half still has no per-class
-budgets, global deadline, network frame measurement, or sustained-load proof of
-EL0 progress. `RISK-017` therefore remains open and v0.2 is not yet promoted.
+budgets, global deadline, device-drop accounting, or sustained-load proof of EL0
+progress. `RISK-017` remains open and v0.2 is not yet promoted.
 
 ## What works
 
@@ -76,7 +77,8 @@ The QEMU codebase includes:
 | Files | `/fat` only; at most eight displayed root entries. |
 | GUI | 16 windows and 32 queued events/window. |
 | Input | Shared 64-event queue; overflow is counted but not prevented. |
-| Networking | No socket ABI, TCP, DNS API, or HTTP. |
+| Network RX | 16 descriptors; consumed frames measured, device drops unavailable. |
+| Networking API | No socket ABI, TCP, DNS API, or HTTP. |
 | USB | Direct keyboard/mouse HID; no hubs. |
 | Scheduling | EL0 preemptive; EL1 helper threads cooperative. |
 | Runtime service | Runs after EOI but before `eret`; selected work is measured but not bounded. |
@@ -173,14 +175,16 @@ physical timer IRQ
        -> input producers
        -> input queue to GUI
        -> dirty redraw
-       -> network poll
+       -> virtio-net RX frames
   -> process dispatch
   -> eret
 ```
 
 EOI completes the interrupt-controller transaction but does not leave the CPU
 exception. EL0 remains paused during the pass. Aggregate duration, selected work
-classes, queue pressure, and overflow are observable; no class is yet bounded.
+classes, queue pressure, and input overflow are observable; no class is bounded.
+Consumed network frames are counted, but the device exposes no reliable RX-drop
+counter.
 
 See [Deferred Runtime Service](docs/RUNTIME_SERVICE.md).
 
