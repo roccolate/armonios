@@ -10,6 +10,9 @@
  * points at the trampoline the lower-EL exception vector returns to
  * after sys_exit.
  *
+ * `app_spawn_vfs` accepts only kernel-owned argv pointers and strings. The
+ * syscall boundary must copy all EL0 argv data before calling it.
+ *
  * The file used to be called user_demo.* and hosted an embedded
  * programs/user_demo.S blob. That blob is gone; the loader now owns
  * boot images through kernel/user_image.c and the bootfs registry.
