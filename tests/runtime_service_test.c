@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "kernel/irq.h"
 #include "kernel/process.h"
 #include "kernel/runtime_service.h"
 
