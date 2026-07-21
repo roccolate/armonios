@@ -36,8 +36,13 @@ _start:
     msr vttbr_el2, xzr
 
     // The normal bootstrap constructs EL1 translation state deliberately.
-    // Do not inherit an unknown EL1 MMU/cache configuration from firmware.
-    msr sctlr_el1, xzr
+    // Preserve architectural RES1 state while disabling inherited EL1 MMU and
+    // cache enable bits.
+    mrs x1, sctlr_el1
+    bic x1, x1, #0x1
+    bic x1, x1, #0x4
+    bic x1, x1, #0x1000
+    msr sctlr_el1, x1
 
     // Return to EL1h with debug, SError, IRQ, and FIQ masked. The first EL1
     // instructions install SP_EL1 before any call or exception can use it.
