@@ -5,7 +5,6 @@
 
 #define RPI4_EMMC2_DIAG_ARGUMENT          0x08U
 #define RPI4_EMMC2_DIAG_TRANSFER_COMMAND  0x0cU
-#define RPI4_EMMC2_DIAG_BUFFER            0x20U
 #define RPI4_EMMC2_DIAG_PRESENT_STATE     0x24U
 #define RPI4_EMMC2_DIAG_HOST_POWER        0x28U
 #define RPI4_EMMC2_DIAG_CLOCK_RESET       0x2cU
@@ -19,14 +18,10 @@ typedef struct {
     uintptr_t base;
     uint32_t last_command;
     uint32_t last_argument;
-    uint32_t last_transfer_command;
     uint32_t last_read_offset;
-    uint32_t last_write_offset;
-    uint32_t last_write_value;
     uint32_t present_state;
     uint32_t clock_reset;
     uint32_t host_power;
-    uint32_t interrupt_status;
     uint32_t last_nonzero_interrupt_status;
 } rpi4_emmc2_probe_diag_t;
 
@@ -40,14 +35,10 @@ static inline void rpi4_emmc2_probe_diag_init(
     diag->base = base;
     diag->last_command = RPI4_EMMC2_DIAG_NO_COMMAND;
     diag->last_argument = 0U;
-    diag->last_transfer_command = 0U;
     diag->last_read_offset = 0U;
-    diag->last_write_offset = 0U;
-    diag->last_write_value = 0U;
     diag->present_state = 0U;
     diag->clock_reset = 0U;
     diag->host_power = 0U;
-    diag->interrupt_status = 0U;
     diag->last_nonzero_interrupt_status = 0U;
 }
 
@@ -66,11 +57,8 @@ static inline uint32_t rpi4_emmc2_probe_diag_read32(void *context,
         diag->clock_reset = value;
     } else if (offset == RPI4_EMMC2_DIAG_HOST_POWER) {
         diag->host_power = value;
-    } else if (offset == RPI4_EMMC2_DIAG_INT_STATUS) {
-        diag->interrupt_status = value;
-        if (value != 0U) {
-            diag->last_nonzero_interrupt_status = value;
-        }
+    } else if (offset == RPI4_EMMC2_DIAG_INT_STATUS && value != 0U) {
+        diag->last_nonzero_interrupt_status = value;
     }
     return value;
 }
@@ -81,12 +69,9 @@ static inline void rpi4_emmc2_probe_diag_write32(void *context,
     rpi4_emmc2_probe_diag_t *diag =
         (rpi4_emmc2_probe_diag_t *)context;
 
-    diag->last_write_offset = offset;
-    diag->last_write_value = value;
     if (offset == RPI4_EMMC2_DIAG_ARGUMENT) {
         diag->last_argument = value;
     } else if (offset == RPI4_EMMC2_DIAG_TRANSFER_COMMAND) {
-        diag->last_transfer_command = value;
         diag->last_command = (value >> 24U) & 0x3fU;
     }
 
@@ -110,7 +95,6 @@ static inline void rpi4_emmc2_probe_diag_refresh(
         diag, RPI4_EMMC2_DIAG_HOST_POWER);
     interrupt_status = rpi4_emmc2_probe_diag_raw_read(
         diag, RPI4_EMMC2_DIAG_INT_STATUS);
-    diag->interrupt_status = interrupt_status;
     if (interrupt_status != 0U) {
         diag->last_nonzero_interrupt_status = interrupt_status;
     }
