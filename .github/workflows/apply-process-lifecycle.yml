@@ -26,28 +26,9 @@ jobs:
         shell: bash
         run: |
           rm -f .github/process-lifecycle-patch.log
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('.github/scripts/apply_process_lifecycle_patch.py')
-          text = path.read_text(encoding='utf-8')
-          old = '''replace_all_exact(
-              "kernel/panel_boot.c",
-              "(void)process_reclaim_zombies();",
-              "(void)process_reclaim_orphan_zombies();",
-              2,
-          )'''
-          new = '''replace_all_exact(
-              "kernel/panel_boot.c",
-              "(void)process_reclaim_zombies();",
-              "(void)process_reclaim_orphan_zombies();",
-              3,
-          )'''
-          old = old.replace('              ', '    ')
-          new = new.replace('              ', '    ')
-          if text.count(old) != 1:
-              raise SystemExit('unable to locate lifecycle occurrence block')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
-          PY
+          sed -i '161s/2/3/' .github/scripts/apply_process_lifecycle_patch.py
+          sed -n '157,162p' .github/scripts/apply_process_lifecycle_patch.py
+          grep -A4 -F 'replace_all_exact(' .github/scripts/apply_process_lifecycle_patch.py | grep -q '    3,'
 
           set +e
           python3 .github/scripts/apply_process_lifecycle_patch.py \
