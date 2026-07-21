@@ -25,34 +25,100 @@ typedef struct {
 
 static irq_handler_entry_t g_irq_handlers[IRQ_HANDLER_SLOTS];
 static volatile uint32_t g_runtime_work_pending;
+static runtime_service_stats_t g_runtime_stats;
 
 /*
- * The normal kernel provides the strong implementation in kernel.c. Host IRQ
- * tests intentionally omit kernel.c, so this weak no-op keeps the IRQ layer
- * independently testable and can be overridden by the test binary.
+ * The normal kernel provides strong implementations in kernel.c and timer.c.
+ * Host IRQ tests intentionally omit those translation units, so these weak
+ * hooks keep the IRQ layer independently testable and may be overridden by the
+ * test binary.
  */
 __attribute__((weak)) void kernel_on_timer_tick(void) {
 }
 
+__attribute__((weak)) uint64_t runtime_service_counter_now(void) {
+    return 0;
+}
+
 void runtime_service_reset(void) {
+    uint64_t counter_frequency_hz = g_runtime_stats.counter_frequency_hz;
+    uint64_t budget_ticks = g_runtime_stats.budget_ticks;
+
     g_runtime_work_pending = 0;
+    g_runtime_stats = (runtime_service_stats_t){0};
+    g_runtime_stats.counter_frequency_hz = counter_frequency_hz;
+    g_runtime_stats.budget_ticks = budget_ticks;
+}
+
+void runtime_service_configure_timing(uint64_t counter_frequency_hz,
+                                      uint64_t budget_ticks) {
+    g_runtime_stats.counter_frequency_hz = counter_frequency_hz;
+    g_runtime_stats.budget_ticks = budget_ticks;
+}
+
+void runtime_service_get_stats(runtime_service_stats_t *stats) {
+    if (stats == 0) {
+        return;
+    }
+
+    *stats = g_runtime_stats;
+    stats->pending_work = g_runtime_work_pending;
 }
 
 void runtime_service_request(uint32_t work) {
-    g_runtime_work_pending |= work & RUNTIME_WORK_ALL;
+    uint32_t accepted = work & RUNTIME_WORK_ALL;
+
+    if (accepted == 0U) {
+        return;
+    }
+
+    g_runtime_stats.request_count++;
+    if ((g_runtime_work_pending & accepted) != 0U) {
+        g_runtime_stats.coalesced_request_count++;
+    }
+
+    g_runtime_work_pending |= accepted;
 }
 
 uint32_t runtime_service_run_pending(void) {
     uint32_t work = g_runtime_work_pending;
+    uint64_t started;
+    uint64_t finished;
+    uint64_t duration;
 
     /* Clear before dispatch so work published by the backend is preserved for
      * the next pass instead of being erased on return. Hard IRQs remain masked
      * throughout this post-EOI bottom half, so the snapshot itself is atomic on
      * the current single-core runtime. */
     g_runtime_work_pending = 0;
+    g_runtime_stats.last_work = work;
 
-    if ((work & RUNTIME_WORK_PERIODIC) != 0) {
+    if (work == 0U) {
+        g_runtime_stats.empty_run_count++;
+        return 0U;
+    }
+
+    started = runtime_service_counter_now();
+
+    if ((work & RUNTIME_WORK_PERIODIC) != 0U) {
         kernel_on_timer_tick();
+    }
+
+    finished = runtime_service_counter_now();
+    duration = finished - started;
+
+    g_runtime_stats.run_count++;
+    g_runtime_stats.last_duration_ticks = duration;
+    g_runtime_stats.total_duration_ticks += duration;
+    if (duration > g_runtime_stats.max_duration_ticks) {
+        g_runtime_stats.max_duration_ticks = duration;
+    }
+    if (g_runtime_stats.budget_ticks != 0U &&
+        duration > g_runtime_stats.budget_ticks) {
+        g_runtime_stats.over_budget_count++;
+    }
+    if (g_runtime_work_pending != 0U) {
+        g_runtime_stats.requeue_count++;
     }
 
     return work;

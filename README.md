@@ -38,6 +38,12 @@ GitHub Actions validated the exact PR head `fedb070` before merge:
 The merge commit did not receive a separate workflow run. The evidence therefore
 applies to the merged code tree, not to an independently rerun merge commit.
 
+The active v0.2 candidate adds aggregate deferred-runtime telemetry using the
+AArch64 generic counter. It measures requests, coalescing, requeues, pass count,
+last/maximum/cumulative duration, and passes exceeding one timer interval. This
+is measurement, not completion: work per pass remains unbounded and RISK-017
+still blocks formal v0.2 promotion.
+
 ## What works now
 
 The current QEMU codebase includes:
@@ -57,7 +63,7 @@ The current QEMU codebase includes:
 - PCI/xHCI enumeration and directly attached boot-protocol USB HID devices;
 - Ethernet, ARP, IPv4, UDP, and DHCP sufficient for a QEMU user-network lease;
 - one post-EOI deferred runtime service for timer-originated input, GUI, device,
-  and network work;
+  and network work, with kernel-internal aggregate timing telemetry;
 - deterministic host, QEMU, size, stack, ABI, storage, GUI, USB, network, and
   board-build gates under `tools/verify.sh`.
 
@@ -80,13 +86,12 @@ The most important current limits are:
 | Networking | No socket ABI, TCP, DNS API, or HTTP client. |
 | USB | Direct keyboard/mouse HID only; no hub support claim. |
 | Scheduling | EL0 is preemptive; EL1 helper threads are cooperative. |
-| Runtime service | Runs after EOI but before exception return, with IRQs masked and no per-pass budget yet. |
+| Runtime service | Runs after EOI but before exception return. Aggregate duration is measured, but input/device/network/redraw work has no per-pass budget. |
 | User copy | Permission checked, but final copies are not fault-recoverable. |
 | Raspberry Pi | Build/host verified scaffolding; no physical boot or storage claim. |
 
 See [Current State](docs/CURRENT_STATE.md) and
-[Technical Risks](docs/TECHNICAL_RISKS.md) for the exact evidence and exit
-criteria.
+[Technical Risks](docs/TECHNICAL_RISKS.md) for exact evidence and exit criteria.
 
 ## Quick start
 
@@ -117,7 +122,8 @@ bash tools/verify.sh
 - `.data == 0` and the 108000-byte kernel limit;
 - RPi4 EMMC2 diagnostic, MBR, and partition-view host tests;
 - the native host suite;
-- deferred runtime-service coalescing, requeue, and EOI ordering;
+- deferred runtime-service EOI ordering, coalescing, deterministic duration,
+  maximum/total tracking, overrun, requeue, snapshot, and reset behavior;
 - parent/wait lifecycle, process-local FDs, user-copy permissions, and KLI1;
 - userland stack usage;
 - FAT32 QEMU smoke;
@@ -185,14 +191,17 @@ physical timer IRQ
   -> publish coalescible periodic work
   -> scheduler accounting
   -> EOI
+  -> read generic counter
   -> non-preemptible runtime-service pass
+  -> read counter and update telemetry
   -> EL0 dispatch
   -> exception return
 ```
 
 EOI releases the interrupt controller, but the runtime service still executes in
 EL1 exception context. IRQs remain masked and EL0 remains paused until that pass,
-process dispatch, and `eret` complete. This distinction is tracked by
+process dispatch, and `eret` complete. Aggregate timing makes the duration
+observable; it does not bound the pass. This distinction is tracked by
 `RISK-017`.
 
 ## Storage and applications
@@ -211,9 +220,10 @@ The applications are useful demonstrations, not complete daily tools:
 - **Panel:** launcher, taskbar, focus, minimize, and restore integration;
 - **Monitor, Control, Clock:** compact system and desktop demonstrations.
 
-The v1 path requires a real storage platform, long names, directories, ext2
-read-only support, shared userland helpers/widgets, and substantially more useful
-applications.
+Issue #2 tracks **v0.6 useful desktop applications**. It depends on the v0.3
+storage/path platform, v0.4 real FAT, and v0.5 shared userland runtime/widgets.
+The project should not jump directly to broad app polish around temporary
+root-only and fixed-buffer foundations.
 
 ## Raspberry Pi status
 
@@ -221,12 +231,9 @@ The `rpi4` backend and an opt-in read-only EMMC2 diagnostic image build and pass
 host tests. The normal board advertises no storage, display, or input capability
 that has not been proven on hardware.
 
-ArmoniOS does **not** currently claim:
-
-- physical Raspberry Pi 4 or Raspberry Pi 5 boot support;
-- working SD/eMMC reads or writes on real hardware;
-- Raspberry Pi framebuffer or input support;
-- an installable Raspberry Pi desktop image.
+ArmoniOS does **not** currently claim physical Raspberry Pi boot support, working
+SD/eMMC on real hardware, Raspberry Pi framebuffer/input, or an installable
+Raspberry Pi desktop image.
 
 Physical evidence must follow [Porting](docs/PORTING.md) and the
 [Documentation Policy](docs/DOCUMENTATION_POLICY.md).
@@ -250,12 +257,12 @@ Physical evidence must follow [Porting](docs/PORTING.md) and the
 
 The next sequence is deliberate:
 
-1. bound and instrument the deferred runtime service;
-2. complete v0.2 promotion evidence;
+1. add per-class runtime metrics and explicit work budgets;
+2. prove EL0 progress under sustained load and complete v0.2 evidence;
 3. build the v0.3 block/VFS/path platform;
 4. replace the root-only bridge with real FAT support;
 5. add a shared userland runtime and widgets;
-6. make Files, Editor, Shell, Settings, Monitor, Panel, and Clock useful;
+6. complete the v0.6 Files, Editor, Shell, Settings, Monitor, Panel, and Clock workflows;
 7. mount ext2 read-only;
 8. stabilize, fuzz, document, and record a final manual workflow.
 
