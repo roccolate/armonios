@@ -61,16 +61,16 @@ static int runtime_service_deadline(void) {
 #if defined(ARMONIOS_TEST) && !defined(ARMONIOS_RUNTIME_DEADLINE_TEST)
     return 0;
 #else
-    uint8_t phase = g_runtime_phase;
+    uint8_t phase;
 
-    if ((phase & RUNTIME_PHASE_DEADLINE) != 0U) {
+    if (g_runtime_phase == RUNTIME_PHASE_DEADLINE) {
         return 1;
     }
-    if (phase == 0U || g_runtime_stats.budget_ticks == 0U ||
-        runtime_service_counter_now() < g_runtime_stats.last_duration_ticks) {
+    if (runtime_service_counter_now() < g_runtime_stats.last_duration_ticks) {
         return 0;
     }
 
+    phase = g_runtime_phase;
     g_runtime_stats.pending_work |= phase;
     g_runtime_phase = RUNTIME_PHASE_DEADLINE;
     g_runtime_stats.over_budget_count++;
