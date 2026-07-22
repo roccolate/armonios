@@ -1,0 +1,206 @@
+#ifndef ARMONIOS_KERNEL_DTB_READER_H
+#define ARMONIOS_KERNEL_DTB_READER_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "kernel/kernel_compiler.h"
+
+#define FDT_MAGIC      0xd00dfeedU
+#define FDT_BEGIN_NODE 0x00000001U
+#define FDT_END_NODE   0x00000002U
+#define FDT_PROP       0x00000003U
+#define FDT_NOP        0x00000004U
+#define FDT_END        0x00000009U
+
+typedef struct {
+    uint32_t magic;
+    uint32_t totalsize;
+    uint32_t off_dt_struct;
+    uint32_t off_dt_strings;
+    uint32_t off_mem_rsvmap;
+    uint32_t version;
+    uint32_t last_comp_version;
+    uint32_t boot_cpuid_phys;
+    uint32_t size_dt_strings;
+    uint32_t size_dt_struct;
+} fdt_header_t;
+
+typedef struct {
+    const char *strings;
+    uintptr_t cursor;
+    uintptr_t struct_end;
+    uint32_t total_size;
+} fdt_view_t;
+
+typedef struct {
+    uint32_t token;
+    const char *name;
+    const char *prop_name;
+    const uint32_t *value;
+    uint32_t len;
+    int depth;
+} fdt_token_t;
+
+/*
+ * Shared flattened-device-tree reader.
+ *
+ * Callers still interpret the token stream themselves, but fdt_view_init owns
+ * the common header validation so malformed offsets cannot make parsers walk
+ * outside the declared FDT blob.
+ */
+
+static inline uint32_t fdt_be32(const void *ptr) {
+    const uint8_t *bytes = ptr;
+
+    return ((uint32_t)bytes[0] << 24) |
+           ((uint32_t)bytes[1] << 16) |
+           ((uint32_t)bytes[2] << 8) |
+           (uint32_t)bytes[3];
+}
+
+static inline uint64_t fdt_read_cells(const uint32_t *cells, uint32_t count) {
+    uint64_t value = 0;
+
+    for (uint32_t i = 0; i < count; i++) {
+        value = (value << 32) | fdt_be32(&cells[i]);
+    }
+
+    return value;
+}
+
+static inline uintptr_t fdt_align4(uintptr_t value) {
+    return (value + 3U) & ~(uintptr_t)3U;
+}
+
+static inline int fdt_streq(const char *a, const char *b) {
+    while (*a == *b) {
+        if (*a == '\0') {
+            return 1;
+        }
+
+        a++;
+        b++;
+    }
+
+    return 0;
+}
+
+static inline int fdt_starts_with(const char *value, const char *prefix) {
+    while (*prefix != '\0') {
+        if (*value != *prefix) {
+            return 0;
+        }
+
+        value++;
+        prefix++;
+    }
+
+    return 1;
+}
+
+static inline int fdt_range_valid(uint32_t offset, uint32_t size,
+                                  uint32_t total_size) {
+    return offset <= total_size && size <= total_size - offset;
+}
+
+static KERNEL_ALWAYS_INLINE int fdt_view_init(uint64_t dtb_addr,
+                                              fdt_view_t *view) {
+    const fdt_header_t *header = (const fdt_header_t *)(uintptr_t)dtb_addr;
+    const uint8_t *base = (const uint8_t *)(uintptr_t)dtb_addr;
+    uint32_t total_size;
+    uint32_t struct_offset;
+    uint32_t struct_size;
+    uint32_t strings_offset;
+    uint32_t strings_size;
+    uintptr_t cursor;
+
+    if (dtb_addr == 0 || view == NULL ||
+        fdt_be32(&header->magic) != FDT_MAGIC) {
+        return -1;
+    }
+
+    total_size = fdt_be32(&header->totalsize);
+    struct_offset = fdt_be32(&header->off_dt_struct);
+    struct_size = fdt_be32(&header->size_dt_struct);
+    strings_offset = fdt_be32(&header->off_dt_strings);
+    strings_size = fdt_be32(&header->size_dt_strings);
+
+    if (total_size < sizeof(fdt_header_t) ||
+        fdt_range_valid(struct_offset, struct_size, total_size) == 0 ||
+        fdt_range_valid(strings_offset, strings_size, total_size) == 0) {
+        return -1;
+    }
+
+    cursor = (uintptr_t)(base + struct_offset);
+    view->strings = (const char *)(base + strings_offset);
+    view->cursor = cursor;
+    view->struct_end = cursor + struct_size;
+    view->total_size = total_size;
+    return 0;
+}
+
+static KERNEL_ALWAYS_INLINE int fdt_next_token(fdt_view_t *view,
+                                               int *depth,
+                                               fdt_token_t *out) {
+    uintptr_t cursor;
+    uint32_t token;
+
+    if (view == NULL || depth == NULL || out == NULL ||
+        view->cursor >= view->struct_end) {
+        return -1;
+    }
+
+    cursor = view->cursor;
+    token = fdt_be32((const void *)cursor);
+    cursor += sizeof(uint32_t);
+
+    out->token = token;
+    out->name = NULL;
+    out->prop_name = NULL;
+    out->value = NULL;
+    out->len = 0;
+    out->depth = *depth;
+
+    if (token == FDT_BEGIN_NODE) {
+        out->name = (const char *)cursor;
+        (*depth)++;
+        out->depth = *depth;
+        while (cursor < view->struct_end && *(const char *)cursor != '\0') {
+            cursor++;
+        }
+        if (cursor >= view->struct_end) {
+            return -1;
+        }
+        cursor = fdt_align4(cursor + 1U);
+    } else if (token == FDT_END_NODE) {
+        out->depth = *depth;
+        (*depth)--;
+    } else if (token == FDT_PROP) {
+        uint32_t nameoff;
+
+        if (cursor + sizeof(uint32_t) * 2U > view->struct_end) {
+            return -1;
+        }
+
+        out->len = fdt_be32((const void *)cursor);
+        nameoff = fdt_be32((const void *)(cursor + sizeof(uint32_t)));
+        out->prop_name = view->strings + nameoff;
+        out->value = (const uint32_t *)(cursor + sizeof(uint32_t) * 2U);
+        cursor += sizeof(uint32_t) * 2U;
+
+        if (cursor + out->len > view->struct_end) {
+            return -1;
+        }
+        cursor = fdt_align4(cursor + out->len);
+    } else if (token == FDT_NOP || token == FDT_END) {
+        /* Nothing else to decode. */
+    } else {
+        return -1;
+    }
+
+    view->cursor = cursor;
+    return 0;
+}
+
+#endif
