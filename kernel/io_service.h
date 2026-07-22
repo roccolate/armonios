@@ -24,6 +24,15 @@ void kernel_io_poll_input_sources(uint8_t include_uart);
 #define input_queue_poll runtime_service_input_poll
 
 /*
+ * The periodic kernel path keeps its existing calls, but the wrappers expose
+ * only one bounded partial-damage batch to the compositor and consume that
+ * batch only after the board reports a successful redraw. A failed GPU redraw
+ * leaves dirty state and damage untouched.
+ */
+#define gui_render runtime_service_gui_render
+#define gui_clear_dirty runtime_service_gui_clear_dirty
+
+/*
  * Kernel orchestration routes network polls through the runtime wrapper. The
  * DHCP implementation itself does not include this header, so its real
  * `net_poll` symbol remains available behind the wrapper.

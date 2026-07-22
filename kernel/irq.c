@@ -5,6 +5,7 @@
 #include "board.h"
 #include "input/input.h"
 #include "kernel/gui_compositor.h"
+#include "kernel/kstring.h"
 #include "net/virtio_net.h"
 #include "kernel/net/dhcp.h"
 #include "kernel/process.h"
@@ -12,6 +13,11 @@
 #include "uart/pl011.h"
 
 #define IRQ_HANDLER_SLOTS 64U
+
+/* The low nibble stores batch + 1, so zero means no prepared redraw. */
+#define RUNTIME_REDRAW_COUNT_MASK 0x0fU
+#define RUNTIME_REDRAW_FULL       (1U << 4)
+#define RUNTIME_REDRAW_SUCCESS    (1U << 5)
 
 enum {
     RUNTIME_PHASE_ACTIVE = 1U << 0,
@@ -27,6 +33,7 @@ typedef struct {
 static irq_handler_entry_t g_irq_handlers[IRQ_HANDLER_SLOTS];
 static runtime_service_stats_t g_runtime_stats;
 static uint8_t g_runtime_phase;
+static uint8_t g_runtime_redraw_state;
 
 __attribute__((weak)) void kernel_on_timer_tick(void) {
 }
@@ -43,6 +50,7 @@ void runtime_service_reset(void) {
     uint64_t budget = g_runtime_stats.budget_ticks;
 
     g_runtime_phase = 0;
+    g_runtime_redraw_state = 0;
     g_runtime_stats = (runtime_service_stats_t){0};
     g_runtime_stats.counter_frequency_hz = frequency;
     g_runtime_stats.budget_ticks = budget;
@@ -70,19 +78,93 @@ void runtime_service_report_metric(uint32_t metric, uint32_t value) {
     }
 }
 
+void runtime_service_gui_render(struct fb *fb, void *context) {
+    gui_desktop_t *desktop = gui_desktop();
+    uint32_t original_count;
+    uint32_t batch;
+
+    if (desktop == 0) {
+        g_runtime_redraw_state = 1U;
+        gui_render((fb_t *)fb, context);
+        return;
+    }
+    if (desktop->damage_full != 0U) {
+        g_runtime_redraw_state = RUNTIME_REDRAW_FULL | 1U;
+        gui_render((fb_t *)fb, context);
+        return;
+    }
+
+    original_count = desktop->damage_count;
+    batch = original_count;
+    if (batch > RUNTIME_REDRAW_DAMAGE_BUDGET) {
+        batch = RUNTIME_REDRAW_DAMAGE_BUDGET;
+    }
+    g_runtime_redraw_state = (uint8_t)(batch + 1U);
+    desktop->damage_count = batch;
+    gui_render((fb_t *)fb, context);
+    desktop->damage_count = original_count;
+}
+
 void runtime_service_report_redraw(void) {
     gui_desktop_t *desktop = gui_desktop();
+    uint8_t state = g_runtime_redraw_state;
+    uint32_t batch;
 
     runtime_service_report_metric(RUNTIME_METRIC_REDRAW, 1U);
     if (desktop == 0) {
         return;
     }
-    if (desktop->damage_full != 0U) {
+    if (state == 0U) {
+        if (desktop->damage_full != 0U) {
+            state = RUNTIME_REDRAW_FULL | 1U;
+        } else {
+            batch = desktop->damage_count;
+            if (batch > RUNTIME_REDRAW_DAMAGE_BUDGET) {
+                batch = RUNTIME_REDRAW_DAMAGE_BUDGET;
+            }
+            state = (uint8_t)(batch + 1U);
+        }
+    }
+
+    batch = (state & RUNTIME_REDRAW_COUNT_MASK) - 1U;
+    if ((state & RUNTIME_REDRAW_FULL) != 0U) {
         runtime_service_report_metric(RUNTIME_METRIC_FULL_REDRAWS, 1U);
     } else {
-        runtime_service_report_metric(RUNTIME_METRIC_DAMAGE_ITEMS,
-                                      desktop->damage_count);
+        runtime_service_report_metric(RUNTIME_METRIC_DAMAGE_ITEMS, batch);
+        if (desktop->damage_count > batch) {
+            runtime_service_report_metric(
+                RUNTIME_METRIC_REDRAW_EXHAUSTIONS, 1U);
+        }
     }
+
+    if (g_runtime_redraw_state != 0U) {
+        g_runtime_redraw_state = state | RUNTIME_REDRAW_SUCCESS;
+    }
+}
+
+void runtime_service_gui_clear_dirty(void) {
+    gui_desktop_t *desktop = gui_desktop();
+    uint8_t state = g_runtime_redraw_state;
+    uint32_t batch;
+    uint32_t remaining;
+
+    g_runtime_redraw_state = 0U;
+    if ((state & RUNTIME_REDRAW_SUCCESS) == 0U || desktop == 0) {
+        return;
+    }
+
+    batch = (state & RUNTIME_REDRAW_COUNT_MASK) - 1U;
+    if ((state & RUNTIME_REDRAW_FULL) != 0U ||
+        desktop->damage_count <= batch) {
+        gui_clear_dirty();
+        return;
+    }
+
+    remaining = desktop->damage_count - batch;
+    /* kmemcpy walks forward; this overlapping left shift is therefore safe. */
+    kmemcpy(desktop->damage_rects, desktop->damage_rects + batch,
+            remaining * (uint32_t)sizeof(damage_rect_t));
+    desktop->damage_count = remaining;
 }
 
 void runtime_service_report_input_queue(uint32_t depth, uint32_t high_water,
@@ -182,6 +264,7 @@ uint32_t runtime_service_run_pending(void) {
     g_runtime_stats.pending_work = 0;
     g_runtime_stats.last_work = work;
     g_runtime_phase = 0;
+    g_runtime_redraw_state = 0;
     for (uint32_t i = 0; i < RUNTIME_METRIC_COUNT; i++) {
         g_runtime_stats.metric_last[i] = 0;
     }

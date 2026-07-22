@@ -50,6 +50,22 @@ void test_virtio_input_init_records_negotiated_queue_size(void) {
     TEST_ASSERT_EQUAL_UINT64(8, mmio[VIRTIO_MMIO_QUEUE_NUM / sizeof(uint32_t)]);
     TEST_ASSERT_EQUAL_UINT64(1, mmio[VIRTIO_MMIO_QUEUE_READY / sizeof(uint32_t)]);
     TEST_ASSERT_EQUAL_UINT64(7, mmio[VIRTIO_MMIO_STATUS / sizeof(uint32_t)]);
+
+    input_queue_init();
+    for (uint16_t i = 0; i < device.queue_size; i++) {
+        virtio_input_test_set_event(i, i, VIRTIO_INPUT_EV_KEY,
+                                    VIRTIO_INPUT_KEY_A, 1);
+    }
+    virtio_input_test_set_used_idx(10);
+
+    TEST_ASSERT_EQUAL_UINT64(8, (uint64_t)virtio_input_poll(&device));
+    TEST_ASSERT_EQUAL_UINT64(8, device.last_used_idx);
+    TEST_ASSERT_EQUAL_UINT64(1, virtio_input_has_events(&device));
+
+    TEST_ASSERT_EQUAL_UINT64(2, (uint64_t)virtio_input_poll(&device));
+    TEST_ASSERT_EQUAL_UINT64(10, device.last_used_idx);
+    TEST_ASSERT_EQUAL_UINT64(0, virtio_input_has_events(&device));
+    TEST_ASSERT_EQUAL_UINT64(10, input_queue_available());
 }
 
 void test_virtio_input_rejects_invalid_inputs(void) {
