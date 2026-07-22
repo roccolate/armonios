@@ -41,6 +41,7 @@ run_gate qemu-focus bash tools/qemu_focus_test.sh
 run_gate qemu-el2-entry bash tools/qemu_el2_entry_test.sh
 run_gate qemu-markers bash tools/qemu_marker_test.sh all
 run_gate qemu-runtime-stress bash tools/qemu_runtime_stress_test.sh
+run_gate qemu-runtime-net-stress bash tools/qemu_runtime_net_stress_test.sh
 run_gate qemu-fb-fat bash tools/qemu_fb_fat_test.sh
 
 printf '\nALL AUTOMATED BASELINE GATES PASSED\n'
