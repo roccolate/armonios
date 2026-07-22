@@ -20,7 +20,7 @@ Proposed direction:
   wink, and heart.
 - Store each icon as a compact 1-bit bitmap/mask with explicit width and height.
 - Provide ASCII fallbacks such as `:)`, `:(`, `;)`, and `<3`.
-- Keep the first implementation in userland/libkarmdesk where possible.
+- Keep the first implementation in userland/libarmdesk where possible.
 - Later add one generic bitmap or mask drawing syscall rather than an
   emoji-specific syscall.
 - Treat UTF-8 text support as a separate feature; do not require it for icons.
@@ -45,3 +45,36 @@ Before implementation:
 3. Decide whether icon data lives in applications, a shared userland runtime,
    or a generic kernel-assisted mask renderer.
 4. Add a small icon gallery/demo and visible QEMU verification.
+
+## libkarm and libarmdesk separation
+
+**Status:** proposed userland architecture cleanup.
+
+Formalize two libraries with a one-way dependency:
+
+```text
+applications -> libarmdesk -> libkarm -> kernel syscalls
+```
+
+- **libkarm** remains the GUI-independent userland base: startup, syscall
+  trampolines, errors, strings, memory, process, IPC, I/O, time, and VFS helpers.
+- **libarmdesk** becomes the desktop toolkit: window/event wrappers, drawing,
+  themes, layouts, widgets, dialogs, notifications, and ArmoniIcons.
+- `libkarm` must never depend on `libarmdesk`; console programs and services
+  should be able to link only the base library.
+- Migrate `programs/libkarmdesk` to `programs/libarmdesk` gradually.
+- Keep a temporary compatibility header in `libkarmdesk` while applications are
+  moved to the new include path.
+- Move shared syscall numbers and ABI structures into public headers under
+  `include/armonios/abi/` so userland does not include kernel-private headers.
+
+Initial target structure:
+
+```text
+programs/libkarm/       freestanding userland runtime
+programs/libarmdesk/    GUI wrappers and desktop toolkit
+include/armonios/abi/   shared kernel/userland ABI contracts
+```
+
+This split should happen before growing a shared widget toolkit, so modern UI
+features do not accumulate inside a single header-only GUI wrapper.
