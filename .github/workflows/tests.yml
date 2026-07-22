@@ -46,3 +46,4 @@ jobs:
           build/qemu-*.log
           build-focus/qemu-*.log
           build-usercopy-test/qemu-*.log
+          build-runtime-stress/qemu-*.log

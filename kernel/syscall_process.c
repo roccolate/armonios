@@ -13,6 +13,10 @@
 #include "kernel/vfs.h"
 #include "uart/pl011.h"
 
+#if defined(ARMONIOS_RUNTIME_STRESS_TEST)
+static uint32_t g_runtime_stress_yields;
+#endif
+
 int64_t sys_spawn(process_t *process, uint64_t path_ptr,
                   uint64_t entry_index) {
     char path[VFS_MAX_PATH];
@@ -118,6 +122,12 @@ int sys_yield_process(exception_frame_t *frame) {
         return 0;
     }
     current->regs[0] = 0;
+#if defined(ARMONIOS_RUNTIME_STRESS_TEST)
+    g_runtime_stress_yields++;
+    if ((g_runtime_stress_yields & 63U) == 0U) {
+        uart_puts("runtime-stress: EL0 heartbeat\n");
+    }
+#endif
     return process_dispatch_next(current, frame, PROCESS_DISPATCH_PREEMPT);
 }
 
