@@ -129,23 +129,25 @@ void test_fat32_mount_reads_geometry(void) {
     TEST_ASSERT_EQUAL_UINT64(2, fs.root_cluster);
 }
 
-void test_fat32_default_fs_tracks_successful_mount_only(void) {
+void test_fat32_mount_state_is_instance_local(void) {
     test_fat32_disk_t disk;
-    fat32_fs_t fs;
-    fat32_fs_t bad_fs;
+    fat32_fs_t mounted;
+    fat32_fs_t rejected;
 
     test_setup_fat32_disk(&disk);
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fat32_mount(
-                                  &fs, test_disk_read_sector, &disk));
-    TEST_ASSERT_TRUE(fat32_default_fs() == &fs);
+                                  &mounted, test_disk_read_sector, &disk));
+    TEST_ASSERT_EQUAL_UINT64(1, mounted.mounted);
 
     test_setup_fat32_disk(&disk);
     test_write_le16(&disk.sectors[0][11], 1024);
+    rejected.mounted = 1;
     TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
-                             (uint64_t)fat32_mount(&bad_fs,
+                             (uint64_t)fat32_mount(&rejected,
                                                    test_disk_read_sector,
                                                    &disk));
-    TEST_ASSERT_NULL(fat32_default_fs());
+    TEST_ASSERT_EQUAL_UINT64(0, rejected.mounted);
+    TEST_ASSERT_EQUAL_UINT64(1, mounted.mounted);
 }
 
 void test_fat32_open_root_finds_8_3_file(void) {
@@ -300,6 +302,19 @@ void test_fat32_list_root_returns_short_names(void) {
     for (uint64_t i = 0; i < bytes_written; i++) {
         TEST_ASSERT_EQUAL_UINT64(expected[i], buffer[i]);
     }
+
+    for (uint64_t i = 0; i < sizeof(buffer); i++) {
+        buffer[i] = 0;
+    }
+    bytes_written = 0;
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)fat32_list_root_at(
+                                 &fs, 6, buffer, 4, &bytes_written));
+    TEST_ASSERT_EQUAL_UINT64(4, bytes_written);
+    TEST_ASSERT_EQUAL_UINT64('T', buffer[0]);
+    TEST_ASSERT_EQUAL_UINT64('X', buffer[1]);
+    TEST_ASSERT_EQUAL_UINT64('T', buffer[2]);
+    TEST_ASSERT_EQUAL_UINT64('\n', buffer[3]);
 }
 
 void test_fat32_mount_vfs_root_lists_through_vfs(void) {
@@ -452,6 +467,8 @@ void test_fat32_vfs_open_mounts_existing_root_file_dynamically(void) {
 
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fat32_mount(
                                   &fs, test_disk_read_sector, &disk));
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)fat32_mount_vfs_root(&fs, "/fat"));
 
     fd = vfs_open_flags("/fat/hello.txt", VFS_O_RDONLY);
     TEST_ASSERT_TRUE(fd >= 0);
@@ -487,6 +504,8 @@ void test_fat32_vfs_open_create_makes_missing_root_file(void) {
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fat32_mount(
                                   &fs, test_disk_read_sector, &disk));
     fat32_set_write_sector(&fs, test_disk_write_sector);
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)fat32_mount_vfs_root(&fs, "/fat"));
 
     fd = vfs_open_flags("/fat/note.txt", VFS_O_RDWR | VFS_O_CREAT);
     TEST_ASSERT_TRUE(fd >= 0);
@@ -520,6 +539,8 @@ void test_fat32_vfs_open_create_rejects_bad_flags_and_paths(void) {
     TEST_ASSERT_EQUAL_UINT64(0, (uint64_t)fat32_mount(
                                   &fs, test_disk_read_sector, &disk));
     fat32_set_write_sector(&fs, test_disk_write_sector);
+    TEST_ASSERT_EQUAL_UINT64(0,
+                             (uint64_t)fat32_mount_vfs_root(&fs, "/fat"));
 
     TEST_ASSERT_EQUAL_UINT64((uint64_t)-1,
                              (uint64_t)vfs_open_flags("/tmp/new.txt",

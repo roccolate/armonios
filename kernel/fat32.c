@@ -17,13 +17,6 @@
 #define FAT32_CLUSTER_EOC    0x0ffffff8U
 #define FAT32_CLUSTER_BAD    0x0ffffff7U
 
-/*
- * Default filesystem handle for callers that don't go through a
- * mounted VFS node. Set by fat32_mount; used by vfs_unlink /
- * vfs_rename when they have to act on a path under "/fat/".
- */
-static fat32_fs_t *g_fat32_default_fs;
-
 static uint16_t le16(const uint8_t *p) {
     return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
 }
@@ -140,20 +133,28 @@ static int short_name_equals(const uint8_t entry[11],
     return 1;
 }
 
-static int append_list_byte(uint8_t *buffer, uint64_t capacity,
-                            uint64_t *out, uint8_t value) {
-    if (*out >= capacity) {
-        return -1;
-    }
+typedef struct {
+    uint8_t *buffer;
+    uint64_t capacity;
+    uint64_t offset;
+    uint64_t position;
+    uint64_t written;
+} fat32_list_output_t;
 
-    buffer[*out] = value;
-    (*out)++;
+static int append_list_byte(fat32_list_output_t *out, uint8_t value) {
+    if (out->position >= out->offset) {
+        if (out->written >= out->capacity) {
+            return -1;
+        }
+        out->buffer[out->written] = value;
+        out->written++;
+    }
+    out->position++;
     return 0;
 }
 
 static int append_short_name(const uint8_t entry[11], uint8_t attr,
-                             uint8_t *buffer, uint64_t capacity,
-                             uint64_t *out) {
+                             fat32_list_output_t *out) {
     uint32_t base_end = 8U;
     uint32_t ext_end = 3U;
 
@@ -165,30 +166,29 @@ static int append_short_name(const uint8_t entry[11], uint8_t attr,
     }
 
     for (uint32_t i = 0; i < base_end; i++) {
-        if (append_list_byte(buffer, capacity, out, entry[i]) != 0) {
+        if (append_list_byte(out, entry[i]) != 0) {
             return -1;
         }
     }
 
     if (ext_end > 0U) {
-        if (append_list_byte(buffer, capacity, out, '.') != 0) {
+        if (append_list_byte(out, '.') != 0) {
             return -1;
         }
         for (uint32_t i = 0; i < ext_end; i++) {
-            if (append_list_byte(buffer, capacity, out,
-                                 entry[8U + i]) != 0) {
+            if (append_list_byte(out, entry[8U + i]) != 0) {
                 return -1;
             }
         }
     }
 
     if ((attr & FAT32_ATTR_DIRECTORY) != 0) {
-        if (append_list_byte(buffer, capacity, out, '/') != 0) {
+        if (append_list_byte(out, '/') != 0) {
             return -1;
         }
     }
 
-    return append_list_byte(buffer, capacity, out, '\n');
+    return append_list_byte(out, '\n');
 }
 
 static uint32_t cluster_to_lba(const fat32_fs_t *fs, uint32_t cluster) {
@@ -436,7 +436,6 @@ int fat32_mount(fat32_fs_t *fs, fat32_read_sector_fn_t read_sector_cb,
         return -1;
     }
 
-    g_fat32_default_fs = 0;
     fs->read_sector = read_sector_cb;
     fs->write_sector = 0;
     fs->context = context;
@@ -484,7 +483,6 @@ int fat32_mount(fat32_fs_t *fs, fat32_read_sector_fn_t read_sector_cb,
     fs->data_start_lba = data_start;
     fs->root_cluster = root_cluster;
     fs->mounted = 1;
-    g_fat32_default_fs = fs;
     return 0;
 }
 
@@ -493,10 +491,6 @@ void fat32_set_write_sector(fat32_fs_t *fs,
     if (fs != 0) {
         fs->write_sector = write_sector_cb;
     }
-}
-
-fat32_fs_t *fat32_default_fs(void) {
-    return g_fat32_default_fs;
 }
 
 int fat32_open_root(fat32_fs_t *fs, const char *name, fat32_file_t *file) {
@@ -562,9 +556,15 @@ int fat32_open_root(fat32_fs_t *fs, const char *name, fat32_file_t *file) {
     return -1;
 }
 
-int fat32_list_root(fat32_fs_t *fs, uint8_t *buffer, uint64_t capacity,
-                    uint64_t *bytes_written) {
-    uint64_t out = 0;
+int fat32_list_root_at(fat32_fs_t *fs, uint64_t offset, uint8_t *buffer,
+                       uint64_t capacity, uint64_t *bytes_written) {
+    fat32_list_output_t out = {
+        .buffer = buffer,
+        .capacity = capacity,
+        .offset = offset,
+        .position = 0,
+        .written = 0,
+    };
     uint32_t cluster;
 
     if (bytes_written != 0) {
@@ -584,13 +584,13 @@ int fat32_list_root(fat32_fs_t *fs, uint8_t *buffer, uint64_t capacity,
                 return -1;
             }
 
-            for (uint32_t offset = 0; offset < FAT32_SECTOR_SIZE;
-                 offset += 32U) {
-                const uint8_t *entry = &fs->sector[offset];
+            for (uint32_t entry_offset = 0; entry_offset < FAT32_SECTOR_SIZE;
+                 entry_offset += 32U) {
+                const uint8_t *entry = &fs->sector[entry_offset];
                 uint8_t attr = entry[11];
 
                 if (entry[0] == 0x00U) {
-                    *bytes_written = out;
+                    *bytes_written = out.written;
                     return 0;
                 }
 
@@ -599,9 +599,8 @@ int fat32_list_root(fat32_fs_t *fs, uint8_t *buffer, uint64_t capacity,
                     continue;
                 }
 
-                if (append_short_name(entry, attr, buffer, capacity,
-                                      &out) != 0) {
-                    *bytes_written = out;
+                if (append_short_name(entry, attr, &out) != 0) {
+                    *bytes_written = out.written;
                     return 0;
                 }
             }
@@ -612,8 +611,13 @@ int fat32_list_root(fat32_fs_t *fs, uint8_t *buffer, uint64_t capacity,
         }
     }
 
-    *bytes_written = out;
+    *bytes_written = out.written;
     return 0;
+}
+
+int fat32_list_root(fat32_fs_t *fs, uint8_t *buffer, uint64_t capacity,
+                    uint64_t *bytes_written) {
+    return fat32_list_root_at(fs, 0, buffer, capacity, bytes_written);
 }
 
 int fat32_read(fat32_fs_t *fs, const fat32_file_t *file, uint64_t offset,
@@ -866,7 +870,7 @@ int fat32_write(fat32_fs_t *fs, fat32_file_t *file, uint64_t offset,
  * we can use that slot directly without scanning further.
  */
 static int find_free_dir_entry(fat32_fs_t *fs, uint32_t *out_lba,
-                              uint32_t *out_offset) {
+                               uint32_t *out_offset) {
     uint32_t cluster = fs->root_cluster;
 
     while (cluster >= 2U && !cluster_is_eoc(cluster)) {

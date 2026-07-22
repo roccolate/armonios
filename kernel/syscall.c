@@ -10,24 +10,20 @@
 
 #include <stdint.h>
 
-#include "drivers/board.h"
 #include "input/input.h"
 #include "kernel/console.h"
 #include "kernel/gui.h"
-#include "kernel/net/dhcp.h"
+#include "kernel/io_service.h"
 #include "kernel/process.h"
 #include "kernel/sched/sched.h"
 #include "kernel/syscall_helpers.h"
 #include "kernel/syscall_internal.h"
 #include "kernel/syscall_numbers.h"
 #include "uart/pl011.h"
-#include "usb/hid_driver.h"
 
 static void syscall_pump_input(uint64_t syscall_number) {
     uart_pump_input();
-    input_uart_poll();
-    board_input_poll();
-    usb_hid_poll_all();
+    kernel_io_poll_input_sources(1);
 
     if (syscall_number != SYS_READ) {
         input_event_t drain_event;
@@ -143,7 +139,7 @@ void syscall_dispatch(exception_frame_t *frame) {
     process_t *current = process_current();
 
     syscall_pump_input(frame->x[8]);
-    net_poll();
+    kernel_io_poll_network();
 
     if (current != 0) {
         process_save_context(current, frame->x, frame->elr, frame->spsr,

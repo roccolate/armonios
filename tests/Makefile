@@ -12,12 +12,12 @@ APPS_DIR  := programs/apps
 # production kernel does the same with aarch64 objcopy, so this
 # test catches the same shape of bug in the BUILD process.
 APP_BLOB_BINS  := $(BUILD_DIR)/$(APPS_DIR)/shell.bin \
-                  $(BUILD_DIR)/$(APPS_DIR)/editor.bin \
-                  $(BUILD_DIR)/$(APPS_DIR)/files.bin \
-                  $(BUILD_DIR)/$(APPS_DIR)/monitor.bin \
-                  $(BUILD_DIR)/$(APPS_DIR)/clock.bin \
-                  $(BUILD_DIR)/$(APPS_DIR)/panel.bin \
-                  $(BUILD_DIR)/$(APPS_DIR)/control.bin
+                   $(BUILD_DIR)/$(APPS_DIR)/editor.bin \
+                   $(BUILD_DIR)/$(APPS_DIR)/files.bin \
+                   $(BUILD_DIR)/$(APPS_DIR)/monitor.bin \
+                   $(BUILD_DIR)/$(APPS_DIR)/clock.bin \
+                   $(BUILD_DIR)/$(APPS_DIR)/panel.bin \
+                   $(BUILD_DIR)/$(APPS_DIR)/control.bin
 APP_BLOB_OBJS  := $(patsubst %.bin,%.host_blob.o,$(APP_BLOB_BINS))
 
 SRCS=unity/unity.c main.c \
@@ -27,13 +27,15 @@ SRCS=unity/unity.c main.c \
      test_user_image_runtime.c \
      test_panel_boot_argv.c \
      test_panel_boot_recovery.c \
-     test_irq.c test_sched.c test_vfs.c test_vfs_fat32_invalidation.c test_tmpfs.c test_fat32.c test_dhcp_options.c \
+     test_irq.c test_sched.c test_vfs.c test_vfs_mount_dispatch.c \
+     test_vfs_fat32_invalidation.c test_fat32_vfs_registration.c \
+     test_tmpfs.c test_fat32.c test_dhcp_options.c \
      test_ipc.c test_font.c \
      test_gui.c test_fb.c test_dtb.c test_virtio_blk.c test_virtio_net.c \
      test_input.c test_virtio_input.c \
      test_hid.c test_pci.c test_hid_driver.c test_usb_core.c \
      test_pci_assign.c test_hid_state.c test_hid_init.c \
-     test_syscall_abi.c test_syscall_helpers.c \
+     test_syscall_abi.c test_syscall_helpers.c test_syscall_vfs_user_copy.c \
      test_process_isolation.c test_window_abi.c \
      ../kernel/mm/pmm.c ../kernel/mm/kheap.c ../kernel/mm/vmm.c \
      ../kernel/boot_program.c ../kernel/bootfs.c \
@@ -46,7 +48,8 @@ SRCS=unity/unity.c main.c \
      ../kernel/init_status.c ../kernel/print.c \
      ../kernel/ipc.c ../kernel/irq.c ../kernel/process.c \
      ../kernel/sched/sched.c \
-     ../kernel/tmpfs.c ../kernel/syscall_helpers.c ../kernel/kstring.c \
+     ../kernel/tmpfs.c ../kernel/syscall_helpers.c ../kernel/syscall_vfs.c \
+     ../kernel/kstring.c \
      ../kernel/user_image.c ../kernel/user_vm.c ../kernel/vfs.c \
      ../kernel/dtb.c ../kernel/dtb_framebuffer.c \
      ../drivers/fb/fb.c ../drivers/storage/virtio_blk.c \

@@ -17,6 +17,7 @@
 #include "kernel/fat32.h"
 #include "kernel/gui.h"
 #include "kernel/init_status.h"
+#include "kernel/io_service.h"
 #include "kernel/ipc.h"
 #include "kernel/irq.h"
 #include "kernel/kernel_compiler.h"
@@ -45,6 +46,28 @@ void kernel_main(uint64_t dtb_addr);
 
 static fat32_fs_t g_fat32_fs;
 
+static int board_supports(uint32_t capability) {
+    return (board_capabilities() & capability) != 0;
+}
+
+void kernel_io_poll_input_sources(uint8_t include_uart) {
+    if (include_uart != 0) {
+        input_uart_poll();
+    }
+    if (board_supports(BOARD_CAP_INPUT)) {
+        board_input_poll();
+    }
+    if (board_supports(BOARD_CAP_USB)) {
+        usb_hid_poll_all();
+    }
+}
+
+void kernel_io_poll_network(void) {
+    if (board_supports(BOARD_CAP_NET)) {
+        net_poll();
+    }
+}
+
 static int desktop_has_keyboard_focus(void) {
     gui_desktop_t *desktop = gui_desktop();
 
@@ -61,9 +84,7 @@ static void console_input_thread(void *arg) {
     (void)arg;
 
     for (;;) {
-        input_uart_poll();
-        board_input_poll();
-        usb_hid_poll_all();
+        kernel_io_poll_input_sources(1);
 
         input_event_t event;
         while (!desktop_has_keyboard_focus() &&
@@ -83,7 +104,7 @@ static void console_input_thread(void *arg) {
             __asm__ volatile("wfe");
         }
 
-        net_poll();
+        kernel_io_poll_network();
 
         sched_yield();
     }
@@ -327,10 +348,9 @@ static void poll_input_events(void) {
 
 /* Timer IRQ work that must happen even when no userspace thread is running. */
 void kernel_on_timer_tick(void) {
-    board_input_poll();
-    usb_hid_poll_all();
+    kernel_io_poll_input_sources(0);
     poll_input_events();
-    net_poll();
+    kernel_io_poll_network();
 }
 
 static int enable_identity_mmu(const dtb_memory_t *memory, uint64_t dtb_addr) {
@@ -350,7 +370,7 @@ static int enable_identity_mmu(const dtb_memory_t *memory, uint64_t dtb_addr) {
      * that user data and PMM allocations are never executable.
      */
     if (vmm_map_kernel_identity(kernel_pgd, memory->base, memory->size,
-                                 board_map_mmio) != 0) {
+                                board_map_mmio) != 0) {
         uart_puts("VMM map: failed\n");
         return -1;
     }
@@ -386,60 +406,72 @@ static init_status_t init_network(void) {
 }
 
 /*
- * Initialize every input source the board can expose. Missing devices are not
- * fatal: serial input alone is enough to keep the kernel console usable.
+ * Initialize the always-available serial queue and only the optional input
+ * sources declared by the board. Unsupported devices are skipped, not probed.
  */
 static init_status_t init_input(void) {
+    pci_device_t pci_devs[16];
+    uint32_t pci_n = 0;
+
     input_queue_init();
-    if (board_input_init() == 0) {
+    if (board_supports(BOARD_CAP_INPUT) && board_input_init() == 0) {
         uart_puts("input: ok\n");
     }
-    pci_device_t pci_devs[16];
-    uint32_t pci_n = pci_enumerate(pci_devs, 16);
-    {
-        uint32_t assigned = pci_assign_bars(pci_devs, pci_n,
-                                            0x20000000U, 0x1000U);
 
+    if (board_supports(BOARD_CAP_PCI)) {
+        uint32_t assigned;
+
+        pci_n = pci_enumerate(pci_devs, 16);
+        assigned = pci_assign_bars(pci_devs, pci_n,
+                                   0x20000000U, 0x1000U);
         uart_puts("PCI: ");
         print_dec64(pci_n);
         uart_puts(" dev, ");
         print_dec64(assigned);
         uart_puts(" BARs\n");
     }
-    if (usb_init() > 0) {
-        uart_puts("USB: controller initialized\n");
-        usb_hid_state_reset();
-        uint8_t usb_ports = usb_port_count();
-        uint8_t usb_address = 1;
-        for (uint8_t port = 0; port < usb_ports; port++) {
-            if (usb_port_reset(port) > 0) {
-                uart_puts("USB port ");
-                print_dec64(port);
-                uart_puts("\n");
 
-                uint8_t config_buf[256];
-                usb_config_walk_t walk;
-                usb_device_t dev;
-                if (usb_enumerate_port(port, usb_address, 1, config_buf,
-                                       sizeof(config_buf), &dev, &walk) == 0) {
-                    uart_puts("USB: enumeration ok\n");
-                    uint8_t before = g_usb_hid_state.count;
-                    (void)usb_hid_add_device(&g_usb_hid_state, &walk, &dev);
-                    for (uint8_t i = before; i < g_usb_hid_state.count; i++) {
-                        usb_hid_set_protocol_boot(&g_usb_hid_state.devices[i]);
+    if (board_supports(BOARD_CAP_USB) &&
+        board_supports(BOARD_CAP_PCI)) {
+        if (usb_init() > 0) {
+            uart_puts("USB: controller initialized\n");
+            usb_hid_state_reset();
+            uint8_t usb_ports = usb_port_count();
+            uint8_t usb_address = 1;
+            for (uint8_t port = 0; port < usb_ports; port++) {
+                if (usb_port_reset(port) > 0) {
+                    uart_puts("USB port ");
+                    print_dec64(port);
+                    uart_puts("\n");
+
+                    uint8_t config_buf[256];
+                    usb_config_walk_t walk;
+                    usb_device_t dev;
+                    if (usb_enumerate_port(port, usb_address, 1, config_buf,
+                                           sizeof(config_buf), &dev,
+                                           &walk) == 0) {
+                        uart_puts("USB: enumeration ok\n");
+                        uint8_t before = g_usb_hid_state.count;
+                        (void)usb_hid_add_device(&g_usb_hid_state, &walk,
+                                                 &dev);
+                        for (uint8_t i = before;
+                             i < g_usb_hid_state.count; i++) {
+                            usb_hid_set_protocol_boot(
+                                &g_usb_hid_state.devices[i]);
+                        }
+                        usb_address++;
+                    } else {
+                        uart_puts("USB: enum skip\n");
                     }
-                    usb_address++;
-                } else {
-                    uart_puts("USB: enum skip\n");
                 }
             }
-        }
-        if (g_usb_hid_state.count > 0) {
-            uart_puts("USB HID: ");
-            uart_putc('0' + (char)g_usb_hid_state.count);
-            uart_puts(" devices\n");
-        } else {
-            uart_puts("USB HID: none\n");
+            if (g_usb_hid_state.count > 0) {
+                uart_puts("USB HID: ");
+                uart_putc('0' + (char)g_usb_hid_state.count);
+                uart_puts(" devices\n");
+            } else {
+                uart_puts("USB HID: none\n");
+            }
         }
     }
 
@@ -493,15 +525,32 @@ void kernel_main(uint64_t dtb_addr) {
             init_status_set(INIT_PHASE_VFS, init_vfs());
             init_timer_irq();
             init_status_set(INIT_PHASE_IRQ_TIMER, INIT_STATUS_OK);
-            storage_status = probe_storage();
-            init_status_set(INIT_PHASE_STORAGE, storage_status);
+
+            if (board_supports(BOARD_CAP_STORAGE)) {
+                storage_status = probe_storage();
+                init_status_set(INIT_PHASE_STORAGE, storage_status);
+            } else {
+                storage_status = INIT_STATUS_SKIPPED;
+                init_status_set(INIT_PHASE_STORAGE, INIT_STATUS_SKIPPED);
+            }
             if (storage_status == INIT_STATUS_OK) {
                 uart_puts("storage app image: FAT32\n");
             } else {
                 uart_puts("storage app image: bootfs\n");
             }
-            init_status_set(INIT_PHASE_DISPLAY, init_display());
-            init_status_set(INIT_PHASE_NETWORK, init_network());
+
+            if (board_supports(BOARD_CAP_DISPLAY)) {
+                init_status_set(INIT_PHASE_DISPLAY, init_display());
+            } else {
+                init_status_set(INIT_PHASE_DISPLAY, INIT_STATUS_SKIPPED);
+            }
+
+            if (board_supports(BOARD_CAP_NET)) {
+                init_status_set(INIT_PHASE_NETWORK, init_network());
+            } else {
+                init_status_set(INIT_PHASE_NETWORK, INIT_STATUS_SKIPPED);
+            }
+
             init_status_set(INIT_PHASE_INPUT, init_input());
             init_status_set(INIT_PHASE_PANEL, start_panel_boot(&memory));
             console_start_interactive();
