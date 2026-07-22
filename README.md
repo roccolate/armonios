@@ -6,7 +6,7 @@
 [![License: GPL-2.0](https://img.shields.io/badge/License-GPL--2.0-blue.svg)](LICENSE)
 [![Architecture](https://img.shields.io/badge/arch-AArch64-green.svg)]()
 [![Language](https://img.shields.io/badge/lang-C%20%2B%20ASM-orange.svg)]()
-[![Status](https://img.shields.io/badge/status-v0.1%20QEMU%20baseline-blue.svg)]()
+[![Status](https://img.shields.io/badge/status-v0.2%20final%20candidate-blue.svg)]()
 
 <p align="center">
   <img src="docs/assets/armin.png" alt="Armin, the ArmoniOS mascot" width="128">
@@ -22,50 +22,71 @@ ArmoniOS is a **real bare-metal AArch64 operating system** with a verified QEMU
 `virt` desktop baseline. It is not a hosted Linux application or distribution.
 
 - **public baseline:** v0.1 QEMU desktop;
-- **engineering phase:** v0.2 cleanup and runtime hardening;
-- **next release blockers:** global-time enforcement and sustained-load proof;
+- **engineering phase:** v0.2 final cleanup/runtime-hardening candidate;
+- **remaining promotion work:** visible pass, residual-risk disposition, issue #63,
+  and the release record;
 - **product target:** v1.0 usable QEMU mini desktop;
 - **hardware:** Raspberry Pi scaffolding only, not hardware-supported.
 
-Runtime measurement Phase 1B is complete for the work classes observable on
-QEMU. Phase 2 currently enforces these count bounds:
+The post-EOI runtime service enforces:
 
-| Work class | Current post-EOI bound |
+| Work class | Current bound |
 |---|---:|
+| Whole service | One nominal timer interval at safe checkpoints |
 | Virtio-input producer | At most 16 used descriptors per call |
 | USB HID producer | At most four registered device visits per call |
 | Shared input consumer | At most 16 queued events per pass |
 | Partial compositor damage | At most eight rectangles per successful redraw |
-| Virtio-net RX | At most 16 valid frames per pass |
+| Virtio-net RX | At most 16 valid frames per active NETWORK pass |
 
-Virtio-input leaves later used descriptors in its ring for the next periodic
-pass. USB covers every supported slot because the fixed device array has four
-entries. Partial compositor damage remains in-order in the existing damage list
-and `dirty` stays set until later batches complete. Failed GPU submissions do not
-consume damage. Input readiness and network readiness have independent pending
-bits. Input requeues only when the shared queue still contains events; network
-uses a conservative rule, so exactly 16 frames may schedule one empty follow-up
-pass.
+Virtio-input leaves later descriptors in its ring. Partial damage remains ordered
+and dirty until later batches complete; failed GPU submissions consume nothing.
+Input and network readiness use independent pending bits. Deadline exhaustion is
+counted once and conservatively republishes the original work snapshot.
 
-This is **not** complete runtime bounding. A full redraw is one operation but may
-still be expensive, total service time has no enforced generic-counter deadline,
-cooperative network polling outside the bottom half remains outside the network
-guarantee, and no sustained-load QEMU test yet proves EL0 progress. `RISK-017`
-remains open and v0.2 is not promoted.
+Network polling and receive now consume nothing outside the active NETWORK phase,
+so the legacy cooperative console poll cannot bypass the post-EOI count and time
+budgets.
 
-The latest validated implementation head is
-`8b86a8c24f25af0937f1df2e983c1c7c4f489b7d`:
+Two automated QEMU stress modes exist:
 
-- `Verify ArmoniOS` run `29863653280`: success;
-- `CI - Tests` run `29863653209`: success;
-- loadable QEMU kernel: **107982 / 108000 bytes**;
-- remaining size margin: **18 bytes**;
-- partial-redraw merge: PR #58
-  `fe4f2a622f5633e55b0eddb2f8f6767453a9ddca`.
+- PR #61 forces deterministic deadline expirations and proves repeated EL0
+  heartbeats while input, redraw, DHCP, and network activity occur;
+- PR #62 preserves the natural production deadline and saturates virtio-net RX
+  while input and redraw work continue.
+
+The natural saturation run recorded:
+
+```text
+EL0 yields:                       38,912
+input events consumed:                 16
+redraw submissions:                   738
+virtio-net frames consumed:        29,234
+maximum frames/pass:                   16
+network cap exhaustions:             1,827
+runtime requeues:                    1,827
+natural deadline overruns:               0
+maximum duration:                  385,763 / 625,000 ticks (61.7%)
+input overflow:                          0
+kernel panic:                            0
+```
+
+Final validated PR #62 head:
+`eac4ff990baddbf83406567b4a20e58bcae6600d`.
+
+- `Verify ArmoniOS` run `29896102906` (#290): success;
+- `CI - Tests` run `29896102904` (#430): success;
+- production loadable QEMU kernel: **107918 / 108000 bytes**;
+- remaining production margin: **82 bytes**.
 
 The virtio-net path still exposes no trustworthy device-drop or ring-overflow
-counter. Consumed-frame counts are not proof that no packet was lost before
-software observed it.
+counter. Consumed-frame counts prove software-visible progress, not delivery of
+every host-submitted packet. A full redraw also remains one cooperatively bounded
+operation rather than an asynchronously preemptible task.
+
+One intermittent EL1 VMM data abort observed during an existing FAT32 smoke run is
+tracked separately in issue #63. Subsequent reruns passed, but the observation is
+not classified as infrastructure-only without investigation.
 
 ## What works
 
@@ -85,9 +106,10 @@ The QEMU codebase includes:
 - QEMU virtio block, GPU, input, and network;
 - PCI/xHCI and directly attached boot-protocol USB HID;
 - Ethernet, ARP, IPv4, UDP, and DHCP for a QEMU user-network lease;
-- one post-EOI deferred runtime service with aggregate and per-class telemetry;
-- deterministic host, QEMU, size, stack, ABI, storage, GUI, USB, network, and
-  board-build gates.
+- one post-EOI runtime service with count bounds, a cooperative global deadline,
+  strict network routing, and aggregate/per-class telemetry;
+- deterministic host, QEMU, stress, size, stack, ABI, storage, GUI, USB, network,
+  and board-build gates.
 
 ## Important limits
 
@@ -104,10 +126,10 @@ The QEMU codebase includes:
 | Input queue | 64 events; overflow is counted but not prevented. |
 | Virtio input | Negotiated ring up to 16; at most one ring-length drained/call. |
 | USB HID | Four devices; at most four device polls/call; no hubs. |
-| Network RX | 16 valid frames/post-EOI pass; device drops unavailable. |
+| Network RX | 16 valid frames/NETWORK pass; outside-phase receive suppressed; device drops unavailable. |
 | Networking API | No socket ABI, TCP, DNS API, or HTTP. |
 | Scheduling | EL0 preemptive; EL1 helper threads cooperative. |
-| Runtime service | Runs after EOI but before `eret`; partial damage is count-bounded, full redraw and total time are not. |
+| Runtime service | Runs after EOI but before `eret`; deadline checks occur at safe boundaries and cannot interrupt one active full redraw. |
 | User copy | Permission checked, but final copies are not fault-recoverable. |
 | Raspberry Pi | Build/host scaffolding only; no physical support claim. |
 
@@ -138,9 +160,9 @@ bash tools/verify.sh
 ```
 
 The gate covers QEMU/RPi4 builds, `.data == 0`, the 108000-byte ceiling,
-native subsystem tests, runtime timing and count budgets, userland stack usage,
-FAT32 smoke, user-copy/focus regressions, framebuffer, USB, DHCP, and visible
-FAT+GPU wiring.
+native subsystem tests, runtime timing/count/routing contracts, userland stack
+usage, FAT32 smoke, user-copy/focus, framebuffer, USB, DHCP, forced-expiry
+heartbeat stress, and natural RX saturation.
 
 Useful focused commands:
 
@@ -155,6 +177,8 @@ make qemu-fs-test
 bash tools/qemu_usercopy_test.sh
 bash tools/qemu_focus_test.sh
 bash tools/qemu_marker_test.sh all
+bash tools/qemu_runtime_stress_test.sh
+bash tools/qemu_runtime_net_stress_test.sh
 bash tools/qemu_fb_fat_test.sh
 ```
 
@@ -174,8 +198,8 @@ make qemu-fb-visible
 
 The latest recorded manual workflow is from 2026-07-17. Rocco listed `/fat`,
 created an 8.3 file, opened Editor, typed and saved, closed, renamed, reopened
-with content intact, deleted, and refreshed. Manual evidence is separate from
-automated serial markers.
+with content intact, deleted, and refreshed. A new dated pass is required after
+the final v0.2 runtime boundary. Manual evidence is separate from serial gates.
 
 ## Runtime architecture
 
@@ -184,23 +208,25 @@ physical timer IRQ
   -> fixed account/rearm/publish PERIODIC | INPUT | NETWORK readiness
   -> EOI
   -> measured post-EOI runtime pass
+       -> deadline = start + one timer interval
        -> periodic producer/GUI phase
             -> virtio-input: <=16 used descriptors/call
             -> USB HID: <=4 device visits/call
             -> shared input queue: <=16 events/pass when INPUT is pending
             -> partial damage: <=8 rectangles/successful redraw
-            -> full redraw: one operation, elapsed time not yet globally bounded
-       -> independently pending network phase
+            -> full redraw: one non-preemptible operation
+       -> independently pending NETWORK phase
             -> <=16 valid RX frames
-            -> conservative requeue when cap is reached
+            -> conservative requeue at cap
+       -> expiry: count once, republish original work, skip later work
   -> process dispatch
   -> eret
 ```
 
 EOI completes the interrupt-controller transaction but does not leave the CPU
-exception. EL0 remains paused during the service pass. Count bounds now cover
-input producers, input consumption, partial damage, and post-EOI network RX; the
-complete pass still has no global duration guarantee.
+exception. EL0 remains paused during the service pass. The complete pass has a
+cooperative generic-counter deadline, but one already-started operation can cross
+it before the next checkpoint.
 
 See [Deferred Runtime Service](docs/RUNTIME_SERVICE.md).
 
@@ -245,15 +271,13 @@ input, or an installable Raspberry Pi desktop image.
 
 ## Road to v1.0
 
-1. Compact again, enforce a global runtime deadline, and prove EL0 progress under
-   sustained load.
-2. Promote v0.2 with dated automated and visible evidence.
-3. Build v0.3 block/VFS/path infrastructure.
-4. Add real FAT support.
-5. Add shared userland runtime/widgets.
-6. Complete v0.6 Files, Editor, Shell, Settings, Monitor, Panel, and Clock.
-7. Mount ext2 read-only.
-8. Stabilize, fuzz, document, and record the final workflow.
+1. Investigate issue #63 and complete the final v0.2 visible/release record.
+2. Build v0.3 block/VFS/path infrastructure.
+3. Add real FAT support.
+4. Add shared userland runtime/widgets.
+5. Complete v0.6 Files, Editor, Shell, Settings, Monitor, Panel, and Clock.
+6. Mount ext2 read-only.
+7. Stabilize, fuzz, document, and record the final workflow.
 
 ## Project structure
 
