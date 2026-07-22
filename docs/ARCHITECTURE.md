@@ -1,22 +1,59 @@
 # Architecture
 
-ArmoniOS is a compact monolithic AArch64 kernel whose verified development platform is QEMU `virt`. The Raspberry Pi 4 board layer and read-only EMMC2 diagnostic probe are build/host verified, but physical hardware behavior remains unverified and fail-closed.
+ArmoniOS is a compact monolithic AArch64 operating system. Its verified runtime
+platform is QEMU `virt`; Raspberry Pi 4 remains a separate build/host-verified,
+fail-closed hardware track.
 
-This document describes the implementation as it exists, including known architectural limitations. Operational status lives in `CURRENT_STATE.md`; active defects and exit criteria live in `TECHNICAL_RISKS.md`.
+This document describes implemented architecture, not roadmap intent.
+Operational evidence lives in `CURRENT_STATE.md`, active risks in
+`TECHNICAL_RISKS.md`, and milestone ordering in `ROADMAP.md`.
 
-## Privilege model
+## Design profile
 
-- **EL1:** kernel, drivers, VFS, GUI compositor, exception handling, syscall dispatch, and cooperative helper threads.
-- **EL0:** freestanding KLI1 applications.
-- **EL2/EL3:** not used by the verified QEMU path. A physical board may enter at EL2 and needs a deliberate transition before normal kernel initialization.
+- freestanding AArch64 kernel written primarily in C with narrow assembly entry
+  boundaries;
+- monolithic EL1 kernel and linked-in drivers;
+- freestanding EL0 applications in the KLI1 image format;
+- no libc, POSIX layer, dynamic linker, package manager, or hosted runtime;
+- single-core execution model;
+- QEMU-first verification policy;
+- fixed-capacity tables and queues chosen for readability and bounded memory.
 
-Drivers are linked into the kernel. There is no driver isolation, libc, POSIX layer, or hosted runtime.
+## Privilege and execution modes
+
+### EL1
+
+EL1 contains:
+
+- kernel initialization and board orchestration;
+- exception and IRQ entry/dispatch;
+- PMM, VMM, heap, and process management;
+- syscall dispatch and user-copy helpers;
+- VFS and filesystem adapters;
+- GUI compositor and window manager;
+- input, storage, USB, and network drivers;
+- the post-EOI deferred runtime bottom half;
+- cooperative helper threads.
+
+### EL0
+
+EL0 runs KLI1 applications such as Panel, Shell, Editor, Files, Monitor, Control,
+and Clock. Applications invoke the kernel with `svc #0` through `libkarm` and
+`libkarmdesk` wrappers.
+
+### EL2 and EL3
+
+The verified QEMU path does not use EL2 or EL3 after entry. Physical boards may
+enter at a higher exception level and require deliberate transition and core
+parking before the normal EL1 path is valid.
 
 ## Boot flow
 
-QEMU loads the kernel at the board linker address and passes the DTB pointer in `x0`.
-
 ```text
+QEMU loader
+  -> load kernel at board linker address
+  -> pass DTB pointer in x0
+
 boot/start.S
   -> preserve DTB pointer
   -> install early stack
@@ -25,97 +62,174 @@ boot/start.S
   -> call kernel_main(dtb)
 
 kernel_main
-  -> board early init and UART
+  -> board early initialization and UART
   -> DTB memory discovery
   -> PMM and process table
   -> console and heap
-  -> VMM/MMU identity mapping
+  -> VMM/MMU identity mappings
   -> VFS, bootfs, tmpfs
-  -> timer, IRQs, EL0 dispatch
-  -> optional storage and FAT32
+  -> timer, IRQ, process dispatch, runtime pending state
+  -> optional block storage and FAT32
   -> optional virtio GPU
   -> optional network
-  -> input, PCI, USB/HID
-  -> launch panel in EL0
-  -> start cooperative EL1 helper scheduler
+  -> input, PCI, xHCI, USB HID
+  -> launch Panel in EL0
+  -> enter normal process/IRQ runtime
 ```
 
-Boot phases are recorded in `kernel/init_status.{c,h}` and exposed through the kernel console.
+Initialization phase status is recorded through `kernel/init_status.{c,h}` and
+reported on the kernel console.
 
 ## Memory architecture
 
 ### Physical memory manager
 
-The PMM uses a fixed bitmap and currently manages at most 128 MiB. This matches the default QEMU configuration but is not a general Raspberry Pi memory policy.
+The PMM uses one fixed bitmap and manages at most 128 MiB. It reserves the loaded
+kernel and DTB before allocating pages for:
 
-The kernel reserves its loaded image and DTB before allocating pages for page tables, application images, stacks, anonymous mappings, GUI backing buffers, and kernel heap arenas.
+- page tables;
+- application images;
+- user stacks;
+- anonymous mappings;
+- GUI backing buffers;
+- kernel heap arenas.
+
+The 128 MiB cap matches the current default QEMU configuration and is not a
+general physical-board memory policy.
 
 ### Virtual memory
 
-The VMM implements AArch64 4 KiB, four-level stage-1 translation tables.
+The VMM implements AArch64 stage-1 translation with 4 KiB pages and four-level
+page tables.
 
-Current behavior:
+Current mapping policy:
 
-- the early kernel builds an identity map of the detected RAM range;
-- kernel text is mapped RX, rodata R/NX, data+bss+stack RW/NX, and remaining RAM RW/NX;
-- mutable kernel globals use zero-initialized BSS and subsystem init functions establish non-zero defaults, keeping the loadable `.data` section empty while preserving the page-aligned W^X boundary;
-- board MMIO is identity-mapped as device memory;
-- each EL0 process has a separate TTBR0 root;
-- every process TTBR0 also contains the full kernel/RAM identity map needed while handling exceptions;
-- process image pages are user read/execute;
-- process stack and ordinary anonymous pages are user read/write unless callers request other supported flags;
-- TTBR1 is disabled;
-- changing process TTBR0 invalidates the complete EL1 TLB.
+- kernel text: read/execute;
+- kernel rodata: read-only, non-executable;
+- kernel data, BSS, and stack: read/write, non-executable;
+- remaining RAM: read/write, non-executable;
+- MMIO: device memory, non-executable;
+- process image: user read/execute;
+- process stack and ordinary anonymous mappings: user read/write unless another
+  supported protection is requested.
 
-This provides basic EL0 separation and kernel-page W^X, but it is not a hardened split-address-space design. The remaining TTBR1, ASID, and scoped-invalidation work is future hardening material and is not part of the current v0.1 claim.
+Mutable kernel globals are zero-initialized and subsystems establish non-zero
+defaults during initialization. This keeps the loadable `.data` section empty
+while preserving W^X boundaries.
+
+Each process owns a TTBR0 root, but that root currently also contains the kernel
+and RAM identity map required while handling exceptions. TTBR1 is disabled.
+Process switches replace TTBR0 and invalidate the complete EL1 TLB.
+
+This is adequate for the current v0.1 isolation baseline, but it is not a
+hardened split-address-space design. Future hardening requires TTBR1, user-only
+TTBR0 roots, ASIDs, and scoped TLB invalidation.
 
 ### Process user regions
 
-Each process records a fixed set of disjoint user virtual ranges. These records are used to decide whether a syscall pointer belongs to the current process.
+Each process records at most eight disjoint user regions. Region records contain
+virtual range, physical base, and ownership flags. They support:
 
-The syscall helper layer first checks the registered process range, then walks the process page table. Input buffers require valid user-readable leaves; output buffers also require writable leaves and return `ERR_PERM` on read-only pages before writing any byte. Syscall entry points now import VFS buffers, path strings, argv, IPC payloads, GUI outputs, and information outputs through kernel-owned temporaries before lower layers operate. The remaining limitation is that the final byte transfer is not fault-contained against an unexpected translation fault.
+- image and stack ownership checks;
+- anonymous mapping allocation and release;
+- syscall pointer range validation;
+- cleanup during process exit.
+
+The syscall boundary checks both the registered range and the process page table.
+Readable input and writable output permissions are distinguished. The remaining
+limitation is that the final byte copy is an ordinary EL1 load/store sequence,
+not a fault-recoverable copy primitive.
 
 ## Processes and scheduling
 
-`kernel/process.{c,h}` owns:
+### Process model
 
-- fixed process slots;
-- PID, parent PID, and state;
-- saved EL0 registers, PC, SP, and PSTATE;
-- per-process TTBR0 root;
-- registered user regions and owned physical pages;
-- zombie state and cleanup.
+The process table contains 16 fixed slots. A process records:
 
-EL0 dispatch uses `process_dispatch_next()` and a round-robin scan of ready slots. Spawn records the current process as parent. A child zombie remains in the fixed table until that parent calls `sys_wait`; automatic reclamation is limited to kernel-owned or orphaned zombies, so later spawns cannot erase an observable exit status.
+- PID and parent PID;
+- name and state;
+- saved x0-x30 registers;
+- user SP, PC, and PSTATE;
+- TTBR0 root;
+- user regions and owned pages;
+- exit code and zombie state;
+- next anonymous mapping address.
 
-### EL0 processes
+Spawn records the current process as parent. A child zombie remains observable
+until its parent successfully calls non-blocking `sys_wait`. Automatic zombie
+reclamation is restricted to kernel-owned or orphaned processes.
 
-EL0 processes are preemptive in the current architecture:
+### EL0 dispatch
 
-- IRQ entry saves the interrupted process frame;
-- timer handling runs;
-- the dispatcher may select another ready process;
-- the selected process TTBR0 and trap frame are activated before exception return.
+EL0 processes are preemptive:
 
-Voluntary yield and exit/fault paths share the same process activation logic.
+1. IRQ entry masks normal IRQs and saves a 288-byte exception frame on the EL1
+   stack.
+2. `irq_handler_frame()` saves the interrupted process state.
+3. The acknowledged IRQ handler runs.
+4. The board interrupt controller receives EOI.
+5. One deferred runtime pass runs if work is pending.
+6. `process_dispatch_next()` may select another ready process.
+7. The selected TTBR0 and trap frame are activated.
+8. `eret` restores EL0 execution and the saved interrupt-mask state.
+
+Voluntary yield, exit, kill, and lower-EL fault paths use the same process context
+activation machinery where applicable.
 
 ### EL1 helper threads
 
-The scheduler under `kernel/sched/` is cooperative. It is used for EL1 helper work such as console/input polling. The timer updates scheduler counters but does not preempt an executing EL1 helper thread.
+The scheduler under `kernel/sched/` is cooperative. EL1 helper threads change
+only through explicit yield or exit boundaries. Timer ticks update counters but
+do not preempt an executing helper.
 
-Therefore the accurate description is:
+The current helper scheduler cannot wake and interleave a kernel service while a
+long-lived EL0 process remains active. That is why periodic desktop work is not
+yet implemented as a helper thread.
 
-> preemptive EL0 processes with cooperative EL1 helper threads.
+### Deferred runtime bottom half
 
-`RISK-010` tracks this documentation and future-design distinction.
+The timer callback publishes `RUNTIME_WORK_PERIODIC` into one coalescing pending
+bitmask. After EOI, the IRQ dispatcher snapshots and clears pending bits, then
+calls the backend.
+
+Current backend work:
+
+- poll UART, board, and direct USB HID input producers;
+- drain the shared input queue into GUI routing;
+- flush dirty GUI redraw;
+- poll the small network stack.
+
+Clearing the snapshot before backend execution preserves a request published
+during the current pass.
+
+Important semantics:
+
+- EOI has occurred, but CPU exception return has not;
+- IRQs remain masked by the vector entry;
+- EL0 remains paused;
+- the exception frame remains on the EL1 stack;
+- the bottom half is not preemptible by normal IRQs;
+- no per-pass work or duration budget currently exists.
+
+The pending word is safe only for the current single-core, masked-IRQ,
+one-consumer model. `volatile` does not provide SMP-safe atomicity.
+
+See `RUNTIME_SERVICE.md` and `RISK-017`.
+
+The accurate runtime description is:
+
+> preemptive EL0 processes, a non-preemptible post-EOI runtime bottom half, and
+> cooperative EL1 helper threads.
 
 ## Exceptions and faults
 
 - `svc #0` from EL0 enters syscall dispatch.
-- Other synchronous lower-EL exceptions mark the current process exited and attempt to dispatch another process.
-- An unexpected EL1 exception enters the fatal diagnostic path and waits forever.
+- Other synchronous lower-EL exceptions mark the current process exited and try
+  to dispatch another ready process.
+- Unexpected EL1 exceptions enter a fatal diagnostic path and wait forever.
+- Normal IRQ entry prevents nesting until exception return.
 
-Lower subsystems no longer receive caller-owned EL0 pointers for the covered syscall payloads. The syscall boundary performs bounded copies after range and PTE checks. Those copies are still ordinary EL1 loads/stores and are not recoverable if an unexpected translation fault occurs after validation.
+The kernel does not yet have exception-table fixups for user-copy faults.
 
 ## Syscall boundary
 
@@ -124,155 +238,232 @@ The ABI uses:
 ```text
 x8      syscall number
 x0..x6  arguments
-x0      return value; negative values are kernel error codes
+x0      return value or negative kernel error
 ```
 
-Numbers are frozen in `kernel/syscall_numbers.h` and exercised by host ABI tests.
+Numbers are frozen in `kernel/syscall_numbers.h`; new calls must append numbers.
 
-Public pointer handling is centralized in `kernel/syscall_helpers.{c,h}`. The helpers provide process-range validation, page-table permission checks, c-string copying, argv import, and checked byte copies. State-consuming outputs validate the whole destination before dequeueing, then perform a bounded final copy. Fault-contained copy is still future work.
+Public pointer handling is centralized in `kernel/syscall_helpers.{c,h}`.
+Covered syscall paths:
 
-See `SYSCALLS.md` for exact calls and current limitations.
+- validate process-owned ranges;
+- walk user page tables;
+- distinguish readable and writable mappings;
+- copy c-strings and bounded byte ranges;
+- import argv into pointer-free kernel storage;
+- build output in kernel-owned buffers;
+- validate complete output destinations before consuming IPC or GUI events.
+
+Fault-contained copying remains future hardening.
+
+See `SYSCALLS.md` for the exact ABI.
 
 ## VFS and file descriptors
 
-The VFS is a fixed-capacity in-kernel facade with static nodes plus a small mount table. Mount callbacks dispatch open, list, unlink, and rename without embedding FAT32 knowledge in the generic layer. It supports bootfs, tmpfs, and dynamic FAT32 root-file nodes.
+The VFS is a fixed-capacity kernel facade:
 
-Current descriptor architecture:
+- 24 nodes;
+- four mounts;
+- 64-byte absolute paths;
+- eight descriptors per process;
+- a global internal handle pool sized for all process slots.
 
-- a global kernel handle pool stores node pointer, offset, flags, owner PID, and local fd;
-- each process sees local descriptor numbers `3..10`;
-- VFS operations translate the caller's local fd through the current PID;
-- dead owners are reaped lazily and `process_mark_exited()` closes all descriptors for the exiting PID.
+Descriptors `3..10` are local to the current process. Internal handles store the
+owner PID, local descriptor, node, offset, and flags. Foreign use is rejected,
+dead owners can be reaped, and `process_mark_exited()` closes all descriptors for
+the exiting PID.
 
-`RISK-002` is closed for process-owned descriptors. The VFS remains a fixed-table kernel facade, not a POSIX filesystem layer.
+Mount callbacks currently support open, list, unlink, and rename. Generic VFS
+code selects the mount and does not include FAT32 policy directly.
 
-The current mount table and filesystem callback boundary are intentionally small. The v1 roadmap still requires a common path resolver, structured metadata/directory ABI, richer block-device metadata, and filesystem semantics beyond root-only FAT32.
+The VFS does not yet provide:
+
+- common path normalization/traversal;
+- structured directory entries;
+- rich metadata;
+- mkdir or truncate;
+- general filesystem driver lifecycle;
+- POSIX semantics.
 
 ## Filesystems and storage
 
 ### bootfs
 
-Shipping application images are embedded into the kernel and exposed under `/armonios/<name>`.
+Shipping KLI1 application images are embedded in the kernel and exposed at
+`/armonios/<name>`.
 
 ### tmpfs
 
-The current tmpfs is a small fixed in-memory file implementation used for simple kernel/VFS validation.
+A small fixed in-memory filesystem supports simple VFS and test workflows.
 
-### FAT32
+### FAT32 bridge
 
-The current FAT32 bridge supports:
+The current writable FAT path supports:
 
 - 512-byte sectors;
-- short 8.3 root names;
-- root-directory list/open/create/read/write/rename/delete;
-- cluster-chain growth for the supported file path;
-- dynamic `/fat/<name>` VFS nodes;
-- invalidation of dynamic nodes after rename/delete.
+- one FAT32 volume;
+- root-directory short 8.3 names;
+- list/open/create/read/write/rename/delete;
+- cluster-chain growth;
+- dynamic `/fat/<name>` nodes;
+- dynamic-node invalidation after rename/delete.
 
-It does not claim long-file-name support, subdirectories, GPT or extended-partition discovery, journaling, crash recovery, or broad compatibility testing. A reusable MBR parser and bounded block view can locate and validate one supported primary FAT32 partition; that path is currently used by the opt-in RPi4 read-only probe, not exposed as normal writable board storage.
+It does not support long names, subdirectories, FAT12/16, GPT, extended
+partitions, journaling, crash recovery, or broad interoperability testing.
 
-The QEMU block path is verified through `make qemu-fs-test`. The visible desktop target also attaches the generated FAT32 block image; `tools/qemu_fb_fat_test.sh` verifies the FAT + display + panel wiring. The visible create/edit/save/rename/reopen/delete workflow has existing manual evidence from rocco on 2026-07-17; newer automated baselines must not imply a newer manual desktop pass unless one is recorded.
+A reusable primary-MBR FAT32 parser and bounded block view exist. The RPi4
+read-only diagnostic path uses those components without exposing normal writable
+hardware storage.
 
-v1 storage direction is to replace this narrow bridge with real writable FAT
-behind the filesystem interface, then mount ext2 at `/ext` at least read-only.
-There is no current ext2 implementation.
+The QEMU path is verified through storage smoke and visible-target wiring tests.
+The latest visible create/edit/save/rename/reopen/delete evidence is dated
+2026-07-17.
+
+### ext2
+
+No ext2 implementation currently exists.
 
 ## GUI architecture
 
-The GUI is a kernel-owned compositor rather than a userland display server.
+The GUI is a kernel compositor/window manager rather than a userland display
+server.
 
-Responsibilities are split across:
+Responsibilities are separated into:
 
-- `gui_events` — per-window queues;
-- `gui_cursor` — cursor state, drag state, and cursor regions;
-- `gui_input` — hit testing and input dispatch;
-- `gui_backing` — per-window content buffers;
-- `gui_pool` — lifecycle, ownership, lookup, and focus;
-- `gui_compositor` — z-order drawing and damage tracking.
+- `gui_events`: 32-entry per-window queues;
+- `gui_cursor`: cursor shape, buttons, and drag state;
+- `gui_input`: hit testing and event routing;
+- `gui_backing`: lazily allocated content buffers;
+- `gui_pool`: 16-window lifecycle, ownership, lookup, z-order, and focus;
+- `gui_compositor`: damage tracking and rendering.
 
-Windows carry an owner PID. Most mutating syscalls require ownership. A small set of presentation calls is intentionally cross-process so the panel can find, focus, restore, and display state for application windows.
+Windows carry owner PID. Most mutating syscalls require ownership. Panel-facing
+focus, restore, lookup, and state calls are intentionally cross-process.
 
-Normal application wrappers request focus after creating a window. The kernel still enforces `GUI_WINDOW_NO_FOCUS`, and `tools/qemu_focus_test.sh` verifies the focus syscall path. The files-to-editor focus workflow has existing manual confirmation from rocco on 2026-07-17.
+Applications draw into backing buffers and flush damage rectangles. When damage
+tracking fills, the compositor may collapse work to a full redraw.
 
-## Input and device polling
+Timer-originated input routing and redraw now run through the deferred runtime
+bottom half. Redraw cost is not yet budgeted.
 
-Input events enter one shared queue from:
+There is no shared userland widget toolkit. Each application currently implements
+its own layout and interaction state.
 
-- UART keyboard translation;
+## Input architecture
+
+One shared 64-event producer queue receives events from:
+
+- UART/ANSI keyboard translation;
 - virtio-input;
-- directly attached USB boot-protocol HID devices.
+- directly attached USB boot-protocol keyboard and mouse devices.
 
-The kernel polls several devices from both the timer path and helper loop. This is intentionally simple but should be treated carefully if concurrency, SMP, or more EL1 threads are introduced.
+The runtime service currently drains all available producer events and routes
+them to the GUI. Queue overflow/fairness and per-pass limits require stronger
+instrumentation.
 
-USB support is currently a basic QEMU xHCI path with directly attached keyboard/mouse devices. USB hubs are not supported.
+USB support is a basic QEMU xHCI path. Hubs and general USB class support are not
+claimed.
 
 ## Networking
 
-The network code is a small direct stack over virtio-net containing enough Ethernet, ARP, IPv4, UDP, and DHCP behavior to obtain a QEMU user-network lease.
+The direct virtio-net stack contains enough:
 
-There is no application socket ABI, TCP, general UDP API, DNS query implementation, or HTTP client.
+- Ethernet;
+- ARP;
+- IPv4;
+- UDP;
+- DHCP
 
-Use `bash tools/qemu_marker_test.sh net` or `bash tools/verify.sh` for deterministic network-marker evidence. The plain `qemu-net` target remains a launch command.
+to obtain a QEMU user-network lease.
+
+There is no application socket ABI, TCP, general UDP API, DNS query interface, or
+HTTP client. Network polling currently contributes to the unbounded runtime-pass
+risk.
 
 ## Board boundary
 
-Generic kernel code includes `drivers/board.h`. Physical addresses and board-specific initialization belong under `drivers/boards/<board>/`.
+Generic kernel code uses `drivers/board.h`. Board-specific addresses, interrupt
+controller details, capability reporting, and device initialization live under
+`drivers/boards/<board>/`.
 
-The QEMU board is the reference implementation.
+QEMU is the reference backend and implements the verified display, input,
+storage, and network paths.
 
-The board contract now exposes generic storage, display, input, IRQ, and capability entry points. QEMU implements display/input through virtio internally; generic kernel orchestration calls `board_display_*` and `board_input_*`. RPi4 returns explicit safe failures for missing display/input while still compiling and linking under `tests/run_board_build_test.sh`.
+The RPi4 backend:
 
-The RPi4 board directory is still not a supported hardware implementation. The SDHCI controller core, firmware clock query, MBR parser, bounded block view, and minimal read-only probe are implemented and host/build verified. Normal board capabilities remain zero and storage stays fail-closed until repeatable physical serial evidence closes `RISK-007`.
+- satisfies the build contract;
+- exposes safe failure for unsupported display/input;
+- contains SDHCI, mailbox clock, telemetry, MBR, block-view, and read-only probe
+  scaffolding;
+- advertises no normal capabilities requiring unproven hardware behavior.
+
+No physical Raspberry Pi runtime claim is valid until `RISK-007` exit criteria
+are met.
 
 ## Userland and KLI1
 
-User programs live under `programs/apps/` and link against:
+Applications link against:
 
-- `programs/libkarm` for startup, syscall trampolines, I/O, and small helpers;
-- `programs/libkarmdesk` for GUI wrappers.
+- `programs/libkarm`: startup, syscall trampolines, I/O, strings, and small
+  helpers;
+- `programs/libkarmdesk`: typed GUI wrappers.
 
-The shipping set is:
+Shipping applications:
 
-- `panel`
-- `shell`
-- `editor`
-- `files`
-- `monitor`
-- `control`
-- `clock`
+- `panel`;
+- `shell`;
+- `editor`;
+- `files`;
+- `monitor`;
+- `control`;
+- `clock`.
 
-KLI1 is a small flat-image format with a fixed header and entry offsets. The current linker script explicitly orders the image header, text, rodata, and end marker.
+KLI1 is a flat image with fixed header and entry offsets. Shipping images may
+contain header, text, and rodata, but mutable `.data` and `.bss` are forbidden by
+linker assertions and regression tests. Large mutable application state uses
+`SYS_MMAP`.
 
-Mutable `.data` and `.bss` are forbidden for shipping app images. `programs/apps/image.ld` asserts that contract, and `tests/run_kli1_contract_test.sh` verifies both the seven shipping apps and a synthetic violation.
-
-The current applications demonstrate the desktop and persistence paths but are
-not yet complete daily-use tools. The v1 line needs shared `libkarm` runtime
-helpers, `libkarmdesk` widgets, a multi-line Editor, directory-aware Files,
-stronger Shell commands, observable Settings behavior, and a more useful
-Monitor while preserving the KLI1 storage contract.
+The applications demonstrate process, GUI, storage, and syscall behavior but are
+not yet complete daily tools. See `CURRENT_STATE.md` for exact limits.
 
 ## Testing architecture
 
-Native host tests exercise pure-C contracts and mocked driver paths. They provide good regression coverage for logic, but they cannot prove device MMIO or full exception-return behavior.
-
-`qemu-fs-test`, `tools/qemu_marker_test.sh`, `tools/qemu_focus_test.sh`, `tools/qemu_usercopy_test.sh`, and `tools/qemu_fb_fat_test.sh` are deterministic because they capture guest serial output and check required markers. They do not replace visible manual workflow evidence.
-
-Release evidence must always state whether it came from:
+Evidence is divided into distinct classes:
 
 - static inspection;
-- host tests;
-- build/link;
-- deterministic QEMU output;
+- native host tests;
+- build/link verification;
+- deterministic QEMU serial-marker tests;
 - visible manual QEMU use;
-- physical hardware.
+- physical hardware evidence.
 
-## Design direction
+Host tests validate pure-C contracts and mocked driver paths, but cannot prove
+real MMIO or complete exception-return timing.
 
-Near-term architectural priorities are:
+Deterministic QEMU tests cover:
 
-1. finish v0.2 hardening: fault-contained user copies and any remaining syscall-boundary audits;
-2. v0.3 storage platform: richer block-device metadata, common path resolution, and structured filesystem ABI;
-3. v0.4 real FAT: long names, directories, broader partition handling, and persistence tests;
-4. v0.5-v0.6 userland runtime, widgets, and useful desktop applications;
-5. v0.7 ext2 read-only support;
-6. ongoing hardening: fault-contained copies, TTBR1 kernel mappings, ASIDs, scoped TLB invalidation, and physical RPi evidence when the hardware track resumes.
+- FAT storage smoke;
+- invalid user-copy rejection;
+- focus transitions;
+- framebuffer/window readiness;
+- USB initialization and two HID devices;
+- DHCP lease;
+- FAT + display + panel wiring.
+
+The runtime-service host gate covers coalescing, requeue preservation, mocked EOI
+ordering, and a static timer-source boundary. It does not prove latency or
+fairness under load.
+
+`bash tools/verify.sh` is the full promotion gate.
+
+## Near-term design direction
+
+1. Instrument and bound the deferred runtime service.
+2. Record formal v0.2 promotion evidence.
+3. Build the v0.3 block-device, path, mount, and structured filesystem platform.
+4. Replace the root-only bridge with real FAT long-name/directory support.
+5. Add a shared userland runtime and widgets.
+6. Make the seven applications support the v1 workflow.
+7. Add ext2 read-only support.
+8. Harden address spaces, user copy, and hardware ports without overstating
+   evidence.

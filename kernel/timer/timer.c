@@ -2,17 +2,16 @@
 
 #include <stdint.h>
 
+#include "kernel/runtime_service.h"
 #include "kernel/sched/sched.h"
-#include "uart/pl011.h"
-
-void kernel_on_timer_tick(void);
 
 /*
  * AArch64 physical timer driver.
  *
- * timer_init programs CNTP_TVAL/CTL using CNTFRQ_EL0. Each interrupt pumps
- * UART input, lets the kernel poll input/rendering work, and then advances the
- * scheduler tick. Keep policy out of the register helpers below.
+ * timer_init programs CNTP_CVAL/CTL using CNTFRQ_EL0. The hard-IRQ handler is
+ * intentionally bounded: account the tick, rearm the timer, publish one
+ * coalescible periodic-work bit, and advance scheduler counters. Device, GUI,
+ * and network work runs later through the post-EOI runtime service.
  */
 
 static uint64_t g_ticks;
@@ -63,13 +62,12 @@ void timer_handle_irq(void *context) {
     g_ticks++;
 
     /* Advance CVAL by the fixed interval so ticks are anchored to the
-     * previous expiry, not the moment we service the IRQ.  This eliminates
+     * previous expiry, not the moment we service the IRQ. This eliminates
      * cumulative drift that TVAL reloads cause. */
     g_next_cval += g_interval_ticks;
     write_cntp_cval(g_next_cval);
 
-    uart_pump_input();
-    kernel_on_timer_tick();
+    runtime_service_request(RUNTIME_WORK_PERIODIC);
     sched_on_timer_tick();
 }
 
