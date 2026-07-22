@@ -2,86 +2,65 @@
 
 ## Purpose
 
-The physical timer callback must remain bounded and independent of GUI, device,
-and network workload. ArmoniOS therefore publishes periodic work from the timer
-handler and consumes it through one centralized runtime service after the board
-interrupt controller receives EOI.
+ArmoniOS keeps the physical timer callback independent of GUI, device, and
+network workload. The timer publishes periodic work and one centralized runtime
+service consumes it after the interrupt controller receives EOI.
 
-This boundary is an important improvement, but its exact semantics matter:
+The exact boundary is:
 
-> The service is deferred past the device-specific timer callback and past EOI,
-> but it still runs inside the IRQ exception path before EL0 dispatch and before
-> `eret`.
+> deferred past the timer callback and EOI, but still inside the IRQ exception
+> path before process dispatch and `eret`.
 
-It is a post-EOI EL1 bottom half, not a thread, task queue, or independently
-preemptible service.
+It is a post-EOI EL1 bottom half, not a thread or independently preemptible work
+queue.
 
-## Current timing
+## Current flow
 
-The physical timer is initialized at 100 Hz on the current QEMU path. One
-periodic request is therefore normally published every 10 ms.
+The QEMU timer runs at 100 Hz, normally publishing one request every 10 ms.
 
 ```text
-EL0 process running
-  -> physical timer IRQ
-  -> AArch64 vector masks IRQ
-  -> save 288-byte exception frame on EL1 stack
-  -> irq_handler_frame()
-       -> save current EL0 process context
-       -> board_irq_ack()
-       -> timer_handle_irq()
-            -> increment tick count
-            -> advance and write CNTP_CVAL
-            -> publish RUNTIME_WORK_PERIODIC
-            -> update scheduler counters
-       -> board_irq_end()
-       -> runtime_service_run_pending()
-            -> snapshot and clear pending bits
-            -> kernel_on_timer_tick()
-                 -> poll UART/board/USB input producers
-                 -> drain the shared input queue into GUI routing
-                 -> flush dirty GUI redraw
-                 -> poll network
-       -> process_dispatch_next()
-  -> restore selected trap frame
+EL0 process
+  -> timer IRQ and 288-byte EL1 exception frame
+  -> timer_handle_irq()
+       -> account tick
+       -> rearm CNTP_CVAL
+       -> publish RUNTIME_WORK_PERIODIC
+       -> update scheduler counters
+  -> board_irq_end()
+  -> runtime_service_run_pending()
+       -> snapshot and clear pending work
+       -> read CNTPCT_EL0
+       -> mark one active measurement pass
+       -> poll virtio-input and USB HID producers
+       -> drain shared input queue into GUI routing
+       -> submit one dirty redraw when needed
+       -> report redraw, partial-damage, or full-redraw shape
+       -> drain available virtio-net RX frames
+       -> end active measurement pass
+       -> read CNTPCT_EL0 and update duration telemetry
+  -> process_dispatch_next()
   -> eret
-  -> selected EL0 process resumes
 ```
 
-## What EOI changes—and what it does not
+EOI completes the interrupt-controller transaction; it does not return from the
+CPU exception. During the service pass execution remains in EL1, the exception
+frame remains on the EL1 stack, the vector's IRQ-masked state is preserved by
+nested IRQ helpers, and EL0 remains paused.
 
-`board_irq_end()` tells the interrupt controller that the acknowledged interrupt
-has been completed. It does not return from the CPU exception.
-
-During the current runtime-service pass:
-
-- the CPU remains in EL1;
-- the IRQ exception frame remains on the EL1 stack;
-- normal IRQs remain masked by the vector entry;
-- EL0 remains paused;
-- another normal timer/device IRQ cannot preempt the pass;
-- process dispatch has not happened yet.
-
-Therefore the timer callback has bounded work, but the complete
-interrupt-to-EL0-return latency is not yet bounded.
+The timer callback is bounded. The complete exception-to-EL0-return path is
+measured but not yet bounded.
 
 ## Pending-work model
 
-The current public work bits are:
+The current pending bit is:
 
 ```text
 RUNTIME_WORK_PERIODIC
 ```
 
-The pending state is a zero-initialized `uint32_t` bitmask.
-
-Publication performs:
-
-```c
-pending |= requested & RUNTIME_WORK_ALL;
-```
-
-Consumption performs:
+Publication masks unknown bits and ORs accepted work into a zero-initialized
+`uint32_t`. Repeated requests coalesce. Consumption clears the snapshot before
+running the backend:
 
 ```c
 snapshot = pending;
@@ -89,191 +68,244 @@ pending = 0;
 run(snapshot);
 ```
 
-Clearing before backend execution guarantees that a request published while a
-pass runs remains pending for a later pass instead of being erased when the
-current pass returns.
+A request republished by the backend therefore remains pending for the next
+pass. The bit is a readiness signal, not an exact timer-tick counter.
 
-Repeated requests for the same bit coalesce. The service represents “work is
-needed”, not an exact count of elapsed ticks.
+One periodic bit is no longer sufficient for budgeting. Phase 2 must split at
+least input/GUI, device, and network readiness so budget-exhausted work can be
+resumed independently.
+
+## Timing telemetry
+
+Production timing uses the AArch64 physical generic counter:
+
+- `CNTPCT_EL0`: pass start and end values;
+- `CNTFRQ_EL0`: conversion frequency.
+
+`timer_init()` sets the observation threshold to one timer interval:
+
+```text
+threshold_ticks = CNTFRQ_EL0 / timer_hz
+```
+
+At 100 Hz this is approximately 10 ms. Exceeding it means one service pass used
+more than a complete nominal timer interval. It is an observation threshold, not
+the final accepted latency budget.
+
+The internal snapshot records requests, coalescing, non-empty and empty passes,
+requeues, last/maximum/cumulative duration, interval overruns, counter frequency,
+threshold, pending work, and last-consumed work.
+
+## Per-class work telemetry
+
+Compact indexed classes are:
+
+```text
+RUNTIME_METRIC_INPUT_PRODUCED
+RUNTIME_METRIC_INPUT_CONSUMED
+RUNTIME_METRIC_REDRAW
+RUNTIME_METRIC_NETWORK_FRAMES
+RUNTIME_METRIC_DEVICE_POLLS
+RUNTIME_METRIC_DAMAGE_ITEMS
+RUNTIME_METRIC_FULL_REDRAWS
+```
+
+Each class records:
+
+- work reported by the last non-empty pass;
+- maximum work reported by any pass;
+- cumulative work reported since reset.
+
+Reports are accepted only while `runtime_service_run_pending()` has marked the
+backend active. Work performed by the cooperative console thread is ignored, so
+it cannot contaminate bottom-half measurements.
+
+### Input produced
+
+`RUNTIME_METRIC_INPUT_PRODUCED` counts successful events returned by QEMU
+virtio-input and directly attached USB HID keyboard/mouse polling. UART input is
+interrupt-driven and is not part of this producer metric.
+
+### Input consumed
+
+`RUNTIME_METRIC_INPUT_CONSUMED` increments for every successful shared queue pop
+during the active runtime pass. The GUI path still drains until empty, so this
+measurement exposes the unbounded behavior that the future input budget must
+limit.
+
+### Input queue pressure
+
+The shared 64-event queue records current depth, lifetime high-water, and
+rejected full-queue pushes. During an active pass, successful pops report depth
+before removal, high-water, and cumulative overflow. Runtime telemetry retains
+maximum observed depth, high-water, and overflow.
+
+Overflow is explicit evidence rather than silent loss, but it is not prevented
+under sustained producer pressure.
+
+### USB HID device polling
+
+`RUNTIME_METRIC_DEVICE_POLLS` increments once for each valid HID device poll that
+reaches the active xHCI controller. Invalid devices, missing endpoints, and a
+missing controller are not counted.
+
+This metric is intentionally separate from input production. A keyboard or
+mouse poll may consume controller work while producing zero events.
+
+The current driver can register at most four direct HID devices and claims no hub
+support.
+
+### Network frames
+
+`RUNTIME_METRIC_NETWORK_FRAMES` increments for each valid non-empty virtio-net RX
+frame returned by `virtio_net_recv()` during the active runtime pass. The metric
+counts completed frame consumption, not calls to `net_poll()`.
+
+The current virtio-net interface has 16 RX descriptors but exposes no trustworthy
+device counter for frames dropped, overwritten, or never delivered to software.
+Consumed-frame counts must not be presented as proof that the receive path lost
+nothing.
+
+### Redraw submissions
+
+`RUNTIME_METRIC_REDRAW` counts successful QEMU display redraw submissions during
+the active pass.
+
+### Partial damage batches
+
+`RUNTIME_METRIC_DAMAGE_ITEMS` records the number of merged partial-damage
+rectangles attached to a successful redraw. The compositor supports up to 32
+rectangles before collapsing to a full-redraw sentinel.
+
+The metric counts the batch shape after merging and clipping, not every original
+damage request.
+
+### Full redraws
+
+`RUNTIME_METRIC_FULL_REDRAWS` increments when a successful redraw uses the full
+sentinel. It is separate from partial damage because the full sentinel clears
+`damage_count`.
+
+Pixels, damaged area, GPU completion latency, and CPU work spent on a failed GPU
+submission are not currently measured.
+
+## Snapshot and reset contract
+
+`runtime_service_get_stats()` copies one kernel-internal snapshot.
+`runtime_service_reset()` clears pending work and measured counters while
+preserving counter frequency and timing threshold.
+
+All state remains zero-initialized, preserving `.data == 0`. No syscall or
+user-visible structure exposes the internal layout. Any Monitor integration must
+define a deliberate versioned diagnostic ABI.
 
 ## Current correctness assumptions
 
-The implementation is correct only under the current runtime assumptions:
+The implementation assumes one CPU core, one runtime-service consumer,
+state-preserving nested IRQ helpers, no concurrent SMP writer, and coalesced
+readiness rather than exact timer publication counts.
 
-- single CPU core;
-- IRQ entry masks normal IRQs;
-- one runtime-service consumer;
-- timer IRQ is the current periodic publisher;
-- no concurrent SMP writer;
-- no requirement to count every timer publication independently.
+The pending word and telemetry are not SMP-safe atomic structures. Before SMP or
+concurrent publishers they require atomics, per-CPU state, or a scheduler-owned
+queue.
 
-The pending word is declared `volatile`, but `volatile` does not make the
-read-modify-write operation atomic. Before SMP, nested IRQ publication, or
-concurrent EL1 publishers are introduced, the state must move to one of:
+## Guarantees implemented
 
-- explicit IRQ-masked critical sections outside exception context;
-- AArch64 atomic read-modify-write operations;
-- per-CPU pending state;
-- a scheduler-owned work queue with defined producer/consumer synchronization.
-
-## Backend work in the current pass
-
-One `RUNTIME_WORK_PERIODIC` pass currently performs three broad groups:
-
-### Input and device producers
-
-- UART/serial input servicing;
-- board input polling where supported;
-- directly attached USB HID polling.
-
-The shared input producer queue has a fixed capacity of 64 events.
-
-### GUI work
-
-- drain all available shared input events;
-- route mouse and keyboard events;
-- update focus, dragging, cursor, and window queues;
-- perform a dirty redraw when required.
-
-Per-window GUI queues have a fixed capacity of 32 events. The compositor can
-collapse damage to a full-screen redraw when its damage list fills.
-
-### Network work
-
-- poll the small virtio-net stack;
-- process enough Ethernet/ARP/IPv4/UDP/DHCP work for the current direct stack.
-
-There is no socket scheduler or application network API.
-
-## Guarantees implemented now
-
-- `kernel/timer/timer.c` does not call UART, board-input, USB-HID, GUI, or network
-  backend routines directly.
-- The physical timer callback performs fixed accounting/rearm/publication work.
-- Runtime work executes only after `board_irq_end()`.
-- Repeated periodic requests coalesce.
-- Work published during a pass remains pending for the next pass.
-- Pending state is zero-initialized, preserving the kernel `.data == 0`
-  contract.
-- One source file and one consumer define the current periodic boundary.
+- The physical timer callback contains no input, GUI, USB, or network backend
+  calls.
+- Runtime work begins only after `board_irq_end()`.
+- Requests coalesce and backend requeue survives.
+- Aggregate generic-counter duration and interval overruns are measured.
+- Input produced, input consumed, USB HID polls, consumed network frames, redraw
+  submissions, partial damage, and full redraws are measurable as last/max/total
+  values.
+- Input queue depth, high-water, and overflow are measurable.
+- Reports outside the active bottom-half pass are ignored.
+- Instrumentation preserves `.data == 0`, the 108000-byte kernel ceiling, and the
+  existing user ABI.
 
 ## Guarantees not implemented
 
 ArmoniOS does not yet guarantee:
 
-- a maximum runtime-service duration;
-- a maximum interrupt-to-EL0-return latency;
-- a maximum number of input events processed per pass;
-- a maximum number of packets processed per pass;
-- a maximum amount of USB/device polling per pass;
-- a maximum redraw cost per pass;
-- fair scheduling among input, GUI, network, and EL0;
-- nested IRQ responsiveness while the pass runs;
-- no event loss under sustained producer overload;
-- SMP-safe publication;
-- a separately wakeable or schedulable EL1 service.
+- maximum service or interrupt-to-EL0 latency;
+- a maximum number of input events per pass;
+- a maximum number of network frames per pass;
+- a maximum number of USB HID polls per pass;
+- a maximum redraw or damage batch per pass;
+- a global generic-counter deadline;
+- preservation of class-specific work after budget exhaustion;
+- measured device-level network drops or RX-ring overflow;
+- fairness among work classes and EL0;
+- no queue overflow under sustained load;
+- SMP-safe publication or snapshots;
+- a separately schedulable runtime thread.
 
-These limitations are tracked by `RISK-017`.
+Measurement does not close `RISK-017`.
 
-## Verification boundary
+## Verification
 
-`tests/run_runtime_service_test.sh` currently proves:
+`tests/run_runtime_service_test.sh` verifies with a deterministic counter:
 
-- two requests for the same bit coalesce into one backend call;
-- a request published during backend execution survives for the next pass;
-- the backend does not run before the mocked EOI;
-- the timer source contains no direct calls matching the forbidden runtime
-  backend set;
-- the timer source publishes `RUNTIME_WORK_PERIODIC`.
+- request coalescing and EOI-before-backend order;
+- requeue preservation;
+- last/max/total timing and interval overruns;
+- indexed last/max/total accumulation for every current work class;
+- inactive report rejection;
+- queue pressure accumulation;
+- direct execution of the redraw helper for partial and full states;
+- reset and snapshot behavior;
+- static timer, network, USB, and redraw wiring boundaries.
 
-The full QEMU matrix proves that framebuffer, input, USB, network, focus,
-usercopy, and FAT paths still reach their expected markers with deferred runtime
-work active.
+`tests/run_input_queue_stats_test.sh` verifies zero state, a 64-entry high-water,
+full-queue overflow counting, depth reduction while draining, and reset.
 
-The tests do **not** prove:
+The complete matrix also covers build/size, RPi4 fail-closed paths, native host
+tests, FAT32 QEMU smoke, usercopy/focus, framebuffer, USB, network, and visible
+FAT+GPU wiring.
 
-- real maximum latency;
-- ordering under accumulated physical interrupts;
-- fairness under sustained traffic;
-- exact timer publication counts;
-- no queue overflow;
-- exception-stack high-water behavior;
-- safe concurrent publication.
+The validated Phase 1B head is
+`6634c3a6f527433643a56f2c90cc6af8bad62c1d`:
 
-## Required instrumentation
+- `Verify ArmoniOS` run `29840410727`: success;
+- `CI - Tests` run `29840411044`: success;
+- loadable QEMU kernel: 107370 bytes against the 108000-byte ceiling.
 
-The next hardening change should expose at least:
+## Phase 2 required behavior
 
-- service pass count;
-- empty pass count;
-- start/end counter values from the architectural counter;
-- last, maximum, and cumulative duration;
-- input events processed per pass and high-water mark;
-- device polls performed per pass;
-- packets/frames processed per pass and high-water mark;
-- redraw count, full redraw count, and damage high-water mark;
-- budget exhaustion counters;
-- pending work left after a pass;
-- EL0 heartbeat/progress counter observed during stress tests.
-
-Metrics should be available to host tests where possible and exposed through a
-small diagnostic kernel or Monitor path only after their ABI is deliberately
-designed.
-
-## Required budgets
-
-A bounded pass should have independent budgets, for example:
+A bounded service should enforce independent limits:
 
 ```text
-input events       <= N per pass
-device poll work   <= N operations per pass
-network receive    <= N frames/packets per pass
-GUI redraw         <= one bounded damage batch per pass
-time                <= configured counter-tick budget
+input consumed      <= N events/pass
+USB HID polling     <= N device operations/pass
+network receive     <= N frames/pass
+redraw               <= one bounded damage batch/pass
+global time          <= T generic-counter ticks
 ```
 
-The exact values must come from measurement, not guesswork.
+When a class or global deadline expires:
 
-When a budget is exhausted:
-
-1. stop that work class;
-2. keep or republish its pending bit;
-3. continue only if the remaining global time budget permits;
+1. stop processing that class;
+2. keep or republish its specific pending bit;
+3. record class or global exhaustion;
 4. return to process dispatch;
-5. resume work on a later tick or wakeup.
+5. continue on a later wakeup.
 
-Coalescing must remain a readiness signal. If exact event counts matter, the
-owning queue or device must retain them independently.
+Initial values must be justified by fixed queue limits and QEMU stress evidence.
+The first recommended cut is network receive: `net_poll()` contains the clearest
+unbounded loop, while the virtio RX queue already provides a natural 16-descriptor
+upper reference.
 
-## Stress-test exit criteria
+## RISK-017 exit criteria
 
-`RISK-017` should not close until deterministic QEMU tests demonstrate:
+The risk remains open until deterministic QEMU tests prove:
 
-- an EL0 heartbeat continues under sustained synthetic input;
-- an EL0 heartbeat continues under sustained synthetic network traffic;
-- simultaneous input/network/redraw load does not stall process dispatch;
-- pending work remains set after a budget-exhausted pass;
-- queued events are either delivered or overflow is explicitly counted;
-- runtime maximum duration remains under a documented threshold;
-- existing framebuffer, USB, network, focus, usercopy, and FAT gates remain
-  green.
+- EL0 heartbeat progress under sustained input and network traffic;
+- combined input/network/redraw pressure does not stall dispatch;
+- every budget-exhausted class remains pending;
+- observable queue loss is absent or explicitly counted;
+- maximum service duration remains below a documented final threshold;
+- all existing subsystem gates remain green.
 
-## Future scheduler integration
-
-A later scheduler revision may promote runtime work into a wakeable EL1 service
-when the kernel can schedule EL1 work alongside long-lived EL0 processes.
-
-That design should define:
-
-- service priority relative to EL0;
-- wakeup semantics;
-- blocking and wait queues;
-- per-work-class budgets;
-- producer synchronization;
-- whether device IRQs publish specific work bits;
-- stack ownership;
-- cancellation and shutdown behavior;
-- SMP/per-CPU policy.
-
-Until that scheduler exists, the current bottom half must remain non-blocking,
-small, measured, and explicitly bounded.
+A later scheduler may promote this work into a wakeable EL1 service, but the
+current bottom half must first become explicitly bounded and non-blocking.

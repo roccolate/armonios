@@ -5,6 +5,10 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="${repo_root}/build-runtime-service-test"
 binary="${build_dir}/runtime_service_test"
 timer_source="${repo_root}/kernel/timer/timer.c"
+runtime_source="${repo_root}/kernel/irq.c"
+network_source="${repo_root}/drivers/net/virtio_net.c"
+usb_hid_source="${repo_root}/drivers/usb/hid_driver.c"
+display_source="${repo_root}/drivers/boards/qemu_virt/board.c"
 
 rm -rf "${build_dir}"
 mkdir -p "${build_dir}"
@@ -25,4 +29,9 @@ if grep -Eq 'uart_pump_input|kernel_on_timer_tick|kernel_io_poll_|board_input_po
 fi
 
 grep -q 'runtime_service_request(RUNTIME_WORK_PERIODIC)' "${timer_source}"
-echo "timer IRQ deferred-work boundary: ok"
+grep -q 'runtime_service_report_metric(RUNTIME_METRIC_NETWORK_FRAMES, 1U)' "${network_source}"
+grep -q 'runtime_service_report_metric(RUNTIME_METRIC_DEVICE_POLLS, 1U)' "${usb_hid_source}"
+grep -q 'runtime_service_report_redraw()' "${display_source}"
+grep -q 'RUNTIME_METRIC_DAMAGE_ITEMS' "${runtime_source}"
+grep -q 'RUNTIME_METRIC_FULL_REDRAWS' "${runtime_source}"
+echo "timer IRQ deferred-work boundary and runtime metric wiring: ok"
