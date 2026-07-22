@@ -13,6 +13,7 @@
  * caller through read/write callbacks so the same code runs in kernel boot and
  * host tests.
  */
+
 typedef int (*fat32_read_sector_fn_t)(void *context, uint32_t lba,
                                       uint8_t *buffer);
 typedef int (*fat32_write_sector_fn_t)(void *context, uint32_t lba,
@@ -32,7 +33,6 @@ typedef struct {
     uint32_t data_start_lba;
     uint32_t root_cluster;
     uint32_t cluster_count;
-    uint32_t max_cluster;
     uint8_t sector[FAT32_SECTOR_SIZE];
     uint8_t write_sector_buffer[FAT32_SECTOR_SIZE];
     uint8_t mounted;

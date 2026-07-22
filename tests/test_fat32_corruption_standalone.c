@@ -141,7 +141,6 @@ static int test_valid_geometry_and_read(void) {
     setup_valid_disk(&disk);
     CHECK(fat32_mount(&fs, disk_read, &disk) == 0);
     CHECK(fs.cluster_count == 6U);
-    CHECK(fs.max_cluster == 8U);
     CHECK(fat32_open_root(&fs, "hello.txt", &file) == 0);
     CHECK(file.capacity == FAT32_SECTOR_SIZE * 2U);
     CHECK(fat32_read(&fs, &file, FAT32_SECTOR_SIZE - 6U,
