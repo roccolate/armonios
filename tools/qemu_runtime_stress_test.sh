@@ -63,7 +63,6 @@ qemu_pid=$!
 # applications keep yielding and redrawing. The monitor output is drained so its
 # socket cannot back-pressure QEMU during the test.
 python3 - "$MONITOR" "$INJECT_SECONDS" <<'PY' || {
-import os
 import socket
 import sys
 import time
@@ -117,7 +116,9 @@ if grep -Fq "runtime-stress: input overflow" "$LOG"; then
     fail "observable input queue overflow occurred"
 fi
 
-require_marker "panel: ready"
+# Do not use ordinary boot strings as stress gates. IRQ diagnostics can legally
+# interleave with EL0 serial writes character-by-character. The markers below are
+# emitted by the actual work paths and the heartbeat proves EL0 executed.
 require_marker "[net] DHCP ack:"
 require_marker "runtime-stress: input consumed"
 require_marker "runtime-stress: redraw submitted"
