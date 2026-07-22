@@ -10,6 +10,9 @@
 #include "kernel/net/dhcp.h"
 #include "kernel/process.h"
 #include "kernel/runtime_service.h"
+#if defined(ARMONIOS_RUNTIME_STRESS_TEST)
+#include "uart/pl011.h"
+#endif
 
 #define IRQ_HANDLER_SLOTS 64U
 
@@ -20,6 +23,12 @@
 #define RUNTIME_REDRAW_EXHAUSTED  (1U << 6)
 #define RUNTIME_PHASE_DEADLINE    (1U << 3)
 
+#if defined(ARMONIOS_RUNTIME_STRESS_TEST)
+#define RUNTIME_STRESS_INPUT_SEEN   (1U << 0)
+#define RUNTIME_STRESS_REDRAW_SEEN  (1U << 1)
+#define RUNTIME_STRESS_NETWORK_SEEN (1U << 2)
+#endif
+
 typedef struct {
     irq_handler_fn_t handler;
     void *context;
@@ -29,6 +38,10 @@ static irq_handler_entry_t g_irq_handlers[IRQ_HANDLER_SLOTS];
 static runtime_service_stats_t g_runtime_stats;
 static uint8_t g_runtime_phase;
 static uint8_t g_runtime_redraw_state;
+#if defined(ARMONIOS_RUNTIME_STRESS_TEST)
+static uint8_t g_runtime_stress_seen;
+static uint8_t g_runtime_stress_pass;
+#endif
 
 __attribute__((weak)) void kernel_on_timer_tick(void) {
 }
@@ -40,12 +53,25 @@ __attribute__((weak)) uint64_t runtime_service_counter_now(void) {
     return 0;
 }
 
+#if defined(ARMONIOS_RUNTIME_STRESS_TEST)
+static void runtime_stress_mark(uint8_t bit, const char *line) {
+    if ((g_runtime_stress_seen & bit) == 0U) {
+        g_runtime_stress_seen |= bit;
+        uart_puts(line);
+    }
+}
+#endif
+
 void runtime_service_reset(void) {
     uint64_t frequency = g_runtime_stats.counter_frequency_hz;
     uint64_t budget = g_runtime_stats.budget_ticks;
 
     g_runtime_phase = 0;
     g_runtime_redraw_state = 0;
+#if defined(ARMONIOS_RUNTIME_STRESS_TEST)
+    g_runtime_stress_seen = 0;
+    g_runtime_stress_pass = 0;
+#endif
     g_runtime_stats = (runtime_service_stats_t){0};
     g_runtime_stats.counter_frequency_hz = frequency;
     g_runtime_stats.budget_ticks = budget;
@@ -78,6 +104,9 @@ static int runtime_service_deadline(void) {
     g_runtime_stats.pending_work |= g_runtime_stats.last_work;
     g_runtime_phase = RUNTIME_PHASE_DEADLINE;
     g_runtime_stats.over_budget_count++;
+#if defined(ARMONIOS_RUNTIME_STRESS_TEST)
+    uart_puts("runtime-stress: deadline republished\n");
+#endif
     return 1;
 #endif
 }
@@ -96,6 +125,18 @@ void runtime_service_report_metric(uint32_t metric, uint32_t value) {
     if (current > g_runtime_stats.metric_max[metric]) {
         g_runtime_stats.metric_max[metric] = current;
     }
+#if defined(ARMONIOS_RUNTIME_STRESS_TEST)
+    if (metric == RUNTIME_METRIC_INPUT_CONSUMED) {
+        runtime_stress_mark(RUNTIME_STRESS_INPUT_SEEN,
+                            "runtime-stress: input consumed\n");
+    } else if (metric == RUNTIME_METRIC_REDRAW) {
+        runtime_stress_mark(RUNTIME_STRESS_REDRAW_SEEN,
+                            "runtime-stress: redraw submitted\n");
+    } else if (metric == RUNTIME_METRIC_NETWORK_FRAMES) {
+        runtime_stress_mark(RUNTIME_STRESS_NETWORK_SEEN,
+                            "runtime-stress: network frame\n");
+    }
+#endif
     (void)runtime_service_deadline();
 }
 
@@ -218,6 +259,9 @@ void runtime_service_report_input_queue(uint32_t depth, uint32_t high_water,
         g_runtime_stats.input_queue_high_water = high_water;
     }
     if (overflow_count > g_runtime_stats.input_queue_overflow_count) {
+#if defined(ARMONIOS_RUNTIME_STRESS_TEST)
+        uart_puts("runtime-stress: input overflow\n");
+#endif
         g_runtime_stats.input_queue_overflow_count = overflow_count;
     }
 }
@@ -315,6 +359,13 @@ uint32_t runtime_service_run_pending(void) {
 
     started = runtime_service_counter_now();
     g_runtime_stats.last_duration_ticks = started + g_runtime_stats.budget_ticks;
+#if defined(ARMONIOS_RUNTIME_STRESS_TEST)
+    g_runtime_stress_pass++;
+    if ((g_runtime_stress_pass & 7U) == 0U) {
+        /* Force a deterministic checkpoint expiry in the test-only image. */
+        g_runtime_stats.last_duration_ticks = started;
+    }
+#endif
     if ((work & (RUNTIME_WORK_PERIODIC | RUNTIME_WORK_INPUT)) != 0U) {
         g_runtime_phase = (uint8_t)(work &
             (RUNTIME_WORK_PERIODIC | RUNTIME_WORK_INPUT));

@@ -35,11 +35,11 @@ fail closed and no physical support claim is made.
 | RISK-014 | P1 v1 | Desktop applications | OPEN | Blocks v1 usability |
 | RISK-015 | P2 | Fault-contained user copy | OPEN | Future mapping hardening |
 | RISK-016 | P1 | Process lifecycle | CLOSED | Parent/wait correctness |
-| RISK-017 | P1 | Deferred runtime execution | OPEN; DEADLINE LANDED, STRESS EVIDENCE OPEN | Blocks formal v0.2 |
+| RISK-017 | P1 | Deferred runtime execution | OPEN; HEARTBEAT LANDED, RX SATURATION OPEN | Blocks formal v0.2 |
 
 ## Open risks
 
-### RISK-017 — Deferred runtime execution needs sustained-load proof
+### RISK-017 — Deferred runtime execution needs final network and duration proof
 
 **Severity:** P1 runtime hardening  
 **Affected scope:** interrupt-to-EL0 latency, responsiveness, fairness,
@@ -59,7 +59,8 @@ Implementation sequence:
 - bounded USB HID device visits: PR #55 / `53c14402`;
 - bounded virtio-input descriptor draining: PR #56 / `7674b639`;
 - bounded partial compositor damage: PR #58 / `fe4f2a62`;
-- service-wide generic-counter deadline: PR #60.
+- service-wide generic-counter deadline: PR #60 / merge `1e51e818`;
+- QEMU EL0 heartbeat and mixed-activity stress gate: PR #61.
 
 The timer callback performs fixed account/rearm/publication/scheduler work. The
 runtime backend executes after EOI but before process dispatch and `eret`.
@@ -110,38 +111,62 @@ already executing. A full redraw remains one explicit operation. It may cross th
 nominal deadline before the next checkpoint, after which the pass is counted as
 exhausted and readiness is republished.
 
-This means the implementation now bounds whether later optional work starts, but
-it does not prove a strict upper bound for every single driver or redraw call.
-
 Cooperative network polling outside the active runtime service remains unbudgeted
 and is outside the post-EOI guarantee.
 
-#### Evidence boundary
-
-The 16-descriptor virtio RX implementation exposes no trustworthy device counter
-for frames dropped, overwritten, or never delivered to software. Consumed-frame
-counts are not proof of zero network loss.
-
-Input queue overflow is observable and counted. The next stress gate must fail or
-report that counter explicitly rather than claiming no loss without evidence.
-
 #### Deterministic validation
 
-The deadline regression proves:
+The host deadline regression proves:
 
 - periodic expiry can prevent redraw and the later network phase;
 - the network receive loop stops at a checkpoint and retains unconsumed frames;
 - an operation completing after the deadline is detected, counted, and
   conservatively republished.
 
-Validated implementation head before documentation synchronization:
-`af07d6de6b4b00fb77b37da1efa51b561aa73d9c`.
+#### QEMU heartbeat and mixed-activity evidence
 
-- `Verify ArmoniOS` run `29891251044`: success;
-- `CI - Tests` run `29891251026`: success;
-- loadable QEMU kernel: 107930 / 108000 bytes;
-- remaining margin: 70 bytes;
-- size limit unchanged.
+PR #61 adds a separate test-only QEMU image. Production builds do not define
+`ARMONIOS_RUNTIME_STRESS_TEST` and remain subject to the original size gate.
+
+The gate:
+
+- launches real windows and redraw work through `PANEL_AUTO_TEST`;
+- completes virtio-net DHCP and observes an actual consumed network frame;
+- attaches xHCI keyboard and mouse devices;
+- injects repeated keyboard events for 12 seconds through QEMU's monitor;
+- emits heartbeats from repeated EL0 `SYS_YIELD` calls;
+- forces one deterministic deadline expiry every eight service passes;
+- records the real deadline republish path;
+- fails on input queue overflow or panic;
+- uploads its serial log as a CI artifact.
+
+Validated stress head:
+`fd2deb8e6ef6999f26a688000c37ab22a4bc46f6`.
+
+- `Verify ArmoniOS` run `29893037276` (#280): success;
+- `CI - Tests` run `29893037263` (#420): success;
+- EL0 heartbeat markers: 509;
+- deadline republish markers: 311;
+- input, redraw, network, and DHCP markers: present;
+- input-overflow markers: 0;
+- panic markers: 0;
+- production loadable kernel: 107930 / 108000 bytes;
+- production margin: 70 bytes.
+
+This closes the earlier gap that no combined QEMU run demonstrated repeated EL0
+progress while deadline expiration and input/redraw/network activity were
+present. It also proves the selected keyboard injection rate does not overflow
+the observable 64-event input queue.
+
+#### Evidence boundary
+
+The stress image forces deterministic expirations. It does not establish the
+maximum production pass duration under the natural 10 ms threshold.
+
+The run observes real virtio-net receive and DHCP activity, but does not maintain
+a sustained RX backlog. The 16-descriptor virtio RX implementation exposes no
+trustworthy device counter for frames dropped, overwritten, or never delivered
+to software. Consumed-frame counts are not proof of zero network loss.
 
 #### Why the risk remains open
 
@@ -153,23 +178,22 @@ During the service pass:
 - EL0 remains paused until a checkpoint returns toward dispatch;
 - one already-started full redraw or driver operation may cross the deadline;
 - cooperative network polling outside the service remains unbudgeted;
-- no sustained-load QEMU heartbeat yet proves repeated EL0 progress;
-- combined-load queue loss has not been demonstrated absent or explicitly
-  recorded.
+- sustained virtio-net RX backlog behavior is unproven;
+- maximum production-threshold pass duration under combined load is unrecorded;
+- device-level network loss is not observable with the current interface.
 
 **Remaining exit criteria:**
 
-1. add a QEMU EL0 heartbeat/progress probe;
-2. inject sustained input, redraw, and network pressure;
-3. prove repeated EL0 progress while deadline exhaustion occurs;
-4. prove unfinished work remains pending or retained in native queues/lists;
-5. prove observable input loss is absent or explicitly counted;
-6. retain all current subsystem gates;
-7. record a dated visible desktop pass after the final boundary;
-8. decide whether the bounded bottom half remains or later becomes a wakeable
-   service.
+1. generate sustained virtio-net RX pressure beyond DHCP/startup traffic;
+2. expose a trustworthy network loss signal or explicitly accept that boundary;
+3. record production-threshold pass durations under realistic combined load;
+4. decide whether full redraw needs finer-grained checkpoints;
+5. retain all current subsystem and stress gates;
+6. record a dated visible desktop pass after the final boundary;
+7. close or explicitly accept the remaining boundary and tag v0.2.
 
-RISK-017 still blocks formal v0.2 promotion.
+RISK-017 still blocks formal v0.2 promotion, but the heartbeat/input evidence
+portion is now satisfied.
 
 ### RISK-013 — Storage and VFS are too narrow for v1
 

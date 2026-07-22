@@ -207,22 +207,69 @@ atomics, per-CPU state, or a scheduler-owned queue.
 - Reports outside the active bottom half are ignored.
 - `.data == 0`, the 108000-byte kernel ceiling, and the user ABI are preserved.
 
-## Guarantees not yet demonstrated
+## QEMU stress evidence
 
-ArmoniOS does not yet have sustained-load evidence proving:
+`tools/qemu_runtime_stress_test.sh` builds a separate instrumented image. The
+production image and size gate are built without `ARMONIOS_RUNTIME_STRESS_TEST`.
 
-- EL0 heartbeat progress under combined input, USB, redraw, and network pressure;
-- maximum complete-pass duration under realistic combined load;
-- absence of silent input loss beyond the existing overflow counter;
-- device-level network loss, which the current interface cannot observe;
-- fairness among work classes under continuous pressure.
+The stress image:
+
+- launches the panel auto-test so real windows and redraw submissions occur;
+- boots virtio-net through DHCP and records a valid consumed frame;
+- attaches xHCI keyboard and mouse devices;
+- injects repeated keyboard events for 12 seconds through QEMU's monitor;
+- emits an EL0 heartbeat from repeated `SYS_YIELD` calls;
+- forces one test-only cooperative deadline expiry every eight service passes;
+- records each expiry after the production republish path runs;
+- fails on observable input queue overflow or kernel panic.
+
+Validated head `fd2deb8e6ef6999f26a688000c37ab22a4bc46f6` produced:
+
+```text
+EL0 heartbeat markers:        509
+deadline republish markers:   311
+input-consumed marker:          1
+redraw-submitted marker:        1
+network-frame marker:           1
+DHCP acknowledgements:          1
+input-overflow markers:         0
+panic markers:                  0
+```
+
+The serial log is uploaded in the `qemu-serial-logs` workflow artifact. Ordinary
+boot strings are not used as stress assertions because IRQ diagnostics can
+legally interleave character-by-character with EL0 serial writes. Assertions use
+work-path markers and counted heartbeats instead.
+
+This proves repeated EL0 execution while the actual deadline-republish path is
+exercised hundreds of times, with real input consumption, GUI submission, and
+network receive activity present in the same QEMU run. It also proves that the
+chosen keyboard injection rate did not trigger the observable input-overflow
+counter.
+
+## Remaining evidence boundary
+
+The stress gate intentionally forces deterministic expirations in its separate
+test image. It does not establish the maximum production pass duration under the
+natural 10 ms threshold.
+
+The run observes real virtio-net receive and DHCP activity, but does not create a
+sustained RX backlog or prove device-level loss behavior. The current driver does
+not expose trustworthy device-drop or overwrite counters.
+
+ArmoniOS therefore still lacks evidence for:
+
+- sustained virtio-net RX pressure beyond boot/DHCP traffic;
+- a measured production-threshold maximum under realistic combined load;
+- asynchronous interruption of one already-started full redraw or driver call;
+- fairness among all work classes under an indefinitely maintained backlog.
 
 The deadline cannot preempt an operation already executing, so a full redraw may
 cross the nominal interval once. Cooperative network polling outside the runtime
 service also remains outside this post-EOI guarantee.
 
-These evidence gaps keep `RISK-017` open until the QEMU sustained-load gate is
-implemented and recorded.
+These remaining boundaries keep `RISK-017` open rather than overstating the new
+stress result.
 
 ## Deterministic verification
 
@@ -239,25 +286,24 @@ reset, class metrics, exact input/network caps, virtio-input 8 + 2 continuation,
 USB four-slot clamping, redraw 8 + 8 + 4 continuation, failed redraw retention,
 and full redraw behavior.
 
-Validated implementation head before documentation synchronization:
-`af07d6de6b4b00fb77b37da1efa51b561aa73d9c`.
+Validation for the stress head:
 
-- `Verify ArmoniOS` run `29891251044`: success;
-- `CI - Tests` run `29891251026`: success;
-- loadable QEMU kernel: 107930 / 108000 bytes;
-- remaining margin: 70 bytes;
-- deadline implementation PR: #60.
+- `Verify ArmoniOS` run `29893037276` (#280): success;
+- `CI - Tests` run `29893037263` (#420): success;
+- production loadable QEMU kernel remains 107930 / 108000 bytes;
+- remaining production margin remains 70 bytes;
+- deadline implementation PR: #60;
+- QEMU stress/heartbeat PR: #61.
 
 ## RISK-017 remaining exit criteria
 
-1. add a QEMU EL0 heartbeat/progress probe;
-2. inject sustained input, redraw, and network pressure;
-3. prove repeated EL0 progress while deadline exhaustion occurs;
-4. prove pending or native-queue continuation is retained;
-5. report observable queue overflow rather than hiding it;
-6. retain every existing subsystem gate;
-7. record a dated visible desktop pass after the final runtime boundary.
+1. generate sustained virtio-net RX pressure, not only DHCP/startup traffic;
+2. expose or explicitly delimit device-level RX loss evidence;
+3. record production-threshold pass durations under realistic combined load;
+4. decide whether an already-started full redraw needs finer-grained checkpoints;
+5. retain every existing subsystem and stress gate;
+6. record a dated visible desktop pass after the final runtime boundary.
 
 A later scheduler may promote this work into a wakeable EL1 service, but the
-current bottom half first needs sustained-load evidence for the cooperative
-deadline already implemented.
+current bottom half first needs the remaining network and natural-duration
+evidence.
