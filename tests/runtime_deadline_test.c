@@ -16,6 +16,7 @@ static uint32_t g_counter_index;
 static uint32_t g_periodic_calls;
 static uint32_t g_network_calls;
 static uint32_t g_periodic_boundary_check;
+static uint32_t g_render_calls;
 static uint32_t g_fake_network_frames;
 static uint32_t g_network_frames_returned;
 static virtio_net_device_t g_net_device;
@@ -26,7 +27,11 @@ void board_irq_end(uint32_t irq) { (void)irq; }
 int board_irq_is_spurious(uint32_t irq) { (void)irq; return 0; }
 process_t *process_current(void) { return 0; }
 gui_desktop_t *gui_desktop(void) { return 0; }
-void gui_render(fb_t *fb, void *context) { (void)fb; (void)context; }
+void gui_render(fb_t *fb, void *context) {
+    (void)fb;
+    (void)context;
+    g_render_calls++;
+}
 void gui_clear_dirty(void) { }
 
 void process_save_context(process_t *process, const uint64_t regs[31],
@@ -75,7 +80,7 @@ void kernel_io_poll_network(void) {
 void kernel_on_timer_tick(void) {
     g_periodic_calls++;
     if (g_periodic_boundary_check != 0U) {
-        assert(runtime_service_continue(RUNTIME_WORK_PERIODIC) == 0);
+        runtime_service_gui_render(0, 0);
     }
 }
 
@@ -99,15 +104,16 @@ static void prepare(const uint64_t *values, uint32_t count) {
     g_periodic_calls = 0U;
     g_network_calls = 0U;
     g_periodic_boundary_check = 0U;
+    g_render_calls = 0U;
     g_fake_network_frames = 0U;
     g_network_frames_returned = 0U;
 }
 
 static void periodic_expiry_defers_later_network(void) {
-    static const uint64_t values[] = {100U, 105U, 111U, 112U};
+    static const uint64_t values[] = {100U, 111U, 112U};
     runtime_service_stats_t stats;
 
-    prepare(values, 4U);
+    prepare(values, 3U);
     g_periodic_boundary_check = 1U;
     runtime_service_request(RUNTIME_WORK_PERIODIC | RUNTIME_WORK_NETWORK);
     assert(runtime_service_run_pending() ==
@@ -115,9 +121,9 @@ static void periodic_expiry_defers_later_network(void) {
     stats = snapshot();
 
     assert(g_periodic_calls == 1U);
+    assert(g_render_calls == 0U);
     assert(g_network_calls == 0U);
-    assert(stats.pending_work ==
-           (RUNTIME_WORK_PERIODIC | RUNTIME_WORK_NETWORK));
+    assert(stats.pending_work == RUNTIME_WORK_ALL);
     assert(stats.over_budget_count == 1U);
     assert(stats.requeue_count == 1U);
     assert(stats.last_duration_ticks == 12U);
@@ -125,20 +131,20 @@ static void periodic_expiry_defers_later_network(void) {
 }
 
 static void network_loop_stops_at_deadline(void) {
-    static const uint64_t values[] = {100U, 101U, 102U, 105U,
+    static const uint64_t values[] = {100U, 101U, 105U,
                                       109U, 110U, 111U};
     runtime_service_stats_t stats;
 
-    prepare(values, 7U);
+    prepare(values, 6U);
     g_fake_network_frames = 5U;
     runtime_service_request(RUNTIME_WORK_NETWORK);
     assert(runtime_service_run_pending() == RUNTIME_WORK_NETWORK);
     stats = snapshot();
 
     assert(g_network_calls == 1U);
-    assert(g_network_frames_returned == 2U);
-    assert(g_fake_network_frames == 3U);
-    assert(stats.metric_last[RUNTIME_METRIC_NETWORK_FRAMES] == 2U);
+    assert(g_network_frames_returned == 3U);
+    assert(g_fake_network_frames == 2U);
+    assert(stats.metric_last[RUNTIME_METRIC_NETWORK_FRAMES] == 3U);
     assert(stats.pending_work == RUNTIME_WORK_NETWORK);
     assert(stats.over_budget_count == 1U);
     assert(stats.requeue_count == 1U);
@@ -147,10 +153,10 @@ static void network_loop_stops_at_deadline(void) {
 }
 
 static void completed_operation_overrun_is_counted(void) {
-    static const uint64_t values[] = {100U, 101U, 115U};
+    static const uint64_t values[] = {100U, 115U};
     runtime_service_stats_t stats;
 
-    prepare(values, 3U);
+    prepare(values, 2U);
     runtime_service_request(RUNTIME_WORK_PERIODIC);
     assert(runtime_service_run_pending() == RUNTIME_WORK_PERIODIC);
     stats = snapshot();
