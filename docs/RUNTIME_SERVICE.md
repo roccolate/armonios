@@ -138,8 +138,8 @@ RUNTIME_METRIC_REDRAW_EXHAUSTIONS
 ```
 
 Each stores last-pass, maximum-pass, and cumulative counts. Reports are accepted
-only while the runtime backend is active, so cooperative console-thread work
-does not contaminate bottom-half measurements.
+only while the runtime backend is active, so unrelated cooperative work does not
+contaminate bottom-half measurements.
 
 The snapshot also records requests, coalescing, non-empty and empty passes,
 requeues, last/max/total duration, global deadline exhaustion through
@@ -159,19 +159,27 @@ The kernel orchestrator routes existing calls through runtime wrappers:
 - `gui_clear_dirty()` -> `runtime_service_gui_clear_dirty()`;
 - `net_poll()` -> `runtime_service_net_poll()`.
 
-The wrappers preserve cooperative behavior outside the active runtime service.
+Input and GUI wrappers retain their documented cooperative behavior where
+needed. Network receive is stricter: `runtime_service_net_poll()` and
+`runtime_service_virtio_net_recv()` consume nothing unless the active phase is
+`RUNTIME_WORK_NETWORK`. The legacy console-thread poll call therefore cannot
+drain the ring outside the post-EOI count and time budgets.
+
 During the periodic phase, the input cap, redraw batch, and deadline checkpoints
 apply. The inherited periodic network call is suppressed; the independent
 network phase invokes the bounded receive path only while time remains.
 
 ## Snapshot and reset contract
 
-`runtime_service_get_stats()` copies one kernel-internal snapshot.
-`runtime_service_reset()` clears pending readiness, transient phase/redraw state,
-and measured counters while preserving counter frequency and configured budget.
+`runtime_service_get_stats()` copies one kernel-internal snapshot using the
+freestanding kernel copy primitive. `runtime_service_reset()` clears pending
+readiness, transient phase/redraw state, and measured counters while preserving
+counter frequency and configured budget.
 
-All state remains zero-initialized, preserving `.data == 0`. No syscall exposes
-the internal layout. Any Monitor integration requires a versioned diagnostic ABI.
+All state remains zero-initialized, preserving `.data == 0`. No production
+syscall exposes the internal layout. Test-only QEMU images may read it directly
+inside EL1 with IRQs masked to emit coherent serial evidence. Any Monitor
+integration requires a versioned diagnostic ABI.
 
 ## Current correctness assumptions
 
@@ -192,6 +200,7 @@ atomics, per-CPU state, or a scheduler-owned queue.
   calls.
 - Runtime work begins only after `board_irq_end()`.
 - Periodic, input, and network readiness follow explicit routing rules.
+- Network receive cannot bypass the active NETWORK phase.
 - Requests coalesce and backend requeue survives.
 - A service-wide generic-counter deadline is enforced at safe checkpoints.
 - Deadline exhaustion is counted once and the original work snapshot is
@@ -205,25 +214,17 @@ atomics, per-CPU state, or a scheduler-owned queue.
   submission and preserves all remaining or failed damage.
 - Post-EOI network RX is at most 16 valid frames per pass.
 - Reports outside the active bottom half are ignored.
-- `.data == 0`, the 108000-byte kernel ceiling, and the user ABI are preserved.
+- `.data == 0`, the 108000-byte production kernel ceiling, and the user ABI are
+  preserved.
 
-## QEMU stress evidence
+## Deterministic forced-expiry stress
 
-`tools/qemu_runtime_stress_test.sh` builds a separate instrumented image. The
-production image and size gate are built without `ARMONIOS_RUNTIME_STRESS_TEST`.
+`tools/qemu_runtime_stress_test.sh` builds a separate image with
+`ARMONIOS_RUNTIME_STRESS_TEST`. It launches real windows, completes DHCP, injects
+USB keyboard events, forces one checkpoint expiry every eight service passes,
+and emits EL0 heartbeats.
 
-The stress image:
-
-- launches the panel auto-test so real windows and redraw submissions occur;
-- boots virtio-net through DHCP and records a valid consumed frame;
-- attaches xHCI keyboard and mouse devices;
-- injects repeated keyboard events for 12 seconds through QEMU's monitor;
-- emits an EL0 heartbeat from repeated `SYS_YIELD` calls;
-- forces one test-only cooperative deadline expiry every eight service passes;
-- records each expiry after the production republish path runs;
-- fails on observable input queue overflow or kernel panic.
-
-Validated head `fd2deb8e6ef6999f26a688000c37ab22a4bc46f6` produced:
+The validated PR #61 run produced:
 
 ```text
 EL0 heartbeat markers:        509
@@ -236,74 +237,84 @@ input-overflow markers:         0
 panic markers:                  0
 ```
 
-The serial log is uploaded in the `qemu-serial-logs` workflow artifact. Ordinary
-boot strings are not used as stress assertions because IRQ diagnostics can
-legally interleave character-by-character with EL0 serial writes. Assertions use
-work-path markers and counted heartbeats instead.
-
 This proves repeated EL0 execution while the actual deadline-republish path is
-exercised hundreds of times, with real input consumption, GUI submission, and
-network receive activity present in the same QEMU run. It also proves that the
-chosen keyboard injection rate did not trigger the observable input-overflow
-counter.
+exercised hundreds of times. Forced expiry is deterministic instrumentation, not
+a measurement of natural production latency.
 
-## Remaining evidence boundary
+## Natural virtio-net RX saturation
 
-The stress gate intentionally forces deterministic expirations in its separate
-test image. It does not establish the maximum production pass duration under the
-natural 10 ms threshold.
+`tools/qemu_runtime_net_stress_test.sh` builds a separate image with
+`ARMONIOS_RUNTIME_NET_STRESS_TEST`; it does not shorten the budget or force the
+clock. After DHCP, QEMU `hostfwd` injects sustained UDP traffic while xHCI
+keyboard events and panel redraw work continue.
 
-The run observes real virtio-net receive and DHCP activity, but does not create a
-sustained RX backlog or prove device-level loss behavior. The current driver does
-not expose trustworthy device-drop or overwrite counters.
+The final PR #62 stress run recorded:
 
-ArmoniOS therefore still lacks evidence for:
+```text
+EL0 yields:                       38,912
+input events consumed:                 16
+redraw submissions:                   738
+virtio-net frames consumed:        29,234
+maximum frames in one pass:            16
+network-cap exhaustions:             1,827
+runtime requeues:                    1,827
+natural deadline overruns:               0
+maximum pass duration:             385,763 ticks
+configured budget:                 625,000 ticks
+maximum / budget:                    61.7%
+input queue overflow:                    0
+kernel panic:                            0
+```
 
-- sustained virtio-net RX pressure beyond boot/DHCP traffic;
-- a measured production-threshold maximum under realistic combined load;
-- asynchronous interruption of one already-started full redraw or driver call;
-- fairness among all work classes under an indefinitely maintained backlog.
+The run contains 38 coherent EL0 summaries. It demonstrates repeated progress
+while the 16-frame cap is reached and requeued thousands of times, with the
+natural maximum remaining below one timer interval. The instrumented image is
+108438 bytes and is not the release artifact; the production image remains under
+the unchanged 108000-byte gate.
 
-The deadline cannot preempt an operation already executing, so a full redraw may
-cross the nominal interval once. Cooperative network polling outside the runtime
-service also remains outside this post-EOI guarantee.
+## Evidence boundary
 
-These remaining boundaries keep `RISK-017` open rather than overstating the new
-stress result.
+The natural saturation gate proves software-visible continuation and latency for
+the tested QEMU workload. It does not prove that every host-submitted packet
+reached a guest descriptor. The current driver exposes no trustworthy device or
+ring-drop counter, so frames dropped or overwritten before software consumption
+remain outside the evidence boundary.
 
-## Deterministic verification
+The deadline also cannot preempt an operation already executing. A full redraw or
+driver call may cross the nominal interval once even though the measured
+saturation run did not. Indefinite fairness among all classes is not formally
+proved.
 
-`tests/runtime_deadline_test.c` verifies:
+An intermittent EL1 VMM data abort observed once during an existing FAT32 smoke
+run is tracked separately in issue #63 and is not attributed to the runtime RX
+change without reproduction evidence.
 
-- a periodic checkpoint can expire before redraw and prevent the later network
-  phase;
-- an active network loop stops at a deadline checkpoint and retains frames;
-- an operation that completes after the deadline is detected, counted, and
-  conservatively republished.
+## Validation
 
-The existing runtime regressions continue to verify EOI ordering, coalescing,
-reset, class metrics, exact input/network caps, virtio-input 8 + 2 continuation,
-USB four-slot clamping, redraw 8 + 8 + 4 continuation, failed redraw retention,
-and full redraw behavior.
+Final implementation/evidence head:
+`eac4ff990baddbf83406567b4a20e58bcae6600d`.
 
-Validation for the stress head:
-
-- `Verify ArmoniOS` run `29893037276` (#280): success;
-- `CI - Tests` run `29893037263` (#420): success;
-- production loadable QEMU kernel remains 107930 / 108000 bytes;
-- remaining production margin remains 70 bytes;
-- deadline implementation PR: #60;
-- QEMU stress/heartbeat PR: #61.
+- `Verify ArmoniOS` run `29896102906` (#290): success;
+- `CI - Tests` run `29896102904` (#430): success;
+- production loadable QEMU kernel: 107918 / 108000 bytes;
+- remaining production margin: 82 bytes;
+- global deadline: PR #60;
+- forced-expiry heartbeat: PR #61;
+- natural RX saturation and strict routing: PR #62.
 
 ## RISK-017 remaining exit criteria
 
-1. generate sustained virtio-net RX pressure, not only DHCP/startup traffic;
-2. expose or explicitly delimit device-level RX loss evidence;
-3. record production-threshold pass durations under realistic combined load;
-4. decide whether an already-started full redraw needs finer-grained checkpoints;
-5. retain every existing subsystem and stress gate;
-6. record a dated visible desktop pass after the final runtime boundary.
+Automated runtime evidence is now complete for the current QEMU v0.2 contract.
+Before formal promotion:
 
-A later scheduler may promote this work into a wakeable EL1 service, but the
-current bottom half first needs the remaining network and natural-duration
-evidence.
+1. explicitly accept the lack of device-level RX-drop telemetry or schedule a
+   separate driver counter milestone;
+2. decide whether the full-redraw non-preemptible boundary is acceptable for
+   v0.2;
+3. retain every existing subsystem and stress gate;
+4. record a dated visible desktop pass after the final runtime boundary;
+5. resolve or explicitly disposition issue #63 before tagging v0.2.
+
+A later scheduler may promote the bottom half into a wakeable EL1 service, but
+that is no longer required to demonstrate the current bounded cooperative
+contract.

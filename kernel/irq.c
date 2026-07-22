@@ -268,7 +268,7 @@ void runtime_service_report_input_queue(uint32_t depth, uint32_t high_water,
 
 void runtime_service_get_stats(runtime_service_stats_t *stats) {
     if (stats != 0) {
-        *stats = g_runtime_stats;
+        kmemcpy(stats, &g_runtime_stats, sizeof(*stats));
     }
 }
 
@@ -315,17 +315,13 @@ int runtime_service_input_poll(struct input_event *event) {
 }
 
 void runtime_service_net_poll(void) {
-    if (g_runtime_phase == 0U ||
-        (g_runtime_phase & RUNTIME_WORK_NETWORK) != 0U) {
+    if ((g_runtime_phase & RUNTIME_WORK_NETWORK) != 0U) {
         net_poll();
     }
 }
 
 int runtime_service_virtio_net_recv(virtio_net_device_t *device, void *data,
                                     uint32_t max_len) {
-    if (g_runtime_phase == 0U) {
-        return virtio_net_recv(device, data, max_len);
-    }
     if ((g_runtime_phase & RUNTIME_WORK_NETWORK) == 0U) {
         return 0;
     }
