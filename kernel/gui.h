@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#include "include/armonios/abi/gui.h"
 #include "input/input.h"
 
 typedef struct fb fb_t;
@@ -41,31 +42,6 @@ typedef struct fb fb_t;
  * default. 8 covers a normal launcher/taskbar/widget surface without
  * spilling. */
 #define GUI_MAX_CURSOR_REGIONS  8U
-/* Sentinel for SYS_CURSOR_REGISTER_REGION: passing shape ==
- * GUI_CURSOR_REGION_DELETE clears the slot instead of installing a
- * new region. */
-#define GUI_CURSOR_REGION_DELETE 0xffffffffU
-
-/* Bitmap returned by sys_window_state. The bit assignments are part
- * of the ABI; apps (and the panel) read them to check whether a
- * window is minimised or focused without polling the event queue. */
-#define GUI_WINDOW_STATE_MINIMIZED (1U << 0)
-#define GUI_WINDOW_STATE_FOCUSED   (1U << 1)
-
-#define GUI_EVENT_KEY_PRESS   1U
-#define GUI_EVENT_KEY_RELEASE 2U
-#define GUI_EVENT_MOUSE_CLICK 3U
-#define GUI_EVENT_MOUSE_MOVE  4U
-#define GUI_EVENT_RESIZE      5U
-#define GUI_EVENT_CLOSE        6U
-#define GUI_EVENT_MINIMIZE     7U
-#define GUI_EVENT_MAXIMIZE     8U
-
-typedef struct {
-    uint32_t type;
-    int32_t  data1;
-    int32_t  data2;
-} gui_event_t;
 
 typedef struct {
     uint32_t x;
@@ -144,16 +120,6 @@ typedef struct {
     uint8_t visible;
     uint8_t shape;
 } gui_cursor_t;
-
-#define GUI_CURSOR_ARROW 0U
-#define GUI_CURSOR_HAND  1U
-
-/* Bitmask values for gui_cursor_t::buttons_mask. The same numbering is used
- * by input_event_t::mouse_button::button so the GUI does not need to know
- * about Linux input codes. */
-#define GUI_BUTTON_LEFT   (1U << 0)
-#define GUI_BUTTON_RIGHT  (1U << 1)
-#define GUI_BUTTON_MIDDLE (1U << 2)
 
 typedef struct {
     int32_t x;
