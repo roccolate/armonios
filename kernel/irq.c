@@ -17,6 +17,7 @@
 #define RUNTIME_REDRAW_COUNT_MASK 0x0fU
 #define RUNTIME_REDRAW_FULL       (1U << 4)
 #define RUNTIME_REDRAW_SUCCESS    (1U << 5)
+#define RUNTIME_REDRAW_EXHAUSTED  (1U << 6)
 
 enum {
     RUNTIME_PHASE_ACTIVE = 1U << 0,
@@ -62,6 +63,32 @@ void runtime_service_configure_timing(uint64_t counter_frequency_hz,
     g_runtime_stats.budget_ticks = budget_ticks;
 }
 
+static int runtime_service_deadline(void) {
+#if defined(ARMONIOS_TEST) && !defined(ARMONIOS_RUNTIME_DEADLINE_TEST)
+    return 0;
+#else
+    uint32_t pending;
+
+    if (g_runtime_phase == 0U || g_runtime_stats.budget_ticks == 0U) {
+        return 0;
+    }
+    if ((g_runtime_phase & RUNTIME_PHASE_DEADLINE) != 0U) {
+        return 1;
+    }
+    if (runtime_service_counter_now() < g_runtime_stats.last_duration_ticks) {
+        return 0;
+    }
+
+    g_runtime_phase |= RUNTIME_PHASE_DEADLINE;
+    g_runtime_stats.over_budget_count++;
+    pending = (g_runtime_phase & RUNTIME_PHASE_NETWORK) != 0U
+                  ? RUNTIME_WORK_NETWORK
+                  : RUNTIME_WORK_PERIODIC | RUNTIME_WORK_INPUT;
+    g_runtime_stats.pending_work |= pending;
+    return 1;
+#endif
+}
+
 void runtime_service_report_metric(uint32_t metric, uint32_t value) {
     uint32_t current;
 
@@ -76,6 +103,7 @@ void runtime_service_report_metric(uint32_t metric, uint32_t value) {
     if (current > g_runtime_stats.metric_max[metric]) {
         g_runtime_stats.metric_max[metric] = current;
     }
+    (void)runtime_service_deadline();
 }
 
 void runtime_service_gui_render(struct fb *fb, void *context) {
@@ -83,7 +111,7 @@ void runtime_service_gui_render(struct fb *fb, void *context) {
     uint32_t original_count;
     uint32_t batch;
 
-    if (!runtime_service_continue(RUNTIME_WORK_PERIODIC)) {
+    if (runtime_service_deadline()) {
         g_runtime_redraw_state = 0U;
         return;
     }
@@ -106,30 +134,35 @@ void runtime_service_gui_render(struct fb *fb, void *context) {
         batch = RUNTIME_REDRAW_DAMAGE_BUDGET;
     }
     g_runtime_redraw_state = (uint8_t)(batch + 1U);
+    if (original_count > batch) {
+        g_runtime_redraw_state |= RUNTIME_REDRAW_EXHAUSTED;
+    }
     desktop->damage_count = batch;
     gui_render((fb_t *)fb, context);
     desktop->damage_count = original_count;
 }
 
 void runtime_service_report_redraw(void) {
-    gui_desktop_t *desktop = gui_desktop();
     uint8_t state = g_runtime_redraw_state;
     uint32_t batch;
 
     runtime_service_report_metric(RUNTIME_METRIC_REDRAW, 1U);
-    if (desktop == 0) {
-        return;
-    }
 #if defined(ARMONIOS_TEST)
     if (state == 0U) {
+        gui_desktop_t *desktop = gui_desktop();
+
+        if (desktop == 0) {
+            return;
+        }
         if (desktop->damage_full != 0U) {
             state = RUNTIME_REDRAW_FULL | 1U;
         } else {
             batch = desktop->damage_count;
             if (batch > RUNTIME_REDRAW_DAMAGE_BUDGET) {
                 batch = RUNTIME_REDRAW_DAMAGE_BUDGET;
+                state = RUNTIME_REDRAW_EXHAUSTED;
             }
-            state = (uint8_t)(batch + 1U);
+            state |= (uint8_t)(batch + 1U);
         }
     }
 #else
@@ -143,7 +176,7 @@ void runtime_service_report_redraw(void) {
         runtime_service_report_metric(RUNTIME_METRIC_FULL_REDRAWS, 1U);
     } else {
         runtime_service_report_metric(RUNTIME_METRIC_DAMAGE_ITEMS, batch);
-        if (desktop->damage_count > batch) {
+        if ((state & RUNTIME_REDRAW_EXHAUSTED) != 0U) {
             runtime_service_report_metric(
                 RUNTIME_METRIC_REDRAW_EXHAUSTIONS, 1U);
         }
@@ -216,28 +249,6 @@ void runtime_service_request(uint32_t work) {
     g_runtime_stats.pending_work = pending | accepted;
 }
 
-int runtime_service_continue(uint32_t work) {
-#if defined(ARMONIOS_TEST) && !defined(ARMONIOS_RUNTIME_DEADLINE_TEST)
-    (void)work;
-    return 1;
-#else
-    work &= RUNTIME_WORK_ALL;
-    if (g_runtime_phase == 0U || g_runtime_stats.budget_ticks == 0U ||
-        (int64_t)(runtime_service_counter_now() -
-                  g_runtime_stats.last_duration_ticks) < 0) {
-        return 1;
-    }
-    if ((g_runtime_phase & RUNTIME_PHASE_DEADLINE) == 0U) {
-        g_runtime_phase |= RUNTIME_PHASE_DEADLINE;
-        g_runtime_stats.over_budget_count++;
-    }
-    if ((g_runtime_stats.pending_work & work) != work) {
-        runtime_service_request(work);
-    }
-    return 0;
-#endif
-}
-
 static void runtime_service_requeue_budget(uint32_t work, uint64_t *counter) {
     if ((g_runtime_stats.pending_work & work) == 0U) {
         (*counter)++;
@@ -250,8 +261,8 @@ int runtime_service_input_poll(struct input_event *event) {
     if (g_runtime_phase == 0U) {
         return input_queue_poll((input_event_t *)event);
     }
-    if ((g_runtime_phase & RUNTIME_PHASE_INPUT) == 0U ||
-        !runtime_service_continue(RUNTIME_WORK_INPUT)) {
+    if ((g_runtime_phase & (RUNTIME_PHASE_INPUT | RUNTIME_PHASE_DEADLINE)) !=
+        RUNTIME_PHASE_INPUT) {
         return -1;
     }
     if (g_runtime_stats.metric_last[RUNTIME_METRIC_INPUT_CONSUMED] <
@@ -268,8 +279,7 @@ int runtime_service_input_poll(struct input_event *event) {
 
 void runtime_service_net_poll(void) {
     if (g_runtime_phase == 0U ||
-        ((g_runtime_phase & RUNTIME_PHASE_NETWORK) != 0U &&
-         runtime_service_continue(RUNTIME_WORK_NETWORK))) {
+        (g_runtime_phase & RUNTIME_PHASE_NETWORK) != 0U) {
         net_poll();
     }
 }
@@ -279,8 +289,8 @@ int runtime_service_virtio_net_recv(virtio_net_device_t *device, void *data,
     if (g_runtime_phase == 0U) {
         return virtio_net_recv(device, data, max_len);
     }
-    if ((g_runtime_phase & RUNTIME_PHASE_NETWORK) == 0U ||
-        !runtime_service_continue(RUNTIME_WORK_NETWORK)) {
+    if ((g_runtime_phase & (RUNTIME_PHASE_NETWORK | RUNTIME_PHASE_DEADLINE)) !=
+        RUNTIME_PHASE_NETWORK) {
         return 0;
     }
     if (g_runtime_stats.metric_last[RUNTIME_METRIC_NETWORK_FRAMES] >=
@@ -314,21 +324,16 @@ uint32_t runtime_service_run_pending(void) {
     started = runtime_service_counter_now();
     g_runtime_stats.last_duration_ticks = started + g_runtime_stats.budget_ticks;
     if ((work & (RUNTIME_WORK_PERIODIC | RUNTIME_WORK_INPUT)) != 0U) {
-        uint32_t periodic_work = work &
-            (RUNTIME_WORK_PERIODIC | RUNTIME_WORK_INPUT);
-
         g_runtime_phase = RUNTIME_PHASE_ACTIVE |
                           (work & RUNTIME_WORK_INPUT);
-        if (runtime_service_continue(periodic_work)) {
-            kernel_on_timer_tick();
-        }
+        kernel_on_timer_tick();
     }
     if ((work & RUNTIME_WORK_NETWORK) != 0U) {
         if ((g_runtime_phase & RUNTIME_PHASE_DEADLINE) != 0U) {
-            runtime_service_request(RUNTIME_WORK_NETWORK);
+            g_runtime_stats.pending_work |= RUNTIME_WORK_NETWORK;
         } else {
             g_runtime_phase = RUNTIME_PHASE_ACTIVE | RUNTIME_PHASE_NETWORK;
-            if (runtime_service_continue(RUNTIME_WORK_NETWORK)) {
+            if (!runtime_service_deadline()) {
                 kernel_io_poll_network();
             }
         }
