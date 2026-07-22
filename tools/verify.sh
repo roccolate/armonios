@@ -19,6 +19,7 @@ printf 'date: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # gate operate on a consistent kernel. The board-rpi4 gate runs in its own
 # build-rpi4/ directory so its artefact never clobbers the qemu one.
 run_gate build make BOARD=qemu_virt
+run_gate libarmdesk-foundation bash tests/run_libarmdesk_foundation_test.sh
 run_gate size make BOARD=qemu_virt size
 run_gate board-rpi4 bash tests/run_board_build_test.sh
 run_gate rpi4-probe-package bash tools/package_rpi4_emmc2_probe.sh
@@ -29,7 +30,6 @@ run_gate block-view-fat32-host bash tests/run_block_view_fat32_test.sh
 run_gate fat32-corruption-host bash tests/run_fat32_corruption_test.sh
 run_gate rpi-mailbox-host bash tests/run_rpi_mailbox_test.sh
 run_gate host-tests make -C tests test
-run_gate libarmdesk-foundation bash tests/run_libarmdesk_foundation_test.sh
 run_gate runtime-service bash tests/run_runtime_service_test.sh
 run_gate input-queue-telemetry bash tests/run_input_queue_stats_test.sh
 run_gate process-parent-wait bash tests/run_process_parent_wait_test.sh
