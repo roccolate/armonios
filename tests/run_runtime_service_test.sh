@@ -9,6 +9,7 @@ redraw_binary="${build_dir}/runtime_redraw_budget_test"
 deadline_binary="${build_dir}/runtime_deadline_test"
 timer_source="${repo_root}/kernel/timer/timer.c"
 runtime_source="${repo_root}/kernel/irq.c"
+kstring_source="${repo_root}/kernel/kstring.c"
 io_service_source="${repo_root}/kernel/io_service.h"
 network_source="${repo_root}/drivers/net/virtio_net.c"
 usb_hid_source="${repo_root}/drivers/usb/hid_driver.c"
@@ -26,22 +27,25 @@ common_flags=(
 ${HOST_CC:-cc} "${common_flags[@]}" \
     "${repo_root}/tests/runtime_service_test.c" \
     "${repo_root}/kernel/irq.c" \
+    "${kstring_source}" \
     -o "${binary}"
 
 ${HOST_CC:-cc} "${common_flags[@]}" \
     "${repo_root}/tests/runtime_input_budget_test.c" \
     "${repo_root}/kernel/irq.c" \
+    "${kstring_source}" \
     -o "${input_binary}"
 
 ${HOST_CC:-cc} "${common_flags[@]}" \
     "${repo_root}/tests/runtime_redraw_budget_test.c" \
     "${repo_root}/kernel/irq.c" \
-    "${repo_root}/kernel/kstring.c" \
+    "${kstring_source}" \
     -o "${redraw_binary}"
 
 ${HOST_CC:-cc} "${common_flags[@]}" -DARMONIOS_RUNTIME_DEADLINE_TEST \
     "${repo_root}/tests/runtime_deadline_test.c" \
     "${repo_root}/kernel/irq.c" \
+    "${kstring_source}" \
     -o "${deadline_binary}"
 
 "${binary}"
