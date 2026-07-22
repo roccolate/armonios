@@ -56,9 +56,9 @@ void timer_init(uint32_t hz) {
         g_interval_ticks = 1;
     }
 
-    /* One timer interval is the initial observation threshold. Exceeding it
-     * means a service pass delayed EL0 beyond the next nominal timer deadline;
-     * later budget work will introduce smaller per-subsystem limits. */
+    /* One nominal timer interval is the enforced service-wide deadline.
+     * Existing class count budgets remain tighter finite stop rules where the
+     * work interface exposes a safe continuation boundary. */
     runtime_service_configure_timing(freq, g_interval_ticks);
 
     g_next_cval = read_cntpct() + g_interval_ticks;
