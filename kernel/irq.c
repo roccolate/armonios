@@ -268,7 +268,7 @@ void runtime_service_report_input_queue(uint32_t depth, uint32_t high_water,
 
 void runtime_service_get_stats(runtime_service_stats_t *stats) {
     if (stats != 0) {
-        *stats = g_runtime_stats;
+        kmemcpy(stats, &g_runtime_stats, sizeof(*stats));
     }
 }
 
