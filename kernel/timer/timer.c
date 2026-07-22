@@ -9,9 +9,9 @@
  * AArch64 physical timer driver.
  *
  * timer_init programs CNTP_CVAL/CTL using CNTFRQ_EL0. The hard-IRQ handler is
- * intentionally bounded: account the tick, rearm the timer, publish one
- * coalescible periodic-work bit, and advance scheduler counters. Device, GUI,
- * and network work runs later through the post-EOI runtime service.
+ * intentionally bounded: account the tick, rearm the timer, publish coalescible
+ * periodic, input, and network work, and advance scheduler counters. Device,
+ * GUI, and network work runs later through the post-EOI runtime service.
  */
 
 static uint64_t g_ticks;
@@ -76,7 +76,8 @@ void timer_handle_irq(void *context) {
     g_next_cval += g_interval_ticks;
     write_cntp_cval(g_next_cval);
 
-    runtime_service_request(RUNTIME_WORK_PERIODIC);
+    runtime_service_request(RUNTIME_WORK_PERIODIC | RUNTIME_WORK_INPUT |
+                            RUNTIME_WORK_NETWORK);
     sched_on_timer_tick();
 }
 

@@ -5,7 +5,7 @@ usable v1.0 mini desktop OS. It is ordered by architectural dependency, user
 value, verification cost, and maintenance risk.
 
 Operational truth lives in `CURRENT_STATE.md`. Active defects and exit criteria
-live in `TECHNICAL_RISKS.md`. This file describes planned sequencing and must not
+live in `TECHNICAL_RISKS.md`. This file describes future sequencing and must not
 be cited as proof that a feature exists.
 
 ## Product target
@@ -41,7 +41,7 @@ Chosen release defaults:
 | Phase | State | Promotion blocker |
 |---|---|---|
 | v0.1 baseline | COMPLETE | None for the recorded QEMU baseline |
-| v0.2 cleanup/hardening | IN PROGRESS / RELEASE CANDIDATE | Runtime budgets, exhausted-work preservation, sustained-load evidence, formal promotion record |
+| v0.2 cleanup/hardening | IN PROGRESS / RELEASE CANDIDATE | USB/device, redraw, and global-time bounds; runtime compaction; sustained-load evidence; promotion record |
 | v0.3 storage/VFS platform | NEXT | Depends on v0.2 promotion |
 | v0.4 real FAT | PLANNED | Depends on v0.3 filesystem interfaces |
 | v0.5 userland runtime/widgets | PLANNED | Depends on stable storage and ABI shapes |
@@ -66,6 +66,8 @@ Chosen release defaults:
    and polish belong to v0.6-v0.8.
 7. Preserve the 108000-byte kernel limit unless a deliberate release decision,
    evidence, and replacement size budget are documented. Compact first.
+8. With only 198 bytes currently remaining, the next runtime cut must reduce or
+   reuse state before introducing new persistent counters or phase flags.
 
 ## v0.1 — verified QEMU baseline
 
@@ -97,20 +99,19 @@ daily applications, or Raspberry Pi hardware support.
 
 ### Landed cleanup
 
-- lower subsystems receive kernel-owned syscall buffers instead of caller-owned
-  EL0 pointers;
+- lower subsystems receive kernel-owned syscall buffers;
 - output pages are permission checked before copying;
-- VFS dispatches through generic mount callbacks instead of FAT32 policy;
+- VFS dispatches through generic mount callbacks;
 - dynamic FAT nodes are invalidated after rename/delete;
 - Raspberry Pi normal storage remains fail closed;
 - process-owned descriptors and parent/wait lifecycle are verified;
 - timer hard-IRQ work is limited to accounting, rearm, publication, and scheduler
   counters;
-- periodic GUI, input, device, and network work is centralized after EOI.
+- periodic GUI, input, USB, and network work is centralized after EOI.
 
 ### Landed runtime measurement
 
-The post-EOI service now measures:
+The post-EOI service measures:
 
 - request, coalescing, requeue, non-empty, and empty pass counts;
 - last, maximum, and cumulative generic-counter duration;
@@ -119,46 +120,86 @@ The post-EOI service now measures:
 - input queue depth, lifetime high-water, and overflow;
 - USB HID polling operations;
 - valid virtio-net RX frames consumed;
-- successful redraw submissions;
-- partial-damage rectangle batches and full-redraw fallbacks.
+- redraw submissions, partial-damage batches, and full-redraw fallbacks;
+- separate input- and network-budget exhaustion.
 
-Latest validated Phase 1B head:
-`6634c3a6f527433643a56f2c90cc6af8bad62c1d`.
+Phase 1B was completed through PRs #44-#48.
 
-- `Verify ArmoniOS` run `29840410727`: success;
-- `CI - Tests` run `29840411044`: success;
-- loadable kernel: 107370 / 108000 bytes.
+### Landed network bound
 
-The current virtio-net path exposes no trustworthy device-level RX-drop counter.
-This is documented as unavailable rather than replaced with an inferred value.
+PR #50 introduced the first enforced class budget:
+
+- `RUNTIME_WORK_NETWORK` is independent from periodic readiness;
+- active post-EOI network receive is capped at 16 valid frames per pass;
+- reaching the cap increments a network exhaustion counter;
+- network readiness is conservatively republished;
+- a seventeenth frame continues later;
+- exactly sixteen frames may produce one empty follow-up pass;
+- cooperative network polling outside the runtime service remains unbudgeted.
+
+Evidence:
+
+- validated head `e3765864e6719c0b6373a4c9b1b7db59dfaa0202`;
+- `Verify ArmoniOS` run `29849603386`: success;
+- `CI - Tests` run `29849603374`: success;
+- loadable kernel: 107548 / 108000 bytes;
+- merge `3797f7e7cf3dfb825d927e399aa4769b27020e29`.
+
+The virtio-net path still exposes no trustworthy device-level RX-drop counter.
+This remains an explicit evidence gap.
+
+### Landed input-consumption bound
+
+PR #52 introduced the second enforced class budget:
+
+- `RUNTIME_WORK_INPUT` is independent from periodic and network readiness;
+- active post-EOI queue consumption is capped at 16 events per pass;
+- queue depth is checked without consuming at the cap;
+- exactly 16 events with an empty queue finish without requeue;
+- a seventeenth event preserves `RUNTIME_WORK_INPUT` for a later pass;
+- input-budget exhaustion is counted only when queue work remains;
+- normal timer work executes the existing periodic backend once with the input
+  phase enabled;
+- console-thread and other outside-service consumers retain prior behavior.
+
+Evidence:
+
+- validated head `ba8051cd8edbe6a66a843f80c54c96668d064a91`;
+- `Verify ArmoniOS` run `29853659559`: success;
+- `CI - Tests` run `29853659491`: success;
+- loadable kernel: 107802 / 108000 bytes;
+- remaining margin: 198 bytes;
+- merge `41f3e185ca1f75ed09416313d34279384f3d78a9`.
+
+The initial value is one quarter of the fixed 64-event queue and matches the
+network count budget. It is an engineering starting point, not a final latency
+claim.
 
 ### Remaining runtime work
 
-1. Split the single periodic readiness bit into independently pending input/GUI,
-   device, and network work.
-2. Bound virtio-net receive draining first; it is the clearest unbounded loop and
-   the queue has 16 descriptors.
-3. Bound input consumption, USB HID polling, and redraw/damage work.
-4. Add a global generic-counter deadline.
-5. Preserve or republish the relevant pending bit whenever a class or deadline
-   expires.
-6. Count every class-budget and global-deadline exhaustion.
-7. Add sustained-load QEMU tests proving EL0 heartbeat progress and explicit loss
+1. Compact runtime phase state, wrappers, and telemetry while preserving all
+   current budget and regression contracts.
+2. Split and bound USB HID/device producer polling.
+3. Bound redraw and damage work.
+4. Enforce a global generic-counter deadline.
+5. Preserve or republish every exhausted class and count each exhaustion.
+6. Add sustained-load QEMU tests proving EL0 heartbeat progress and explicit loss
    accounting.
-8. Decide whether the bounded bottom half remains permanent or later becomes a
-   wakeable EL1 service.
-9. Create a formal v0.2 promotion/tag record with exact evidence.
+7. Decide whether the fully bounded bottom half remains permanent or later becomes
+   a wakeable EL1 service.
+8. Create a formal v0.2 promotion/tag record with exact evidence.
 
 ### Exit criteria
 
 - `bash tools/verify.sh` passes on the promotion commit;
 - no hard timer callback contains rendering, queue drains, network polling, or
   device polling;
-- runtime duration and every current budget-relevant work class are observable;
-- work per pass is bounded;
+- every budget-relevant class and total service duration are observable;
+- input consumption, USB/device polling, network RX, redraw, and global time are
+  bounded;
 - leftover class work remains pending;
 - every exhaustion is counted;
-- sustained input/network/redraw load cannot stop an EL0 heartbeat;
+- sustained combined load cannot stop an EL0 heartbeat;
 - documentation states the exact post-EOI exception-context model;
 - RPi4 remains fail closed and no hardware claim is introduced;
 - a dated visible QEMU pass is recorded;
@@ -208,55 +249,27 @@ Exit criteria:
 
 Goal: replace the root-only FAT32 bridge with a tested filesystem driver.
 
-Scope:
-
 - FAT12/16/32 probe and mount where practical;
-- VFAT long file names;
-- subdirectories;
+- VFAT long file names and subdirectories;
 - create, read, write, list, stat, truncate, mkdir, rename, move, and delete;
 - file growth and shrink;
-- simple MBR discovery for QEMU images;
-- clear rejection of unsupported or corrupt geometry;
-- `/fat` remains the primary writable volume;
-- exFAT remains outside v1 unless it can be added safely.
+- MBR discovery for QEMU images;
+- safe rejection of unsupported or corrupt geometry;
+- host-image and QEMU reboot-persistence gates.
 
-Exit criteria:
-
-- Files and Shell no longer depend on 8.3 names;
-- a multi-line file can be saved, reopened, moved, and deleted in a nested
-  directory;
-- host image and QEMU reboot-persistence gates pass;
-- the root-only bridge is removed or isolated as compatibility code.
+Exit criteria include a nested directory workflow with long names and removal or
+isolation of the root-only compatibility bridge.
 
 ## v0.5 — userland runtime and widgets
 
 **State: PLANNED**
 
-Goal: make application development practical without violating KLI1.
-
-Runtime work:
-
 - small heap backed by `SYS_MMAP`;
 - dynamic buffers and bounded vectors;
-- path construction and normalization helpers;
-- argv parsing, formatting, error, and ownership helpers;
-- no mutable static `.data` or `.bss` in shipping images.
-
-Widget work:
-
-- labels and status bars;
-- buttons and text fields;
-- list views with selection and scrolling;
-- viewport/scrollbar helpers;
-- modal confirmation dialogs;
-- shared focus and keyboard navigation.
-
-Exit criteria:
-
-- Files, Editor, Control, and Monitor share runtime and widget code;
-- image size changes are budgeted deliberately;
-- stack and KLI1 gates remain green;
-- layout/state logic is host-testable where practical.
+- path, argv, formatting, error, and ownership helpers;
+- reusable labels, buttons, text fields, list views, scrolling, and dialogs;
+- no mutable static `.data` or `.bss` in shipping images;
+- stack and KLI1 gates remain green.
 
 ## v0.6 — useful desktop applications
 
@@ -265,44 +278,15 @@ Exit criteria:
 
 This milestone is intentionally v0.6, not v1.1. It depends on v0.3-v0.5.
 
-### Files
+Required user workflow:
 
 - navigate directories and mount roots;
-- show type and size;
-- create files and folders;
-- copy, move, rename, and delete;
-- open files with Editor;
-- scroll beyond eight entries;
-- report storage errors clearly.
-
-### Editor
-
-- multi-line viewport;
-- vertical and horizontal scrolling;
-- larger or chunked loading;
-- dirty state and Save As;
-- safe truncate-on-save;
-- line/column status and predictable caret navigation.
-
-### Shell
-
-Preserve current commands and add `cp`, `mv`, `rm`, `mkdir`, `touch`, `echo`,
-`edit`, `open`, `df`, and `clear`, with path-aware errors and clearer process
-output.
-
-### Control and Monitor
-
-- persist at least three observable settings across reboot;
-- show PID, state, memory, and timer information;
-- refresh and kill a selected process with confirmation.
-
-Exit criteria:
-
-- create a folder and multi-line file;
-- save, close, reopen, copy, move, rename, and delete;
+- create folders and multi-line files;
+- save, reopen, copy, move, rename, and delete;
+- use path-aware shell commands;
 - inspect and terminate a process;
-- change three settings;
-- reboot and confirm files and settings persist.
+- persist at least three observable settings;
+- reboot and confirm files and settings survived.
 
 ## v0.7 — ext2 read-only
 
@@ -329,7 +313,7 @@ separate write-safety plan exists.
 - keyboard navigation and cursor regions;
 - resizing and damage repaint tests;
 - reduced hardcoded geometry where it blocks use;
-- storage and runtime status visible through a deliberate diagnostic ABI.
+- storage and runtime status through a deliberate diagnostic ABI.
 
 Exit criteria include a 30-minute manual QEMU session without crash, scheduler
 stall, blank compositor, or data loss.
@@ -351,15 +335,14 @@ stall, blank compositor, or data loss.
 
 Final acceptance requires:
 
-- reliable graphical boot;
-- directory-aware writable FAT;
+- reliable graphical boot and desktop workflow;
+- writable FAT with directories and long names;
 - read-only ext2;
-- useful Files, Editor, Shell, Control, Monitor, Panel, and Clock;
-- persistent files and settings across reboot;
-- bounded deferred runtime work with sustained-load EL0 proof;
-- deterministic automated gates;
-- dated visible end-to-end evidence;
-- exact release commit, workflow runs, limitations, and recovery instructions.
+- useful Files, Editor, Shell, Settings, Monitor, Panel, and Clock;
+- reboot persistence for files and settings;
+- bounded runtime execution with sustained-load evidence;
+- complete user, developer, ABI, and recovery documentation;
+- dated automated and manual release evidence.
 
-Raspberry Pi support remains a separate hardware track until physical evidence
-exists.
+Raspberry Pi remains a separate hardware-support track until physical evidence is
+repeatable.

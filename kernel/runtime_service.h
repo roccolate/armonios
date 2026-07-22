@@ -3,10 +3,17 @@
 
 #include <stdint.h>
 
+/* Initial count budgets derived from fixed queue/ring capacities. */
+#define RUNTIME_INPUT_EVENT_BUDGET 16U
+#define RUNTIME_NETWORK_FRAME_BUDGET 16U
+
 /* Deferred work published from hard IRQ and consumed after EOI. */
 enum {
     RUNTIME_WORK_PERIODIC = 1U << 0,
-    RUNTIME_WORK_ALL = RUNTIME_WORK_PERIODIC,
+    RUNTIME_WORK_INPUT = 1U << 1,
+    RUNTIME_WORK_NETWORK = 1U << 2,
+    RUNTIME_WORK_ALL = RUNTIME_WORK_PERIODIC | RUNTIME_WORK_INPUT |
+                       RUNTIME_WORK_NETWORK,
 };
 
 /* Work classes measured during one active runtime-service pass. */
@@ -31,6 +38,8 @@ typedef struct {
     uint64_t max_duration_ticks;
     uint64_t total_duration_ticks;
     uint64_t over_budget_count;
+    uint64_t input_budget_exhaustion_count;
+    uint64_t network_budget_exhaustion_count;
     uint64_t counter_frequency_hz;
     uint64_t budget_ticks;
 
@@ -45,6 +54,8 @@ typedef struct {
     uint32_t last_work;
 } runtime_service_stats_t;
 
+struct input_event;
+
 void runtime_service_request(uint32_t work);
 uint32_t runtime_service_run_pending(void);
 void runtime_service_reset(void);
@@ -56,6 +67,10 @@ void runtime_service_report_redraw(void);
 void runtime_service_report_input_queue(uint32_t depth, uint32_t high_water,
                                         uint64_t overflow_count);
 void runtime_service_get_stats(runtime_service_stats_t *stats);
+
+/* Input and network wrappers used by kernel orchestration and tests. */
+int runtime_service_input_poll(struct input_event *event);
+void runtime_service_net_poll(void);
 
 /* Weak zero clock in irq.c; strong CNTPCT_EL0 implementation in timer.c. */
 uint64_t runtime_service_counter_now(void);

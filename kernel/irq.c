@@ -3,12 +3,21 @@
 #include <stdint.h>
 
 #include "board.h"
+#include "input/input.h"
 #include "kernel/gui_compositor.h"
+#include "net/virtio_net.h"
+#include "kernel/net/dhcp.h"
 #include "kernel/process.h"
 #include "kernel/runtime_service.h"
 #include "uart/pl011.h"
 
 #define IRQ_HANDLER_SLOTS 64U
+
+enum {
+    RUNTIME_PHASE_ACTIVE = 1U << 0,
+    RUNTIME_PHASE_INPUT = 1U << 1,
+    RUNTIME_PHASE_NETWORK = 1U << 2,
+};
 
 typedef struct {
     irq_handler_fn_t handler;
@@ -16,11 +25,13 @@ typedef struct {
 } irq_handler_entry_t;
 
 static irq_handler_entry_t g_irq_handlers[IRQ_HANDLER_SLOTS];
-static volatile uint32_t g_runtime_work_pending;
 static runtime_service_stats_t g_runtime_stats;
-static uint8_t g_runtime_service_active;
+static uint8_t g_runtime_phase;
 
 __attribute__((weak)) void kernel_on_timer_tick(void) {
+}
+
+__attribute__((weak)) void kernel_io_poll_network(void) {
 }
 
 __attribute__((weak)) uint64_t runtime_service_counter_now(void) {
@@ -31,8 +42,7 @@ void runtime_service_reset(void) {
     uint64_t frequency = g_runtime_stats.counter_frequency_hz;
     uint64_t budget = g_runtime_stats.budget_ticks;
 
-    g_runtime_work_pending = 0;
-    g_runtime_service_active = 0;
+    g_runtime_phase = 0;
     g_runtime_stats = (runtime_service_stats_t){0};
     g_runtime_stats.counter_frequency_hz = frequency;
     g_runtime_stats.budget_ticks = budget;
@@ -47,7 +57,7 @@ void runtime_service_configure_timing(uint64_t counter_frequency_hz,
 void runtime_service_report_metric(uint32_t metric, uint32_t value) {
     uint32_t current;
 
-    if (g_runtime_service_active == 0U || metric >= RUNTIME_METRIC_COUNT ||
+    if (g_runtime_phase == 0U || metric >= RUNTIME_METRIC_COUNT ||
         value == 0U) {
         return;
     }
@@ -77,7 +87,7 @@ void runtime_service_report_redraw(void) {
 
 void runtime_service_report_input_queue(uint32_t depth, uint32_t high_water,
                                         uint64_t overflow_count) {
-    if (g_runtime_service_active == 0U) {
+    if (g_runtime_phase == 0U) {
         return;
     }
     if (depth > g_runtime_stats.max_input_queue_depth) {
@@ -94,30 +104,84 @@ void runtime_service_report_input_queue(uint32_t depth, uint32_t high_water,
 void runtime_service_get_stats(runtime_service_stats_t *stats) {
     if (stats != 0) {
         *stats = g_runtime_stats;
-        stats->pending_work = g_runtime_work_pending;
     }
 }
 
 void runtime_service_request(uint32_t work) {
     uint32_t accepted = work & RUNTIME_WORK_ALL;
+    uint32_t pending;
 
     if (accepted == 0U) {
         return;
     }
+    pending = g_runtime_stats.pending_work;
     g_runtime_stats.request_count++;
-    if ((g_runtime_work_pending & accepted) != 0U) {
+    if ((pending & accepted) != 0U) {
         g_runtime_stats.coalesced_request_count++;
     }
-    g_runtime_work_pending |= accepted;
+    g_runtime_stats.pending_work = pending | accepted;
+}
+
+static void runtime_service_requeue_budget(uint32_t work, uint64_t *counter) {
+    if ((g_runtime_stats.pending_work & work) == 0U) {
+        (*counter)++;
+        g_runtime_stats.request_count++;
+        g_runtime_stats.pending_work |= work;
+    }
+}
+
+int runtime_service_input_poll(struct input_event *event) {
+    if (g_runtime_phase == 0U) {
+        return input_queue_poll((input_event_t *)event);
+    }
+    if ((g_runtime_phase & RUNTIME_PHASE_INPUT) == 0U) {
+        return -1;
+    }
+    if (g_runtime_stats.metric_last[RUNTIME_METRIC_INPUT_CONSUMED] <
+        RUNTIME_INPUT_EVENT_BUDGET) {
+        return input_queue_poll((input_event_t *)event);
+    }
+    if (input_queue_available() > 0) {
+        runtime_service_requeue_budget(
+            RUNTIME_WORK_INPUT,
+            &g_runtime_stats.input_budget_exhaustion_count);
+    }
+    return -1;
+}
+
+void runtime_service_net_poll(void) {
+    if (g_runtime_phase == 0U ||
+        (g_runtime_phase & RUNTIME_PHASE_NETWORK) != 0U) {
+        net_poll();
+    }
+}
+
+int runtime_service_virtio_net_recv(virtio_net_device_t *device, void *data,
+                                    uint32_t max_len) {
+    if (g_runtime_phase == 0U) {
+        return virtio_net_recv(device, data, max_len);
+    }
+    if ((g_runtime_phase & RUNTIME_PHASE_NETWORK) == 0U) {
+        return 0;
+    }
+    if (g_runtime_stats.metric_last[RUNTIME_METRIC_NETWORK_FRAMES] >=
+        RUNTIME_NETWORK_FRAME_BUDGET) {
+        runtime_service_requeue_budget(
+            RUNTIME_WORK_NETWORK,
+            &g_runtime_stats.network_budget_exhaustion_count);
+        return 0;
+    }
+    return virtio_net_recv(device, data, max_len);
 }
 
 uint32_t runtime_service_run_pending(void) {
-    uint32_t work = g_runtime_work_pending;
+    uint32_t work = g_runtime_stats.pending_work;
     uint64_t started;
     uint64_t duration;
 
-    g_runtime_work_pending = 0;
+    g_runtime_stats.pending_work = 0;
     g_runtime_stats.last_work = work;
+    g_runtime_phase = 0;
     for (uint32_t i = 0; i < RUNTIME_METRIC_COUNT; i++) {
         g_runtime_stats.metric_last[i] = 0;
     }
@@ -128,11 +192,16 @@ uint32_t runtime_service_run_pending(void) {
     }
 
     started = runtime_service_counter_now();
-    g_runtime_service_active = 1U;
-    if ((work & RUNTIME_WORK_PERIODIC) != 0U) {
+    if ((work & (RUNTIME_WORK_PERIODIC | RUNTIME_WORK_INPUT)) != 0U) {
+        g_runtime_phase = RUNTIME_PHASE_ACTIVE |
+                          (work & RUNTIME_WORK_INPUT);
         kernel_on_timer_tick();
     }
-    g_runtime_service_active = 0U;
+    if ((work & RUNTIME_WORK_NETWORK) != 0U) {
+        g_runtime_phase = RUNTIME_PHASE_ACTIVE | RUNTIME_PHASE_NETWORK;
+        kernel_io_poll_network();
+    }
+    g_runtime_phase = 0;
     duration = runtime_service_counter_now() - started;
 
     g_runtime_stats.run_count++;
@@ -145,7 +214,7 @@ uint32_t runtime_service_run_pending(void) {
         duration > g_runtime_stats.budget_ticks) {
         g_runtime_stats.over_budget_count++;
     }
-    if (g_runtime_work_pending != 0U) {
+    if (g_runtime_stats.pending_work != 0U) {
         g_runtime_stats.requeue_count++;
     }
     return work;

@@ -35,11 +35,11 @@ fail closed and no physical support claim is made.
 | RISK-014 | P1 v1 | Desktop applications | OPEN | Blocks v1 usability |
 | RISK-015 | P2 | Fault-contained user copy | OPEN | Future mapping hardening |
 | RISK-016 | P1 | Process lifecycle | CLOSED | Parent/wait correctness |
-| RISK-017 | P1 | Deferred runtime execution | OPEN; MEASUREMENT COMPLETE, BUDGETS ABSENT | Blocks formal v0.2 |
+| RISK-017 | P1 | Deferred runtime execution | OPEN; INPUT + NETWORK BOUNDED | Blocks formal v0.2 |
 
 ## Open risks
 
-### RISK-017 — Deferred runtime execution is measurable but not bounded
+### RISK-017 — Deferred runtime execution is partially bounded
 
 **Severity:** P1 runtime hardening  
 **Affected scope:** interrupt-to-EL0 latency, responsiveness, fairness,
@@ -49,10 +49,12 @@ exception-stack occupancy, and v0.2 promotion
 Implementation sequence:
 
 - aggregate timing and request telemetry: PR #44 / `b3fd013`;
-- input, redraw-submission, and input-queue telemetry: PR #45 / `a3b9b44`;
+- input, redraw-submission, and queue telemetry: PR #45 / `a3b9b44`;
 - consumed network frames: PR #46 / `f60ab28`;
 - USB HID polling operations: PR #47 / `7a6780d`;
-- partial damage and full redraws: PR #48 / `f327868`.
+- partial damage and full redraws: PR #48 / `f327868`;
+- independent, bounded post-EOI network RX: PR #50 / `3797f7e`;
+- independent, bounded post-EOI input consumption: PR #52 / `41f3e18`.
 
 The timer callback performs fixed account/rearm/publication/scheduler work. The
 runtime backend executes after EOI but before process dispatch and `eret`.
@@ -64,47 +66,69 @@ The internal snapshot records:
 - requests, coalescing, non-empty and empty passes, and requeues;
 - last, maximum, and cumulative generic-counter duration;
 - passes exceeding one timer interval;
-- input events produced by virtio-input and direct USB HID;
-- input events consumed from the shared queue;
-- maximum input queue depth, lifetime high-water, and full-queue overflow;
-- USB HID polling operations that reach xHCI;
+- input events produced and consumed;
+- maximum input queue depth, lifetime high-water, and overflow;
+- USB HID polls reaching xHCI;
 - valid virtio-net RX frames consumed;
-- successful QEMU redraw submissions;
-- merged partial-damage rectangles;
-- full-redraw fallbacks;
+- successful redraw submissions;
+- merged partial-damage rectangles and full-redraw fallbacks;
+- input- and network-budget exhaustion;
 - counter frequency, threshold, pending bits, and last-consumed bits.
 
 Each indexed class keeps last-pass, maximum-pass, and cumulative counts. Reports
-outside the active pass are ignored so cooperative console work is excluded.
+outside the active pass are ignored so cooperative work is excluded from
+bottom-half class metrics.
 
 Production timing uses `CNTPCT_EL0`; `CNTFRQ_EL0` provides conversion. At 100 Hz
-the current threshold is approximately 10 ms. It is an observation threshold,
-not the accepted final budget.
+the current threshold is approximately 10 ms. It remains an observation
+threshold, not the accepted final global budget.
 
-#### Evidence boundary
+#### Input bound implemented
 
-The 16-descriptor virtio RX implementation exposes no trustworthy device counter
-for frames dropped, overwritten, or never delivered to software. Consumed-frame
-counts are therefore not proof of zero network loss. This is a documented
-measurement limitation, not a reason to fabricate a counter.
+Input readiness is separate from periodic and network readiness. The active input
+phase accepts at most 16 successful shared-queue pops per pass.
 
-Damage telemetry records merged rectangle count or a full-redraw sentinel after a
-successful QEMU submission. It does not measure pixels, damaged area, GPU
-completion latency, or CPU work spent on a failed submission.
+At the cap, the wrapper queries queue depth without consuming:
+
+1. an empty queue finishes without requeue or exhaustion;
+2. remaining events increment `input_budget_exhaustion_count`;
+3. `RUNTIME_WORK_INPUT` is republished;
+4. process dispatch resumes after the service returns;
+5. queue continuation occurs later.
+
+Exactly 16 events with an empty queue do not schedule an empty follow-up. A
+seventeenth event is retained. Cooperative console and other outside-service
+consumers remain unbudgeted.
+
+#### Network bound implemented
+
+The active network phase accepts at most 16 valid virtio-net RX frames per pass.
+At the cap, receive stops, network exhaustion increments, and
+`RUNTIME_WORK_NETWORK` is conservatively republished.
+
+The requeue is conservative because retaining a non-consuming RX query crossed a
+2 KiB linker-alignment boundary and exceeded the 108000-byte limit. Exactly 16
+frames can therefore produce one empty follow-up network pass.
+
+Cooperative network polling outside the active runtime service remains
+unbudgeted. The 16-descriptor implementation exposes no trustworthy device-drop
+or ring-overflow counter, so consumed-frame counts are not proof of zero loss.
 
 #### Validation
 
-Latest validated Phase 1B head:
-`6634c3a6f527433643a56f2c90cc6af8bad62c1d`.
+Latest validated input-budget head:
+`ba8051cd8edbe6a66a843f80c54c96668d064a91`.
 
-- `Verify ArmoniOS` run `29840410727`: success;
-- `CI - Tests` run `29840411044`: success;
-- loadable QEMU kernel: 107370 bytes against the 108000-byte ceiling.
+- `Verify ArmoniOS` run `29853659559`: success;
+- `CI - Tests` run `29853659491`: success;
+- loadable QEMU kernel: 107802 / 108000 bytes;
+- remaining margin: 198 bytes;
+- merge: `41f3e185ca1f75ed09416313d34279384f3d78a9`.
 
-The matrix covers deterministic last/max/total accumulation for every current
-class, direct partial/full helper execution, inactive-report rejection, queue
-pressure, static wiring, complete native tests, QEMU/RPi4 builds, stack, FAT32,
-usercopy, focus, framebuffer, USB, and network markers.
+The runtime regression proves exactly 16 input events without requeue, 17-event
+continuation, combined periodic/input single-backend execution, outside-service
+input behavior, the previous network budget contracts, reset, EOI ordering, all
+telemetry, and static wiring.
 
 #### Why the risk remains open
 
@@ -114,37 +138,34 @@ During the service pass:
 - the 288-byte frame remains on the EL1 stack;
 - nested IRQ helpers preserve the vector's prior mask state;
 - EL0 remains paused;
-- the entire input queue may still be drained;
-- every registered USB HID device may be polled;
-- all available network frames may be drained;
-- redraw work has no batch or time limit;
-- only one periodic pending bit exists;
-- no class or global deadline is enforced;
-- no class-budget or global-deadline exhaustion counter exists;
-- no budget-exhaustion pending-bit rule exists;
-- no sustained-load QEMU heartbeat proves EL0 progress.
+- input queue consumption is bounded, but input producer and USB HID polling are
+  not;
+- redraw/damage work has no count or time limit;
+- no global generic-counter deadline is enforced;
+- cooperative input/network work outside the service is unbounded;
+- no sustained-load QEMU heartbeat proves EL0 progress;
+- only 198 bytes remain under the kernel ceiling.
 
-Pending state and telemetry are non-atomic single-core structures. They are valid
-only under the current one-consumer model.
+Pending state and telemetry remain non-atomic single-core structures valid only
+under the current one-consumer model.
 
-**Failure mode:** sustained input, USB, redraw, or network traffic can extend one
-exception path and delay EL0 and other normal IRQ handling. Shared input loss is
-countable; device-level network loss is not observable through the current
-interface.
+**Failure mode:** sustained USB/input producer or redraw work can still extend one
+exception path and delay EL0 and other normal IRQ handling. Input consumption and
+network RX cannot exceed their count budgets, but input overflow may still occur
+and device-level network loss remains unobservable.
 
 **Remaining exit criteria:**
 
-1. split periodic work into independently pending input, GUI, network, and device
-   classes;
-2. bound network receive, input consumption, USB polling, and redraw work;
-3. enforce a global generic-counter deadline;
-4. preserve or republish the relevant pending bit when a class or deadline
-   expires;
-5. count every class and global exhaustion;
+1. compact runtime phase state and telemetry while preserving all current tests;
+2. split and bound USB/device polling;
+3. bound redraw/damage work;
+4. enforce a global generic-counter deadline;
+5. preserve or republish every exhausted class and count each exhaustion;
 6. add QEMU stress with an EL0 heartbeat under combined load;
 7. retain all current subsystem gates;
 8. record a dated visible desktop pass;
-9. decide whether the bounded bottom half remains or becomes a wakeable service.
+9. decide whether the fully bounded bottom half remains or becomes a wakeable
+   service.
 
 RISK-017 still blocks formal v0.2 promotion.
 

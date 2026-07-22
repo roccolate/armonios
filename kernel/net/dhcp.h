@@ -5,6 +5,9 @@
 
 #include "kernel/kernel_compiler.h"
 
+/* Route this client's RX loop through the post-EOI network budget wrapper. */
+#define ARMONIOS_RUNTIME_BUDGET_NET_RX 1
+
 #define DHCP_DISCOVER 1
 #define DHCP_OFFER    2
 #define DHCP_REQUEST  3
