@@ -31,6 +31,7 @@ jobs:
           build-essential \
           gcc-aarch64-linux-gnu \
           binutils-aarch64-linux-gnu \
+          gdb-multiarch \
           qemu-system-arm
 
     - name: Verify release baseline
@@ -48,3 +49,4 @@ jobs:
           build-usercopy-test/qemu-*.log
           build-runtime-stress/qemu-*.log
           build-runtime-net-stress/*.log
+          build-vmm-soak/*.log
