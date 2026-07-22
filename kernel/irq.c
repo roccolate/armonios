@@ -330,6 +330,12 @@ uint32_t runtime_service_run_pending(void) {
         }
     }
     duration = runtime_service_counter_now() - started;
+#if defined(ARMONIOS_TEST) && !defined(ARMONIOS_RUNTIME_DEADLINE_TEST)
+    if (g_runtime_stats.budget_ticks != 0U &&
+        duration > g_runtime_stats.budget_ticks) {
+        g_runtime_stats.over_budget_count++;
+    }
+#endif
     g_runtime_phase = 0;
 
     g_runtime_stats.run_count++;
