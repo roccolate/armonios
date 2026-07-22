@@ -5,6 +5,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${RUNTIME_NET_STRESS_BUILD_DIR:-$ROOT_DIR/build-runtime-net-stress}"
 LOG="${RUNTIME_NET_STRESS_LOG:-$BUILD_DIR/qemu-runtime-net-stress.log}"
+BUILD_LOG="${RUNTIME_NET_STRESS_BUILD_LOG:-$BUILD_DIR/build.log}"
+QEMU_LOG="${RUNTIME_NET_STRESS_QEMU_LOG:-$BUILD_DIR/qemu-stderr.log}"
 MONITOR="${RUNTIME_NET_STRESS_MONITOR:-$BUILD_DIR/qemu-monitor.sock}"
 TIMEOUT="${QEMU_TEST_TIMEOUT:-30s}"
 LOAD_SECONDS="${RUNTIME_NET_STRESS_SECONDS:-12}"
@@ -13,9 +15,12 @@ QEMU="${QEMU_SYSTEM_AARCH64:-qemu-system-aarch64}"
 
 fail() {
     printf 'FAIL: %s\n' "$*" >&2
-    if [[ -f "$LOG" ]]; then
-        cat "$LOG" >&2 || true
-    fi
+    for diagnostic in "$BUILD_LOG" "$QEMU_LOG" "$LOG"; do
+        if [[ -f "$diagnostic" ]]; then
+            printf '%s\n' "--- $diagnostic" >&2
+            cat "$diagnostic" >&2 || true
+        fi
+    done
     exit 1
 }
 
@@ -34,14 +39,17 @@ mkdir -p "$BUILD_DIR"
 
 # This image keeps the production deadline untouched. It adds only EL0-side
 # telemetry summaries; no forced expiration or shortened budget is used.
-make -C "$ROOT_DIR" \
+if ! make -C "$ROOT_DIR" \
     BUILD_DIR="$BUILD_DIR" \
     BOARD_CFLAGS="-DARMONIOS_RUNTIME_NET_STRESS_TEST" \
     USERLAND_EXTRA_CFLAGS="-DPANEL_AUTO_TEST" \
-    >/dev/null
+    >"$BUILD_LOG" 2>&1; then
+    fail "network stress image build failed"
+fi
 
 [[ -f "$BUILD_DIR/kernel.bin" ]] || fail "network stress kernel was not built"
-rm -f "$LOG" "$MONITOR"
+printf 'instrumented kernel bytes: %s\n' "$(wc -c < "$BUILD_DIR/kernel.bin")" >>"$BUILD_LOG"
+rm -f "$LOG" "$QEMU_LOG" "$MONITOR"
 
 status=0
 timeout "$TIMEOUT" "$QEMU" \
@@ -57,7 +65,7 @@ timeout "$TIMEOUT" "$QEMU" \
     -device usb-mouse,bus=xhci.0 \
     -netdev "user,id=net0,hostfwd=udp:127.0.0.1:${HOST_PORT}-:5555" \
     -device virtio-net-device,netdev=net0 \
-    >/dev/null 2>&1 &
+    >"$QEMU_LOG" 2>&1 &
 qemu_pid=$!
 
 # Wait for DHCP, then keep the 16-descriptor RX ring under pressure while real
@@ -65,7 +73,6 @@ qemu_pid=$!
 # guest socket: the minimal stack still receives and accounts each Ethernet frame
 # before discarding non-DHCP payloads.
 python3 - "$MONITOR" "$LOG" "$LOAD_SECONDS" "$HOST_PORT" <<'PY' || {
-import os
 import socket
 import sys
 import time
