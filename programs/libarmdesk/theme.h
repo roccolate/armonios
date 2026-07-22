@@ -73,7 +73,8 @@ typedef struct {
 
 static inline uint32_t armdesk_theme_color(const armdesk_theme_t *theme,
                                             armdesk_theme_token_t token) {
-    if (theme == 0 || token < 0 || token >= ARMDESK_THEME_TOKEN_COUNT) {
+    if (theme == 0 ||
+        (unsigned)token >= (unsigned)ARMDESK_THEME_TOKEN_COUNT) {
         return 0U;
     }
     return theme->colors[token];
