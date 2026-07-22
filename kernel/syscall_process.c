@@ -24,11 +24,10 @@ static void runtime_net_stress_summary(void) {
     runtime_service_stats_t stats;
     uint64_t saved_daif;
 
-    runtime_service_get_stats(&stats);
-
-    /* Keep each machine-readable line intact if a timer IRQ arrives mid-report. */
+    /* Keep the snapshot and machine-readable line coherent across timer IRQs. */
     __asm__ volatile("mrs %0, daif" : "=r"(saved_daif));
     __asm__ volatile("msr daifset, #2" ::: "memory");
+    runtime_service_get_stats(&stats);
     uart_puts("runtime-net-stress: summary yields=");
     print_dec64(g_runtime_stress_yields);
     uart_puts(" input=");
