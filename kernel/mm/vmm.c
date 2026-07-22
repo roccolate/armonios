@@ -152,7 +152,8 @@ static uint64_t page_descriptor(uint64_t paddr, uint64_t flags) {
     if ((flags & VMM_FLAG_EXEC) == 0) {
         descriptor |= DESC_UXN | DESC_PXN;
     } else if ((flags & VMM_FLAG_USER) != 0) {
-        descriptor |= 0;
+        /* EL0 may execute, but EL1 must never execute a user mapping. */
+        descriptor |= DESC_PXN;
     } else {
         descriptor |= DESC_UXN;
     }

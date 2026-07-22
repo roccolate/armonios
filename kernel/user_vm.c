@@ -39,6 +39,12 @@ static int flags_to_vmm(uint64_t flags, uint64_t *vmm_flags) {
         flags = USER_VM_PROT_READ | USER_VM_PROT_WRITE;
     }
 
+    /* User mappings are never writable and executable at the same time. */
+    if ((flags & USER_VM_PROT_WRITE) != 0 &&
+        (flags & USER_VM_PROT_EXEC) != 0) {
+        return -1;
+    }
+
     /* AArch64 stage-1 page permissions do not provide a write-only user page. */
     if ((flags & USER_VM_PROT_WRITE) != 0) {
         result |= VMM_FLAG_READ | VMM_FLAG_WRITE;

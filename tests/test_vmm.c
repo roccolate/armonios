@@ -151,7 +151,7 @@ void test_vmm_user_exec_mapping_flags(void) {
     entry = vmm_leaf_entry(pgd, vaddr);
     TEST_ASSERT_TRUE((entry & (1ULL << 6)) != 0);
     TEST_ASSERT_TRUE((entry & (1ULL << 54)) == 0);
-    TEST_ASSERT_TRUE((entry & (1ULL << 53)) == 0);
+    TEST_ASSERT_TRUE((entry & (1ULL << 53)) != 0);
 
     free(mem);
 }
@@ -186,7 +186,7 @@ void test_vmm_kernel_mapping_can_be_replaced_with_user_mapping(void) {
     entry = vmm_leaf_entry(pgd, vaddr);
     TEST_ASSERT_TRUE((entry & (1ULL << 6)) != 0);
     TEST_ASSERT_TRUE((entry & (1ULL << 54)) == 0);
-    TEST_ASSERT_TRUE((entry & (1ULL << 53)) == 0);
+    TEST_ASSERT_TRUE((entry & (1ULL << 53)) != 0);
     TEST_ASSERT_EQUAL_UINT64(page, vmm_virt_to_phys(pgd, vaddr));
 
     free(mem);
