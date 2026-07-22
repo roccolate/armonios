@@ -1,44 +1,211 @@
 #include "boards/rpi4/board.h"
 
+#include "firmware/rpi_mailbox.h"
 #include "irq/gicv2.h"
-#include "kernel/kernel_compiler.h"
 #include "kernel/mm/vmm.h"
-#include "storage/emmc.h"
+#include "kernel/print.h"
 #include "uart/pl011.h"
 
-static emmc_device_t g_emmc_dev;
-static int g_emmc_initialized = 0;
+#if defined(ARMONIOS_RPI4_EMMC2_PROBE)
+#include "boards/rpi4/emmc2_probe_diag.h"
+#include "kernel/fat32.h"
+#include "storage/block_view.h"
+#include "storage/emmc.h"
+#include "storage/mbr.h"
+#endif
 
-static volatile uint32_t *mailbox_reg(uint32_t offset) {
-    return (volatile uint32_t *)(RPI4_MAILBOX_BASE + offset);
+static uint32_t g_emmc2_clock_hz;
+
+#if defined(ARMONIOS_RPI4_EMMC2_PROBE)
+static emmc_device_t g_emmc2_probe_device;
+static rpi4_emmc2_probe_diag_t g_emmc2_probe_diag;
+static fat32_fs_t g_emmc2_probe_fat32;
+static block_view_t g_emmc2_probe_view;
+static uint8_t g_emmc2_sector0[EMMC_BLKSZ] __attribute__((aligned(16)));
+
+static void rpi4_emmc2_probe_delay_us(void *context, uint32_t usec) {
+    uint64_t frequency;
+    uint64_t start;
+    uint64_t now;
+    uint64_t ticks;
+
+    (void)context;
+    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
+    __asm__ volatile("mrs %0, cntpct_el0" : "=r"(start));
+    ticks = (frequency * usec + 999999U) / 1000000U;
+    do {
+        __asm__ volatile("mrs %0, cntpct_el0" : "=r"(now));
+    } while (now - start < ticks);
 }
 
-KERNEL_UNUSED static int mailbox_call(uint32_t channel, uint32_t *data) {
-    uint32_t r;
+static int rpi4_emmc2_probe_read_sector(void *context, uint32_t lba,
+                                                uint8_t *buffer) {
+    return emmc_read_sector((emmc_device_t *)context, lba, 1U, buffer);
+}
 
-    *mailbox_reg(0x20) = 0;
-    *mailbox_reg(0x10) = ((uint32_t)((uintptr_t)data) & ~0xF) | (channel & 0xF);
+static int rpi4_emmc2_probe_mount_fat32(uint32_t base_lba,
+                                         uint32_t sector_count) {
+    if (block_view_init(&g_emmc2_probe_view,
+                        rpi4_emmc2_probe_read_sector, 0,
+                        &g_emmc2_probe_device, base_lba,
+                        sector_count) != 0 ||
+        fat32_mount(&g_emmc2_probe_fat32,
+                    block_view_read_sector,
+                    &g_emmc2_probe_view) != 0 ||
+        g_emmc2_probe_fat32.total_sectors > sector_count) {
+        g_emmc2_probe_fat32.mounted = 0U;
+        return -1;
+    }
+    return 0;
+}
 
-    for (uint32_t i = 0; i < 1000000; i++) {
-        r = *mailbox_reg(0x18);
-        if (r & 0x40000000) {
-            return (r & 0xF) == channel ? 0 : -1;
+static void rpi4_emmc2_probe_print_fat32(void) {
+    mbr_partition_t partition;
+    uint32_t layout = 0U;
+    uint32_t base_lba = 0U;
+    uint8_t type = 0U;
+
+    if (rpi4_emmc2_probe_mount_fat32(0U, UINT32_MAX) != 0) {
+        if (mbr_find_fat32_partition(g_emmc2_sector0, &partition) != 0) {
+            uart_puts("EMMC2 fat none\n");
+            return;
+        }
+        layout = 1U;
+        base_lba = partition.start_lba;
+        type = partition.type;
+        if (rpi4_emmc2_probe_mount_fat32(partition.start_lba,
+                                          partition.sector_count) != 0) {
+            uart_puts("EMMC2 fat bad ");
+            print_dec64(base_lba);
+            uart_puts("\n");
+            return;
         }
     }
 
-    return -1;
+    uart_puts("EMMC2 fat ");
+    print_dec64(layout);
+    uart_puts(" ");
+    print_hex8(type);
+    uart_puts(" ");
+    print_dec64(base_lba);
+    uart_puts(" ");
+    print_dec64(g_emmc2_probe_fat32.sectors_per_cluster);
+    uart_puts(" ");
+    print_dec64(g_emmc2_probe_fat32.sectors_per_fat);
+    uart_puts(" ");
+    print_dec64(g_emmc2_probe_fat32.root_cluster);
+    uart_puts(" ");
+    print_dec64(g_emmc2_probe_fat32.total_sectors);
+    uart_puts("\n");
 }
+
+static void rpi4_emmc2_probe_print_diag(void) {
+    rpi4_emmc2_probe_diag_refresh(&g_emmc2_probe_diag);
+
+    uart_puts("EMMC2 diag c ");
+    print_signed32((int32_t)g_emmc2_probe_diag.last_command);
+    uart_puts(" a ");
+    print_hex64(g_emmc2_probe_diag.last_argument);
+    uart_puts(" r ");
+    print_hex64(g_emmc2_probe_diag.last_read_offset);
+    uart_puts(" p ");
+    print_hex64(g_emmc2_probe_diag.present_state);
+    uart_puts(" k ");
+    print_hex64(g_emmc2_probe_diag.clock_reset);
+    uart_puts(" h ");
+    print_hex64(g_emmc2_probe_diag.host_power);
+    uart_puts(" i ");
+    print_hex64(g_emmc2_probe_diag.last_nonzero_interrupt_status);
+    uart_puts(" f ");
+    print_dec64(g_emmc2_probe_device.actual_clock_hz);
+    uart_puts("\n");
+}
+
+static void rpi4_emmc2_probe(void) {
+    emmc_io_t io;
+    int result;
+
+    if (g_emmc2_clock_hz == 0U) {
+        uart_puts("EMMC2 probe: clock unavailable\n");
+        return;
+    }
+
+    rpi4_emmc2_probe_diag_init(&g_emmc2_probe_diag,
+                               (uintptr_t)RPI4_EMMC_BASE);
+    io.read32 = rpi4_emmc2_probe_diag_read32;
+    io.write32 = rpi4_emmc2_probe_diag_write32;
+    io.delay_us = rpi4_emmc2_probe_delay_us;
+    io.context = &g_emmc2_probe_diag;
+
+    uart_puts("EMMC2 probe: begin\n");
+    uart_puts("EMMC2 probe: broken-cd assume-present\n");
+    result = emmc_init_with_io(&g_emmc2_probe_device, &io,
+                               g_emmc2_clock_hz);
+    uart_puts("EMMC2 probe: init ");
+    print_signed32(result);
+    uart_puts("\n");
+    if (result != EMMC_OK) {
+        rpi4_emmc2_probe_print_diag();
+        return;
+    }
+
+    result = emmc_read_sector(&g_emmc2_probe_device, 0U, 1U,
+                              g_emmc2_sector0);
+    uart_puts("EMMC2 probe: read0 ");
+    print_signed32(result);
+    uart_puts("\n");
+    if (result != EMMC_OK) {
+        rpi4_emmc2_probe_print_diag();
+        return;
+    }
+
+    uart_puts("EMMC2 s0 ");
+    for (uint32_t i = 0; i < 16U; i++) {
+        print_hex8(g_emmc2_sector0[i]);
+    }
+    uart_puts(" ");
+    print_hex8(g_emmc2_sector0[510]);
+    print_hex8(g_emmc2_sector0[511]);
+    uart_puts("\n");
+    rpi4_emmc2_probe_print_fat32();
+}
+#endif
 
 const char *board_name(void) {
     return "rpi4-bcm2711";
 }
 
 uint32_t board_capabilities(void) {
-    return BOARD_CAP_STORAGE;
+    /*
+     * The RPi4 backend remains a serial-only build target until physical
+     * hardware evidence exists. The opt-in probe never advertises storage to
+     * generic kernel code.
+     */
+    return 0U;
 }
 
 void board_early_init(void) {
+    int mailbox_result;
+
     uart_init(RPI4_UART0_BASE);
+
+    mailbox_result = rpi_mailbox_get_clock_rate(
+        RPI4_MAILBOX_BASE, RPI4_MAILBOX_BUS_ALIAS,
+        RPI_FIRMWARE_CLOCK_EMMC2, &g_emmc2_clock_hz);
+    if (mailbox_result == RPI_MAILBOX_OK) {
+        uart_puts("EMMC2 clock: ");
+        print_dec64(g_emmc2_clock_hz);
+        uart_puts("\n");
+    } else {
+        g_emmc2_clock_hz = 0U;
+        uart_puts("EMMC2 clock: unavailable ");
+        print_signed32(mailbox_result);
+        uart_puts("\n");
+    }
+
+#if defined(ARMONIOS_RPI4_EMMC2_PROBE)
+    rpi4_emmc2_probe();
+#endif
 }
 
 void board_irq_init(void) {
@@ -94,14 +261,6 @@ int board_map_mmio(uint64_t *pgd) {
         return status;
     }
 
-    status = vmm_map_range(pgd, RPI4_VIRTIO_MMIO_BASE,
-                           RPI4_VIRTIO_MMIO_BASE,
-                           RPI4_VIRTIO_MMIO_SIZE,
-                           VMM_FLAG_READ | VMM_FLAG_WRITE | VMM_FLAG_DEVICE);
-    if (status != 0) {
-        return status;
-    }
-
     status = vmm_map_range(pgd, RPI4_MAILBOX_BASE,
                            RPI4_MAILBOX_BASE,
                            RPI4_MAILBOX_SIZE,
@@ -110,54 +269,44 @@ int board_map_mmio(uint64_t *pgd) {
         return status;
     }
 
-    status = vmm_map_range(pgd, RPI4_EMMC_BASE,
-                           RPI4_EMMC_BASE,
-                           0x1000,
-                           VMM_FLAG_READ | VMM_FLAG_WRITE | VMM_FLAG_DEVICE);
-    if (status != 0) {
-        return status;
-    }
-
     return 0;
 }
 
+/*
+ * Storage intentionally fails closed. Even the opt-in sector probe runs only
+ * during early board diagnostics and never exposes the device through these
+ * generic entry points.
+ */
 int board_emmc_read(uint32_t lba, uint32_t count, void *buffer) {
-    if (!g_emmc_initialized) {
-        if (emmc_init(&g_emmc_dev, RPI4_EMMC_BASE) != 0) {
-            return -1;
-        }
-        g_emmc_initialized = 1;
-    }
-
-    return emmc_read_sector(&g_emmc_dev, lba, count, buffer);
+    (void)lba;
+    (void)count;
+    (void)buffer;
+    return -1;
 }
 
 int board_emmc_write(uint32_t lba, uint32_t count, const void *buffer) {
-    if (!g_emmc_initialized) {
-        if (emmc_init(&g_emmc_dev, RPI4_EMMC_BASE) != 0) {
-            return -1;
-        }
-        g_emmc_initialized = 1;
-    }
-
-    return emmc_write_sector(&g_emmc_dev, lba, count, buffer);
+    (void)lba;
+    (void)count;
+    (void)buffer;
+    return -1;
 }
 
 int board_storage_read(uint32_t lba, uint32_t count, void *buffer) {
-    return board_emmc_read(lba, count, buffer);
+    (void)lba;
+    (void)count;
+    (void)buffer;
+    return -1;
 }
 
 int board_storage_write(uint32_t lba, uint32_t count, const void *buffer) {
-    return board_emmc_write(lba, count, buffer);
+    (void)lba;
+    (void)count;
+    (void)buffer;
+    return -1;
 }
 
 int board_storage_init(void) {
-    if (emmc_init(&g_emmc_dev, RPI4_EMMC_BASE) != 0) {
-        g_emmc_initialized = 0;
-        return -1;
-    }
-    g_emmc_initialized = 1;
-    return 0;
+    return -1;
 }
 
 int board_display_init(board_display_draw_fn_t draw, void *context) {

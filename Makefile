@@ -34,6 +34,9 @@ endif
 
 BUILD_DIR ?= build
 BOARD ?= qemu_virt
+RPI4_EMMC2_PROBE ?= 0
+RPI4_PROBE_BUILD_DIR ?= build-rpi4-emmc2-probe
+BOARD_CFLAGS :=
 BOARD_DIR := drivers/boards/$(BOARD)
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
@@ -89,7 +92,15 @@ ifeq ($(BOARD),rpi4)
 LOAD_ADDR := 0x80000
 LOAD_ADDR_HEX := 80000
 KERNEL_LINKER_SCRIPT := linker/linker_rpi4.ld
-STORAGE_DEV := $(BUILD_DIR)/drivers/storage/emmc.o
+STORAGE_DEV := \
+    $(BUILD_DIR)/drivers/storage/emmc.o \
+    $(BUILD_DIR)/drivers/firmware/rpi_mailbox.o
+ifeq ($(RPI4_EMMC2_PROBE),1)
+BOARD_CFLAGS += -DARMONIOS_RPI4_EMMC2_PROBE=1
+STORAGE_DEV += \
+    $(BUILD_DIR)/drivers/storage/block_view.o \
+    $(BUILD_DIR)/drivers/storage/mbr.o
+endif
 else
 STORAGE_DEV := $(BUILD_DIR)/drivers/storage/virtio_blk.o
 endif
@@ -103,7 +114,7 @@ CFLAGS  := -Wall -Wextra -Werror -ffreestanding -nostdlib -nostartfiles \
            -fno-builtin -fno-stack-protector -mgeneral-regs-only \
            -fno-pic -fno-pie \
            -ffunction-sections -fdata-sections \
-           -mcpu=cortex-a72 -std=c11 -Os -g -I . -I drivers
+           -mcpu=cortex-a72 -std=c11 -Os -g -I . -I drivers $(BOARD_CFLAGS)
 # Userland C compiles with the same flags plus the libkarm include path
 # so app code can pull in <syscall.h>, <errno.h>, <string.h> from its
 # own build unit without an explicit relative include.
@@ -185,9 +196,17 @@ DEPS := $(OBJS:.o=.d) $(APP_IMAGE_OBJS:.o=.d) $(LIBKARM_OBJS:.o=.d)
 
 .SECONDARY: $(APP_IMAGE_OBJS)
 
-.PHONY: all help toolchain-check qemu-check qemu qemu-blk qemu-fs-test qemu-fb qemu-fb-visible qemu-debug qemu-net qemu-usb entry-check size clean apps libkarm stack-check
+.PHONY: all help toolchain-check qemu-check qemu qemu-blk qemu-fs-test qemu-fb qemu-fb-visible qemu-debug qemu-net qemu-usb rpi4-emmc2-probe entry-check size clean apps libkarm stack-check
 
 all: toolchain-check $(KERNEL_ELF) $(KERNEL_BIN)
+
+rpi4-emmc2-probe:
+	@$(MAKE) --no-print-directory BOARD=rpi4 \
+	    BUILD_DIR=$(RPI4_PROBE_BUILD_DIR) RPI4_EMMC2_PROBE=1 all
+	@cp $(RPI4_PROBE_BUILD_DIR)/kernel.bin \
+	    $(RPI4_PROBE_BUILD_DIR)/kernel8.img
+	@printf "RPi4 EMMC2 probe image: %s\n" \
+	    "$(RPI4_PROBE_BUILD_DIR)/kernel8.img"
 
 help:
 	@printf "ArmoniOS make targets:\n"
@@ -199,6 +218,7 @@ help:
 	@printf "  %-18s %s\n" "qemu-fb-visible" "run visible desktop with FAT32, GPU, keyboard, and mouse"
 	@printf "  %-18s %s\n" "qemu-net" "run QEMU with virtio-net"
 	@printf "  %-18s %s\n" "qemu-usb" "run QEMU with xHCI USB keyboard and mouse"
+	@printf "  %-18s %s\n" "rpi4-emmc2-probe" "build opt-in read-only RPi4 sector probe"
 	@printf "  %-18s %s\n" "size" "print kernel ELF and binary size"
 	@printf "  %-18s %s\n" "libkarm" "build freestanding userland support objects"
 	@printf "  %-18s %s\n" "apps" "build userland app ELF and binary images"
