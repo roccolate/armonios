@@ -336,17 +336,20 @@ static void network_budget_requeues_leftover(void) {
     assert(stats.pending_work == 0U);
 }
 
-static void network_outside_service_is_not_budgeted(void) {
+static void network_outside_service_is_suppressed(void) {
     runtime_service_stats_t stats;
 
     prepare(1U);
     g_fake_network_frames = RUNTIME_NETWORK_FRAME_BUDGET + 1U;
     runtime_service_net_poll();
+    assert(runtime_service_virtio_net_recv(&g_net_device, g_net_buffer,
+                                           sizeof(g_net_buffer)) == 0);
     stats = snapshot();
 
-    assert(g_network_poll_calls == 1U);
-    assert(g_network_frames_returned == RUNTIME_NETWORK_FRAME_BUDGET + 1U);
-    assert(g_fake_network_frames == 0U);
+    assert(g_network_poll_calls == 0U);
+    assert(g_network_recv_calls == 0U);
+    assert(g_network_frames_returned == 0U);
+    assert(g_fake_network_frames == RUNTIME_NETWORK_FRAME_BUDGET + 1U);
     assert(stats.network_budget_exhaustion_count == 0U);
     assert(stats.metric_total[RUNTIME_METRIC_NETWORK_FRAMES] == 0U);
     assert(stats.pending_work == 0U);
@@ -397,7 +400,7 @@ int main(void) {
     redraw_batch_helper();
     network_budget_exact_ring_rechecks();
     network_budget_requeues_leftover();
-    network_outside_service_is_not_budgeted();
+    network_outside_service_is_suppressed();
     requeue_and_reset();
     eoi_order();
     puts("deferred runtime service network budget: ok");
