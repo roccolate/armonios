@@ -1,0 +1,21 @@
+name: Export FAT32 base
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fat32-base-source
+          path: |
+            kernel/fat32.c
+            kernel/fat32.h
+          if-no-files-found: error
+          retention-days: 1
