@@ -34,7 +34,7 @@ uint64_t panel_boot_recovery_run(panel_boot_recovery_run_fn_t run, void *ctx,
     uint32_t attempts = 0;
 
     if (run == 0) {
-        panel_boot_recovery_log(log, "panel_boot: no run callback\n");
+        panel_boot_recovery_log(log, "panel:no run\n");
         return 0;
     }
 
@@ -42,14 +42,14 @@ uint64_t panel_boot_recovery_run(panel_boot_recovery_run_fn_t run, void *ctx,
         attempts++;
 
         if (attempts == 1U) {
-            panel_boot_recovery_log(log, "panel_boot: launching\n");
+            panel_boot_recovery_log(log, "panel:start\n");
         } else {
-            panel_boot_recovery_log(log, "panel_boot: relaunching\n");
+            panel_boot_recovery_log(log, "panel:retry\n");
         }
 
         last_exit = run(ctx);
 
-        panel_boot_recovery_log(log, "panel_boot: exited\n");
+        panel_boot_recovery_log(log, "panel:exit\n");
 
         if (panel_boot_recovery_decide(attempts, last_exit) !=
             PANEL_BOOT_RECOVERY_CONTINUE) {
@@ -58,7 +58,7 @@ uint64_t panel_boot_recovery_run(panel_boot_recovery_run_fn_t run, void *ctx,
     }
 
     if (attempts >= PANEL_BOOT_RECOVERY_MAX_ATTEMPTS) {
-        panel_boot_recovery_log(log, "panel_boot: giving up\n");
+        panel_boot_recovery_log(log, "panel:stop\n");
     }
 
     return last_exit;

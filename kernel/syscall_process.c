@@ -6,12 +6,54 @@
 #include "kernel/panel_boot.h"
 #include "kernel/panel_boot_argv.h"
 #include "kernel/print.h"
+#include "kernel/runtime_service.h"
 #include "kernel/sched/sched.h"
 #include "kernel/syscall_helpers.h"
 #include "kernel/user_exit.h"
 #include "kernel/user_vm.h"
 #include "kernel/vfs.h"
 #include "uart/pl011.h"
+
+#if defined(ARMONIOS_RUNTIME_STRESS_TEST) || \
+    defined(ARMONIOS_RUNTIME_NET_STRESS_TEST)
+static uint32_t g_runtime_stress_yields;
+#endif
+
+#if defined(ARMONIOS_RUNTIME_NET_STRESS_TEST)
+static void runtime_net_stress_summary(void) {
+    runtime_service_stats_t stats;
+    uint64_t saved_daif;
+
+    /* Keep the snapshot and machine-readable line coherent across timer IRQs. */
+    __asm__ volatile("mrs %0, daif" : "=r"(saved_daif));
+    __asm__ volatile("msr daifset, #2" ::: "memory");
+    runtime_service_get_stats(&stats);
+    uart_puts("runtime-net-stress: summary yields=");
+    print_dec64(g_runtime_stress_yields);
+    uart_puts(" input=");
+    print_dec64(stats.metric_total[RUNTIME_METRIC_INPUT_CONSUMED]);
+    uart_puts(" redraw=");
+    print_dec64(stats.metric_total[RUNTIME_METRIC_REDRAW]);
+    uart_puts(" frames=");
+    print_dec64(stats.metric_total[RUNTIME_METRIC_NETWORK_FRAMES]);
+    uart_puts(" netmax=");
+    print_dec64(stats.metric_max[RUNTIME_METRIC_NETWORK_FRAMES]);
+    uart_puts(" netcap=");
+    print_dec64(stats.network_budget_exhaustion_count);
+    uart_puts(" over=");
+    print_dec64(stats.over_budget_count);
+    uart_puts(" max=");
+    print_dec64(stats.max_duration_ticks);
+    uart_puts(" budget=");
+    print_dec64(stats.budget_ticks);
+    uart_puts(" requeue=");
+    print_dec64(stats.requeue_count);
+    uart_puts(" overflow=");
+    print_dec64(stats.input_queue_overflow_count);
+    uart_puts("\n");
+    __asm__ volatile("msr daif, %0" :: "r"(saved_daif) : "memory");
+}
+#endif
 
 int64_t sys_spawn(process_t *process, uint64_t path_ptr,
                   uint64_t entry_index) {
@@ -118,6 +160,19 @@ int sys_yield_process(exception_frame_t *frame) {
         return 0;
     }
     current->regs[0] = 0;
+#if defined(ARMONIOS_RUNTIME_STRESS_TEST) || \
+    defined(ARMONIOS_RUNTIME_NET_STRESS_TEST)
+    g_runtime_stress_yields++;
+#endif
+#if defined(ARMONIOS_RUNTIME_STRESS_TEST)
+    if ((g_runtime_stress_yields & 63U) == 0U) {
+        uart_puts("runtime-stress: EL0 heartbeat\n");
+    }
+#elif defined(ARMONIOS_RUNTIME_NET_STRESS_TEST)
+    if ((g_runtime_stress_yields & 1023U) == 0U) {
+        runtime_net_stress_summary();
+    }
+#endif
     return process_dispatch_next(current, frame, PROCESS_DISPATCH_PREEMPT);
 }
 

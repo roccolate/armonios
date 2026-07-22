@@ -13,54 +13,71 @@ cleanup/runtime-hardening candidate**.
 
 The QEMU `virt` kernel, graphical desktop, narrow writable FAT32 workflow,
 freestanding EL0 applications, and automated verification matrix are real and
-reproducible. Most original v0.2 cleanup goals have landed.
+reproducible. The planned automated runtime-hardening evidence for v0.2 has now
+landed.
 
-Runtime measurement Phase 1B is complete. Phase 2 now enforces count bounds for
-post-EOI network RX, shared input consumption, virtio-input descriptor draining,
-USB HID device visits, and partial compositor damage.
+Runtime hardening includes:
 
-The service is not fully bounded. A full redraw remains one potentially
-expensive operation, total generic-counter time has no enforced deadline,
-cooperative network polling outside the bottom half is outside the network
-guarantee, and no sustained-load QEMU test proves EL0 progress under combined
-pressure.
+- aggregate and per-class generic-counter telemetry;
+- count bounds for virtio-input, USB HID visits, shared input consumption,
+  partial compositor damage, and post-EOI network RX;
+- an enforced service-wide generic-counter deadline at safe checkpoints;
+- conservative republishing of original work after deadline exhaustion;
+- strict routing that prevents virtio-net receive outside the NETWORK phase;
+- deterministic host regressions for expiry and native continuation;
+- forced-expiry QEMU stress with repeated EL0 heartbeats;
+- natural-deadline QEMU RX saturation with input and redraw activity.
+
+The natural RX run consumed 29,234 frames, reached the 16-frame cap in 1,827
+passes, requeued all 1,827 capped passes, and still recorded 38,912 EL0 yields.
+Its maximum complete service pass was 385,763 of 625,000 configured ticks
+(61.7%), with zero natural deadline overruns and zero observable input overflow.
+
+The remaining v0.2 work is release disposition rather than missing runtime
+instrumentation: accept or defer device-level RX-drop telemetry, decide whether
+the one-operation full-redraw boundary is acceptable, perform a dated visible
+pass on the final runtime boundary, and investigate the intermittent VMM panic
+tracked in issue #63.
 
 ArmoniOS is accurately described as:
 
 > A compact AArch64 QEMU desktop alpha with freestanding EL0 applications, a
 > kernel compositor, a narrow writable FAT32 workflow, broad automated
-> regression coverage, and count-bounded input, partial redraw, and post-EOI
-> network work.
+> regression coverage, count-bounded runtime classes, a cooperative service-wide
+> deadline, forced-expiry heartbeat evidence, and natural RX saturation evidence.
 
 It is not a production OS, general FAT implementation, POSIX system, or verified
 Raspberry Pi operating system.
 
 ## Audit metadata
 
-- **Audit date:** 2026-07-21
+- **Audit date:** 2026-07-22
 - **Primary verified platform:** QEMU `virt`, Cortex-A72 CPU model
-- **Tracking issue:** #43, v0.2 measure and bound deferred runtime service
-- **Partial-redraw merge:** `fe4f2a622f5633e55b0eddb2f8f6767453a9ddca`
-- **Validated implementation head:**
-  `8b86a8c24f25af0937f1df2e983c1c7c4f489b7d`
+- **Runtime tracking issue:** #43
+- **Intermittent VMM investigation:** #63
+- **Global deadline:** PR #60, merged as
+  `1e51e81867e3518d9efd56a7a9ec67d40c7caf34`
+- **Forced-expiry heartbeat:** PR #61, merged as
+  `172496d855e523c080225d8133a4aa0004835bda`
+- **Natural RX saturation candidate:** PR #62
+- **Validated head:**
+  `eac4ff990baddbf83406567b4a20e58bcae6600d`
 - **Hosted validation:**
-  - `Verify ArmoniOS` run `29863653280`: success
-  - `CI - Tests` run `29863653209`: success
-- **Loadable QEMU kernel size:** 107982 bytes
+  - `Verify ArmoniOS` run `29896102906` (#290): success
+  - `CI - Tests` run `29896102904` (#430): success
+- **Production loadable QEMU kernel size:** 107918 bytes
 - **Kernel size limit:** 108000 bytes
-- **Remaining margin:** 18 bytes
+- **Remaining production margin:** 82 bytes
 
-Those runs validate the implementation, deterministic producer/consumer/redraw
-budget regressions, runtime-service gate, QEMU behavior, and all pre-existing
-subsystem gates. A merge commit is not a separately executed workflow unless a
-run targets that exact SHA.
+The stress images are built separately with test-only macros. The production
+image, ABI, `.data == 0`, and fixed size ceiling remain the release controls.
 
 ## Release phases
 
 | Phase | State | Real interpretation |
 |---|---|---|
 | v0.1 QEMU baseline | COMPLETE | Boot, desktop, narrow FAT workflow, deterministic QEMU gates, CI, and dated manual evidence exist. |
-| v0.2 cleanup/hardening | IN PROGRESS / CANDIDATE | Input, network, and partial-damage counts are bounded. Global time and stress proof remain. |
+| v0.2 cleanup/hardening | FINAL CANDIDATE | Count bounds, global deadline, forced-expiry heartbeat, strict network routing, and natural RX saturation landed. Final visible evidence and residual-risk disposition remain. |
 | v0.3 storage/VFS platform | NEXT AFTER v0.2 | No common path resolver, rich block metadata, or structured filesystem ABI. |
 | v0.4 real FAT | PLANNED | Current FAT remains root-only 8.3 FAT32. |
 | v0.5 userland runtime/widgets | PLANNED | No reusable heap, dynamic containers, or shared widget toolkit. |
@@ -68,27 +85,30 @@ run targets that exact SHA.
 | v0.7 ext2 | PLANNED | No ext2 implementation. |
 | v0.8 polish | EARLY PARTIAL | Basic window/panel behavior exists; sustained visible-session evidence does not. |
 | v0.9 beta | NOT STARTED | No ABI freeze, fuzz campaign, reboot-persistence gate, or beta record. |
-| v1.0 | NOT READY | Storage, apps, ext2, persistence, remaining runtime proof, and final evidence are incomplete. |
+| v1.0 | NOT READY | Storage, apps, ext2, persistence, remaining hardening, and final evidence are incomplete. |
 
 ## Verification record
 
 | Check | Evidence class | Result and scope |
 |---|---|---|
-| QEMU build and size | BUILD-VERIFIED | `.data == 0`; loadable kernel 107982 bytes under the 108000-byte ceiling. |
+| QEMU build and size | BUILD-VERIFIED | `.data == 0`; production kernel 107918 bytes under the 108000-byte ceiling. |
 | RPi4 build/probe gates | BUILD/HOST-VERIFIED | Normal and diagnostic images build; unsupported normal capabilities fail closed. |
 | Native host suite | HOST-VERIFIED | Kernel, memory, VFS, FAT32, GUI, parser, driver, and ABI tests pass. |
-| Runtime service regression | HOST-VERIFIED | Timing, EOI order, coalescing, reset, class metrics, input/network caps, and redraw batches pass. |
+| Runtime service regression | HOST-VERIFIED | Timing, EOI order, coalescing, reset, metrics, count caps, redraw batches, strict network routing, and deadline behavior pass. |
+| Global deadline | HOST-VERIFIED | Expiry skips later optional work, stops network at checkpoints, counts exhaustion, and republishes readiness. |
+| Forced-expiry runtime stress | QEMU-VERIFIED, test image | 509 EL0 heartbeats and 311 deadline republications; real input, redraw, network, and DHCP markers; zero overflow and panic. |
+| Natural RX saturation | QEMU-VERIFIED, test image | 29,234 consumed frames; 1,827 capped/requeued passes; 38,912 EL0 yields; max 385,763/625,000 ticks; zero natural overruns, overflow, and panic. |
 | Virtio-input producer | HOST-VERIFIED | Ten used descriptors on an eight-entry ring complete as 8 + 2 with ten queued events. |
 | USB HID producer | HOST-VERIFIED | A malformed count of 255 still visits exactly the fixed four HID slots. |
-| Partial redraw | HOST-VERIFIED | Twenty rectangles complete as 8 + 8 + 4; failed GPU submission preserves all damage; full redraw clears once. |
+| Partial redraw | HOST-VERIFIED | Twenty rectangles complete as 8 + 8 + 4; failed submission preserves all damage. |
 | Input queue telemetry | HOST-VERIFIED | Zero state, 64-entry high-water, full-queue overflow, draining, and reset. |
 | Process/VFS/user-copy/KLI1 | HOST-VERIFIED | Parent/wait, local FDs, permission-aware copy, and mutable-storage contracts. |
 | Stack check | HOST-VERIFIED | Editor maximum remains 368 bytes against 3072. |
-| FAT32 smoke | QEMU-VERIFIED | Storage initialization and FAT application markers. |
-| User-copy/focus | QEMU-VERIFIED | Invalid output rejection and six app focus transitions. |
+| FAT32 smoke | QEMU-VERIFIED with open flake investigation | Current head passes. One earlier attempt panicked in `next_table()` and is tracked in issue #63. |
+| User-copy/focus | QEMU-VERIFIED | Invalid output rejection and app focus transitions. |
 | Framebuffer/USB/network | QEMU-VERIFIED | Window/panel, xHCI/two HID, and DHCP markers. |
 | Visible FAT + GPU wiring | QEMU-VERIFIED | FAT32, display, and panel readiness in one boot. |
-| Visible desktop workflow | MANUAL-VERIFIED, dated | Rocco verified create/edit/save/rename/reopen/delete on 2026-07-17. |
+| Visible desktop workflow | MANUAL-VERIFIED, dated | Rocco verified create/edit/save/rename/reopen/delete on 2026-07-17; a final post-runtime-change pass remains required. |
 | Physical Raspberry Pi | UNVERIFIED | No repeatable physical boot, timer, storage, framebuffer, or input evidence. |
 
 ## Runtime execution model
@@ -100,58 +120,64 @@ runtime service is a third execution mode:
 timer callback
   -> fixed account/rearm/publish PERIODIC | INPUT | NETWORK
   -> board_irq_end()
-  -> measured runtime pass
-       -> periodic producer/GUI phase
+  -> runtime pass with deadline = start + one timer interval
+       -> periodic/input phase
             -> virtio-input <= min(negotiated ring, 16) descriptors
             -> USB HID <= 4 registered device visits
             -> input queue <= 16 events when INPUT is pending
             -> partial damage <= 8 rectangles/successful redraw
-            -> full redraw = one operation
-       -> independent network phase
+            -> full redraw = one non-preemptible operation
+       -> network phase only while deadline remains
             -> <= 16 valid RX frames
-            -> conservative requeue at cap
+       -> on expiry: count once, republish original work, skip later work
   -> process dispatch
   -> eret
 ```
+
+Network polling and descriptor receive return without consuming anything outside
+the active NETWORK phase. The old cooperative console-thread poll therefore no
+longer bypasses the post-EOI count and time contracts.
 
 EOI does not leave the exception. During the pass execution remains in EL1, the
 288-byte exception frame remains on the EL1 stack, nested IRQ helpers restore the
 vector's prior masked state, and EL0 remains paused.
 
-## Runtime telemetry and budget state
+The deadline is cooperative. It stops work only at explicit safe checkpoints and
+cannot asynchronously interrupt a driver or full redraw already executing.
 
-The kernel-internal snapshot records requests, coalescing, non-empty and empty
-passes, requeues, last/max/total `CNTPCT_EL0` duration, interval overruns, input
-production/consumption, queue pressure/overflow, USB polls, network frames,
-redraw/damage shape, redraw exhaustion, budget exhaustion, pending work, and
-last-consumed work.
+## Natural RX stress evidence
 
-Current enforced bounds:
+`tools/qemu_runtime_net_stress_test.sh` builds a separate test image without
+shortening the production deadline. It completes DHCP, injects sustained UDP via
+QEMU `hostfwd`, injects USB keyboard events, and keeps panel redraw work active.
+
+Final recorded summary:
 
 ```text
-virtio-input producer <= min(queue_size, 16) used descriptors/call
-USB HID producer      <= 4 registered device visits/call
-input consumer        <= 16 queued events/post-EOI pass
-partial redraw        <= 8 damage rectangles/successful redraw
-network RX            <= 16 valid frames/post-EOI pass
+EL0 yields:                       38,912
+input events consumed:                 16
+redraw submissions:                   738
+virtio-net frames consumed:        29,234
+maximum frames/pass:                   16
+network cap exhaustions:             1,827
+runtime requeues:                    1,827
+natural deadline overruns:               0
+maximum duration:                  385,763 ticks
+configured budget:                 625,000 ticks
+maximum / budget:                    61.7%
+input overflow:                          0
+kernel panic:                            0
 ```
 
-Virtio-input continuation remains in its used ring. USB scans every supported
-fixed slot. Input requeues only when queue events remain. Partial damage remains
-ordered in the compositor list and dirty until later successful batches; a
-failed redraw consumes nothing. Network conservatively requeues at 16, which can
-cause one empty follow-up pass.
-
-The current virtio-net interface has no trustworthy device-drop or RX-ring
-overflow counter. Consumed frames are not proof of loss-free delivery.
-
-No syscall exposes the telemetry layout. Pending state and counters assume one
-CPU and one consumer; they are not SMP-safe synchronization.
+The test proves software-visible continuation and EL0 progress under repeated RX
+saturation. It cannot prove that every host-submitted packet reached a guest
+receive descriptor because the current driver exposes no device-drop counter.
 
 ## Important fixed limits
 
 | Area | Current limit |
 |---|---|
+| Kernel image | 108000 bytes; production image 107918 bytes |
 | PMM | 128 MiB managed |
 | Processes | 16 slots; eight user regions each |
 | VFS | 24 nodes, four mounts, eight FDs/process, 64-byte paths |
@@ -160,7 +186,7 @@ CPU and one consumer; they are not SMP-safe synchronization.
 | Input queue | 64 events; overflow counted but not prevented |
 | Virtio input | Ring up to 16; one negotiated ring-length drained/call |
 | USB | Four direct HID devices; no hubs; four visits/call |
-| Network RX | 16 descriptors; post-EOI valid RX capped at 16/pass; device drops unavailable |
+| Network RX | 16 descriptors; valid RX capped at 16/NETWORK pass; outside-phase receive suppressed; device drops unavailable |
 | Editor | 512-byte buffer; caret-line viewport |
 | Files | `/fat` only; eight displayed root entries |
 | Network API | No sockets, TCP, DNS API, or HTTP |
@@ -171,14 +197,11 @@ CPU and one consumer; they are not SMP-safe synchronization.
 
 ### Blocks formal v0.2
 
-- **RISK-017:** input, network, and partial-damage counts are bounded, but the
-  complete runtime service is not.
-- A full redraw remains one potentially expensive operation.
-- No global generic-counter deadline exists.
-- Cooperative network polling outside the service is unbudgeted.
-- No sustained-load QEMU heartbeat proves EL0 progress or no silent loss.
-- Only 18 bytes remain under the kernel ceiling; another compaction is required.
-- No formal v0.2 tag/evidence record exists.
+- **RISK-017:** automated runtime proof is complete, but the device-drop boundary,
+  full-redraw residual, and final visible pass need explicit disposition.
+- **RISK-018 / issue #63:** one intermittent EL1 VMM panic occurred in the FAT32
+  smoke path and needs investigation or a justified release disposition.
+- No final v0.2 tag/evidence record exists.
 
 ### Required before v1.0
 
@@ -192,11 +215,6 @@ CPU and one consumer; they are not SMP-safe synchronization.
 - TTBR1, ASIDs, and scoped TLB invalidation are absent.
 - **RISK-007:** no physical Raspberry Pi evidence.
 
-## Application milestone
-
-Issue #2 is **v0.6 useful desktop applications**, not v1.1. It depends on v0.3
-paths/metadata, v0.4 real FAT, and v0.5 shared runtime/widgets.
-
 ## Promotion gates
 
 ```sh
@@ -206,8 +224,9 @@ make qemu-fb-visible   # separate manual evidence
 
 ## Next sequence
 
-1. Compact runtime/kernel code again without changing behavior.
-2. Enforce a service-wide generic-counter deadline and preserve unfinished work.
-3. Add sustained-load QEMU heartbeat and explicit loss accounting.
-4. Close or accept RISK-017, record a visible pass, and promote/tag v0.2.
+1. Merge the strict-routing and natural RX evidence cut after final CI.
+2. Add a repeated FAT32/QEMU diagnostic gate for issue #63.
+3. Decide or document acceptance of device-drop and full-redraw residuals.
+4. Record a dated visible pass, close or explicitly accept remaining risks, and
+   tag v0.2.
 5. Begin v0.3 storage/VFS work.

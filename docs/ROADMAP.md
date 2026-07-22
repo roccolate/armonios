@@ -5,8 +5,8 @@ usable v1.0 mini desktop OS. It is ordered by architectural dependency, user
 value, verification cost, and maintenance risk.
 
 Operational truth lives in `CURRENT_STATE.md`. Active defects and exit criteria
-live in `TECHNICAL_RISKS.md`. This file describes future sequencing and must not
-be cited as proof that a feature exists.
+live in `TECHNICAL_RISKS.md`. This file describes sequencing and must not be used
+as proof that a planned feature exists.
 
 ## Product target
 
@@ -41,7 +41,7 @@ Chosen release defaults:
 | Phase | State | Promotion blocker |
 |---|---|---|
 | v0.1 baseline | COMPLETE | None for the recorded QEMU baseline |
-| v0.2 cleanup/hardening | IN PROGRESS / RELEASE CANDIDATE | Compaction, global-time deadline, sustained-load evidence, promotion record |
+| v0.2 cleanup/hardening | FINAL RELEASE CANDIDATE | Final visible pass, residual-risk disposition, issue #63, promotion record |
 | v0.3 storage/VFS platform | NEXT | Depends on v0.2 promotion |
 | v0.4 real FAT | PLANNED | Depends on v0.3 filesystem interfaces |
 | v0.5 userland runtime/widgets | PLANNED | Depends on stable storage and ABI shapes |
@@ -65,7 +65,7 @@ Chosen release defaults:
 6. Do not call userland polish “v1.1” before v1.0 exists. Application usefulness
    and polish belong to v0.6-v0.8.
 7. Preserve the 108000-byte kernel limit unless a deliberate release decision,
-   evidence, and replacement size budget are documented. Compact first.
+   evidence, and replacement budget are documented. Compact first.
 
 ## v0.1 — verified QEMU baseline
 
@@ -93,7 +93,7 @@ daily applications, or Raspberry Pi hardware support.
 
 ## v0.2 — cleanup and runtime hardening
 
-**State: IN PROGRESS / RELEASE CANDIDATE**
+**State: FINAL RELEASE CANDIDATE**
 
 ### Landed cleanup
 
@@ -105,7 +105,7 @@ daily applications, or Raspberry Pi hardware support.
 - process-owned descriptors and parent/wait lifecycle are verified;
 - timer hard-IRQ work is limited to accounting, rearm, publication, and scheduler
   counters;
-- periodic GUI, input, USB, and network work is centralized after EOI.
+- GUI, input, USB, and network work is centralized after EOI.
 
 ### Landed runtime measurement
 
@@ -113,81 +113,85 @@ The post-EOI service measures:
 
 - request, coalescing, requeue, non-empty, and empty pass counts;
 - last, maximum, and cumulative generic-counter duration;
-- one-timer-interval overruns;
+- global deadline exhaustion;
 - input events produced and consumed;
 - input queue depth, lifetime high-water, and overflow;
 - USB HID polling operations;
 - valid virtio-net RX frames consumed;
 - redraw submissions, partial-damage batches, full redraws, and redraw exhaustion.
 
-Phase 1B was completed through PRs #44-#48.
-
-### Landed count bounds
+### Landed count and time bounds
 
 | PR | Work class | Rule |
 |---|---|---|
-| #50 | Network RX | 16 valid frames per active post-EOI network pass; conservative requeue |
-| #52 | Shared input consumer | 16 queue events per active input pass; requeue only when work remains |
+| #50 | Network RX | 16 valid frames per active post-EOI NETWORK pass; conservative requeue |
+| #52 | Shared input consumer | 16 queue events per active input pass; requeue when work remains |
 | #55 | USB HID producer | Four registered device visits per call, even with malformed count |
 | #56 | Virtio-input producer | At most one negotiated ring length and never more than 16 descriptors per call |
 | #58 | Partial compositor damage | Eight rectangles per successful redraw; preserve ordered remainder or all damage on failure |
+| #60 | Whole service | One nominal timer interval; check at safe boundaries and republish original work on expiry |
+| #62 | Network routing | No polling or receive outside the active NETWORK phase |
 
-Runtime state was compacted in PR #54 before the producer bounds. PR #58 also
-removed two terminal scheduler UART messages to preserve the fixed ceiling
-without changing scheduler behavior.
+Runtime state was compacted in PR #54. PR #60 preserved the size ceiling while
+adding the global deadline. PR #62 reduced the production kernel to 107918 bytes,
+leaving 82 bytes under the unchanged 108000-byte limit.
 
-Latest validated implementation head:
-`8b86a8c24f25af0937f1df2e983c1c7c4f489b7d`.
+### Landed automated stress evidence
 
-- `Verify ArmoniOS` `29863653280`: success;
-- `CI - Tests` `29863653209`: success;
-- loadable QEMU kernel 107982 / 108000 bytes;
-- remaining margin 18 bytes;
-- partial-redraw merge `fe4f2a622f5633e55b0eddb2f8f6767453a9ddca`.
+PR #61 added deterministic forced-expiry evidence:
 
-The deterministic runtime regression proves:
+- 509 EL0 heartbeats;
+- 311 deadline republications;
+- real input, redraw, DHCP, and network activity;
+- zero observable input overflow and panic markers.
 
-- virtio-input ten descriptors on an eight-entry ring complete as 8 + 2;
-- malformed USB count scans only four slots;
-- shared input and network caps preserve continuation;
-- 20 partial rectangles complete as 8 + 8 + 4;
-- failed redraw preserves all five damage rectangles;
-- full redraw clears as one successful operation.
+PR #62 added natural-deadline RX saturation:
 
-The virtio-net path still exposes no trustworthy device-level RX-drop counter.
-This remains an explicit evidence gap.
+```text
+EL0 yields:                       38,912
+input events consumed:                 16
+redraw submissions:                   738
+virtio-net frames consumed:        29,234
+maximum frames/pass:                   16
+network cap exhaustions:             1,827
+runtime requeues:                    1,827
+natural deadline overruns:               0
+maximum duration:                  385,763 ticks
+configured budget:                 625,000 ticks
+maximum / budget:                    61.7%
+input overflow:                          0
+kernel panic:                            0
+```
 
-### Remaining runtime work
+Validated PR #62 head:
+`eac4ff990baddbf83406567b4a20e58bcae6600d`.
 
-1. Compact production code/state again; only 18 bytes remain under the ceiling.
-2. Enforce a service-wide generic-counter deadline.
-3. Check the deadline at class and safe inner-loop boundaries.
-4. Preserve or republish unfinished work at deadline exhaustion.
-5. Count deadline exhaustion.
-6. Add sustained-load QEMU tests proving EL0 heartbeat progress and explicit loss
-   accounting.
-7. Decide whether the fully bounded bottom half remains permanent or later becomes
-   a wakeable EL1 service.
-8. Create a formal v0.2 promotion/tag record with exact evidence.
+- `Verify ArmoniOS` `29896102906` (#290): success;
+- `CI - Tests` `29896102904` (#430): success;
+- production kernel 107918 / 108000 bytes;
+- all existing host, QEMU, RPi4, ABI, stack, and size gates retained.
 
-### Exit criteria
+The driver still lacks device-level RX-drop telemetry. Consumed frames prove
+software-visible progress and continuation, not delivery of every host-submitted
+packet. The deadline remains cooperative and cannot interrupt one already-started
+full redraw or driver call.
 
-- `bash tools/verify.sh` passes on the promotion commit;
-- no hard timer callback contains rendering, queue drains, network polling, or
-  device polling;
-- every budget-relevant class and total service duration are observable;
-- input producers, input consumption, USB, network, partial redraw, and global
-  time are bounded;
-- leftover work remains pending or retained in its native queue/list;
-- every exhaustion is counted;
-- sustained combined load cannot stop an EL0 heartbeat;
-- documentation states the exact post-EOI exception-context model;
-- RPi4 remains fail closed and no hardware claim is introduced;
-- a dated visible QEMU pass is recorded;
-- a v0.2 tag or release record names the tested commit and workflow runs.
+### Remaining promotion work
+
+1. Investigate or explicitly disposition the intermittent VMM fault in issue #63.
+2. Accept the missing device-level RX-drop counter for v0.2 or schedule it as a
+   later driver milestone.
+3. Accept the one-operation full-redraw boundary or add finer checkpoints.
+4. Record a dated visible QEMU desktop pass after the final runtime boundary.
+5. Run `bash tools/verify.sh` on the promotion commit.
+6. Close or explicitly accept `RISK-017` and `RISK-018`.
+7. Create the v0.2 tag/release record naming the tested commit and workflow runs.
+
+A later scheduler may move the bounded bottom half into a wakeable EL1 service,
+but that is not required for the current v0.2 cooperative contract.
 
 Fault-recoverable copyin/copyout (`RISK-015`) remains valuable P2 hardening and may
-be scheduled after v0.2 if its status is preserved explicitly.
+be scheduled after v0.2 if its status remains explicit.
 
 ## v0.3 — storage and VFS platform
 
@@ -320,8 +324,5 @@ Final acceptance requires:
 - useful Files, Editor, Shell, Settings, Monitor, Panel, and Clock;
 - reboot persistence for files and settings;
 - bounded runtime execution with sustained-load evidence;
-- complete user, developer, ABI, and recovery documentation;
-- dated automated and manual release evidence.
-
-Raspberry Pi remains a separate hardware-support track until physical evidence is
-repeatable.
+- zero open QEMU P0 risks and explicit disposition of every P1;
+- tagged release with automated and dated manual evidence.

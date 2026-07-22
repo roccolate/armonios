@@ -16,7 +16,14 @@ queue.
 
 ## Current flow
 
-The QEMU timer runs at 100 Hz, normally publishing readiness every 10 ms.
+The QEMU timer runs at 100 Hz and configures one nominal timer interval as the
+service-wide generic-counter deadline:
+
+```text
+deadline_ticks = CNTFRQ_EL0 / timer_hz
+```
+
+At 100 Hz this is approximately 10 ms.
 
 ```text
 EL0 process
@@ -29,20 +36,22 @@ EL0 process
   -> board_irq_end()
   -> runtime_service_run_pending()
        -> snapshot and clear pending readiness
-       -> read CNTPCT_EL0
-       -> mark active service pass
+       -> record deadline = CNTPCT_EL0 + budget_ticks
        -> PERIODIC / INPUT phase
             -> virtio-input producer: <= min(queue_size, 16) descriptors
             -> USB HID producer: <= 4 registered device visits
             -> shared input consumer: <= 16 events when INPUT is pending
             -> partial redraw: <= 8 damage rectangles/successful submission
-            -> full redraw: one operation
-            -> inherited network call suppressed
-       -> NETWORK phase
+            -> full redraw: one non-preemptible operation
+            -> deadline checkpoints at metric and redraw boundaries
+       -> NETWORK phase, only when deadline remains
             -> consume <= 16 valid virtio-net RX frames
-            -> conservatively republish NETWORK at the cap
-       -> end active pass
-       -> update duration and exhaustion telemetry
+            -> checkpoint after completed frames
+       -> on deadline exhaustion
+            -> record one over-budget event
+            -> republish the original work snapshot
+            -> skip later optional work
+       -> update duration and requeue telemetry
   -> process_dispatch_next()
   -> eret
 ```
@@ -52,9 +61,31 @@ CPU exception. During the service pass execution remains in EL1, the exception
 frame remains on the EL1 stack, nested IRQ helpers preserve the vector's masked
 state, and EL0 remains paused.
 
-Input producers, input consumption, partial compositor damage, and post-EOI
-network RX are count-bounded. A full redraw and complete exception-to-EL0-return
-time are not yet globally time-bounded.
+## Deadline contract
+
+Production timing uses the AArch64 physical generic counter:
+
+- `CNTPCT_EL0` supplies pass start, checkpoints, and end;
+- `CNTFRQ_EL0` supplies the conversion frequency;
+- `budget_ticks` is one nominal timer interval.
+
+At a safe checkpoint, when `CNTPCT_EL0 >= deadline`:
+
+1. the active phase becomes `RUNTIME_PHASE_DEADLINE`;
+2. `over_budget_count` increments once;
+3. the original `last_work` snapshot is ORed back into `pending_work`;
+4. later optional work classes are not started;
+5. control returns toward process dispatch.
+
+The republish rule is deliberately conservative. A completed class may be
+scheduled once more, but no class from an expired pass is silently forgotten.
+Native continuation remains in the input queue, virtio rings, and compositor
+damage list.
+
+The deadline is cooperative, not asynchronous preemption. It cannot interrupt a
+single operation already in progress. In particular, a full redraw remains one
+explicit operation and may cross the deadline before the next checkpoint. The
+pass is then recorded as exhausted and its readiness is republished.
 
 ## Pending-work model
 
@@ -68,47 +99,28 @@ RUNTIME_WORK_NETWORK
 
 Publication masks unknown bits and ORs accepted readiness into the canonical
 `runtime_service_stats_t.pending_work` field. Repeated requests coalesce.
-Consumption clears the snapshot before running the backend:
+Consumption clears the snapshot before running the backend. Backend requeue and
+deadline republish survive for the next pass.
 
-```c
-snapshot = pending;
-pending = 0;
-run(snapshot);
-```
+Bits represent readiness, not exact event counts:
 
-A request republished by the backend survives for the next pass. Bits represent
-readiness, not exact timer or device-event counts.
-
-- `PERIODIC` owns fixed producer scans and GUI flush opportunity.
-- `INPUT` permits up to 16 shared-queue pops and requeues only if events remain.
+- `PERIODIC` owns fixed producer scans and GUI flush opportunity;
+- `INPUT` permits up to 16 shared-queue pops and requeues when events remain;
 - `NETWORK` permits up to 16 valid RX frames and conservatively requeues at cap.
 
-Virtio-input continuation remains in the used ring. USB needs no cursor because
-all four supported slots fit in one scan. Partial redraw continuation remains in
-the compositor's existing damage list; `dirty` stays set until all successful
-batches complete.
+## Enforced count budgets
 
-## Timing telemetry
+| Work class | Rule | Continuation |
+|---|---|---|
+| Virtio-input producer | `min(queue_size, 16)` used descriptors/call | Later descriptors remain in the used ring. |
+| USB HID producer | Four registered device visits/call | Every supported fixed slot fits in one scan. |
+| Shared input consumer | 16 events/active input pass | Requeue when queue depth remains nonzero. |
+| Partial compositor damage | Eight rectangles/successful redraw | Remaining ordered damage stays dirty. |
+| Virtio-net RX | 16 valid frames/active network pass | Conservatively republish network readiness at cap. |
 
-Production timing uses the AArch64 physical generic counter:
-
-- `CNTPCT_EL0`: pass start and end;
-- `CNTFRQ_EL0`: conversion frequency.
-
-`timer_init()` configures one timer interval as the observation threshold:
-
-```text
-threshold_ticks = CNTFRQ_EL0 / timer_hz
-```
-
-At 100 Hz this is approximately 10 ms. Exceeding it means one service pass used
-more than a nominal timer interval. It is not an enforced deadline and does not
-stop work mid-pass.
-
-The internal snapshot records requests, coalescing, non-empty/empty passes,
-requeues, duration values, interval overruns, counter frequency, threshold,
-pending work, last-consumed work, class metrics, and input/network exhaustion
-counters.
+The network cap can schedule one empty follow-up pass when exactly 16 frames were
+available. Exhaustion means the cap was reached, not proof that a seventeenth
+frame existed.
 
 ## Per-class telemetry
 
@@ -126,91 +138,17 @@ RUNTIME_METRIC_REDRAW_EXHAUSTIONS
 ```
 
 Each stores last-pass, maximum-pass, and cumulative counts. Reports are accepted
-only while the runtime backend is active, so cooperative console-thread work
-does not contaminate bottom-half measurements.
+only while the runtime backend is active, so unrelated cooperative work does not
+contaminate bottom-half measurements.
 
-### Input production and queue pressure
+The snapshot also records requests, coalescing, non-empty and empty passes,
+requeues, last/max/total duration, global deadline exhaustion through
+`over_budget_count`, input/network count-budget exhaustion, queue pressure,
+counter frequency, configured budget, pending work, and last-consumed work.
 
-- `INPUT_PRODUCED` counts events successfully queued by virtio-input and direct
-  USB HID producers.
-- `INPUT_CONSUMED` counts successful shared-queue pops during the active input
-  phase.
-- The 64-event queue records current depth, lifetime high-water, and rejected
-  full-queue pushes.
-
-`virtio_input_poll()` returns the number of events actually queued. It processes
-no more than the negotiated ring size and never more than
-`VIRTIO_INPUT_POLL_BUDGET == 16` used descriptors per call. Later descriptors
-remain in the ring.
-
-The shared consumer accepts at most `RUNTIME_INPUT_EVENT_BUDGET == 16` events per
-active pass. At the cap it checks queue depth without consuming. If work remains,
-`RUNTIME_WORK_INPUT` is republished and input-budget exhaustion increments.
-
-### USB HID polling
-
-`DEVICE_POLLS` increments for each valid HID poll that reaches the active xHCI
-controller. It is separate from produced input because a poll may perform
-controller work while yielding no event.
-
-The kernel-wide HID state has four slots:
-
-```text
-USB_HID_POLL_BUDGET == USB_HID_MAX_DEVICES == 4
-```
-
-Even a malformed count cannot scan beyond the array. Each visited device receives
-one interrupt-in attempt. The xHCI path has finite spin limits, but only the
-future global deadline can bound combined elapsed time against a service-wide
-clock.
-
-### Network frames
-
-`NETWORK_FRAMES` increments for each valid non-empty virtio-net RX frame returned
-during the active network phase. It counts completed software consumption, not
-calls to `net_poll()`.
-
-The current virtio-net path has 16 RX descriptors and no trustworthy device-drop,
-overwrite, or ring-overflow counter. Consumed-frame counts must not be presented
-as proof of loss-free receive.
-
-### Redraw and damage
-
-- `REDRAW` counts successful board submissions.
-- `DAMAGE_ITEMS` counts partial-damage rectangles in successful batches.
-- `FULL_REDRAWS` counts successful submissions using the full-redraw sentinel.
-- `REDRAW_EXHAUSTIONS` counts successful partial redraws that leave damage for a
-  later periodic pass.
-
-Partial redraw uses:
-
-```text
-RUNTIME_REDRAW_DAMAGE_BUDGET == 8
-```
-
-The runtime wrapper temporarily exposes only the first eight rectangles to
-`gui_render()`, then restores the original list before submission success is
-known. After a successful board submission, the consumed prefix is removed and
-the remainder stays in-order. After a failed submission, no damage is removed
-and `dirty` remains set.
-
-A full redraw is one explicit operation and clears on success. Its pixel count,
-CPU cost, and GPU completion time are not bounded by the count rule; the future
-global deadline must cover elapsed service time.
-
-## Enforced count budgets
-
-| Work class | Rule | Continuation |
-|---|---|---|
-| Virtio-input producer | `min(queue_size, 16)` used descriptors/call | Later descriptors remain in the used ring. |
-| USB HID producer | Four registered device visits/call | Every supported fixed slot fits in one scan. |
-| Shared input consumer | 16 events/active input pass | Requeue only when queue depth remains nonzero. |
-| Partial compositor damage | Eight rectangles/successful redraw | Remaining ordered damage stays dirty for later periodic passes. |
-| Virtio-net RX | 16 valid frames/active network pass | Conservatively republish network readiness at cap. |
-
-The network requeue is deliberately conservative. Exactly 16 frames may
-schedule one empty follow-up pass. Exhaustion means the cap was reached, not
-proof that a seventeenth frame existed.
+The current virtio-net interface has no trustworthy counter for device-level
+frames dropped, overwritten, or never delivered to software. Consumed-frame
+counts are not evidence of loss-free receive.
 
 ## Routing contract
 
@@ -221,20 +159,27 @@ The kernel orchestrator routes existing calls through runtime wrappers:
 - `gui_clear_dirty()` -> `runtime_service_gui_clear_dirty()`;
 - `net_poll()` -> `runtime_service_net_poll()`.
 
-The wrappers preserve cooperative behavior outside the active runtime service.
-During the periodic phase, the input consumer cap and redraw batch rules apply.
-The inherited network call is suppressed; the independent network phase invokes
-the bounded receive path.
+Input and GUI wrappers retain their documented cooperative behavior where
+needed. Network receive is stricter: `runtime_service_net_poll()` and
+`runtime_service_virtio_net_recv()` consume nothing unless the active phase is
+`RUNTIME_WORK_NETWORK`. The legacy console-thread poll call therefore cannot
+drain the ring outside the post-EOI count and time budgets.
+
+During the periodic phase, the input cap, redraw batch, and deadline checkpoints
+apply. The inherited periodic network call is suppressed; the independent
+network phase invokes the bounded receive path only while time remains.
 
 ## Snapshot and reset contract
 
-`runtime_service_get_stats()` copies one kernel-internal snapshot.
-`runtime_service_reset()` clears pending readiness, phase/redraw transient state,
-and measured counters while preserving counter frequency and observation
-threshold.
+`runtime_service_get_stats()` copies one kernel-internal snapshot using the
+freestanding kernel copy primitive. `runtime_service_reset()` clears pending
+readiness, transient phase/redraw state, and measured counters while preserving
+counter frequency and configured budget.
 
-All state remains zero-initialized, preserving `.data == 0`. No syscall exposes
-the internal layout. Any Monitor integration requires a versioned diagnostic ABI.
+All state remains zero-initialized, preserving `.data == 0`. No production
+syscall exposes the internal layout. Test-only QEMU images may read it directly
+inside EL1 with IRQs masked to emit coherent serial evidence. Any Monitor
+integration requires a versioned diagnostic ABI.
 
 ## Current correctness assumptions
 
@@ -255,8 +200,12 @@ atomics, per-CPU state, or a scheduler-owned queue.
   calls.
 - Runtime work begins only after `board_irq_end()`.
 - Periodic, input, and network readiness follow explicit routing rules.
+- Network receive cannot bypass the active NETWORK phase.
 - Requests coalesce and backend requeue survives.
-- Aggregate duration and current class metrics are measurable.
+- A service-wide generic-counter deadline is enforced at safe checkpoints.
+- Deadline exhaustion is counted once and the original work snapshot is
+  conservatively republished.
+- Later optional classes are skipped after deadline exhaustion.
 - Virtio-input processes at most one negotiated ring length and no more than 16
   descriptors per call.
 - USB HID visits at most four device slots per call.
@@ -265,81 +214,107 @@ atomics, per-CPU state, or a scheduler-owned queue.
   submission and preserves all remaining or failed damage.
 - Post-EOI network RX is at most 16 valid frames per pass.
 - Reports outside the active bottom half are ignored.
-- `.data == 0`, the 108000-byte kernel ceiling, and the user ABI are preserved.
+- `.data == 0`, the 108000-byte production kernel ceiling, and the user ABI are
+  preserved.
 
-## Guarantees not implemented
+## Deterministic forced-expiry stress
 
-ArmoniOS does not yet guarantee:
+`tools/qemu_runtime_stress_test.sh` builds a separate image with
+`ARMONIOS_RUNTIME_STRESS_TEST`. It launches real windows, completes DHCP, injects
+USB keyboard events, forces one checkpoint expiry every eight service passes,
+and emits EL0 heartbeats.
 
-- maximum total service or interrupt-to-EL0 latency;
-- an elapsed-time bound for a full redraw;
-- an enforced global generic-counter deadline;
-- fairness among all work classes and EL0 under sustained combined pressure;
-- no input queue overflow under sustained load;
-- measured device-level network drops;
-- bounded cooperative network polling outside the runtime service;
-- SMP-safe publication or snapshots;
-- a separately schedulable runtime thread.
-
-The count budgets progress but do not close `RISK-017`.
-
-## Verification
-
-The hosted and local gates verify:
-
-- EOI-before-backend order;
-- request coalescing and generic requeue preservation;
-- last/max/total timing and interval overruns;
-- every indexed class metric;
-- exact network and input consumer caps and continuation;
-- virtio-input negotiated-ring 8 + 2 continuation;
-- malformed USB count clamped to four visits;
-- partial redraw completion as 8 + 8 + 4;
-- failed redraw preserving five rectangles;
-- full-redraw and reset behavior;
-- full QEMU/RPi4, storage, GUI, stack, ABI, and subsystem baseline.
-
-Latest validated implementation head:
-`8b86a8c24f25af0937f1df2e983c1c7c4f489b7d`.
-
-- `Verify ArmoniOS` run `29863653280`: success;
-- `CI - Tests` run `29863653209`: success;
-- loadable QEMU kernel: 107982 / 108000 bytes;
-- PR #58 merge: `fe4f2a622f5633e55b0eddb2f8f6767453a9ddca`.
-
-## Remaining Phase 2 behavior
-
-The remaining production work is:
+The validated PR #61 run produced:
 
 ```text
-service elapsed time <= T generic-counter ticks
+EL0 heartbeat markers:        509
+deadline republish markers:   311
+input-consumed marker:          1
+redraw-submitted marker:        1
+network-frame marker:           1
+DHCP acknowledgements:          1
+input-overflow markers:         0
+panic markers:                  0
 ```
 
-Before adding that code, another compacting change is required because the
-current loadable kernel has only 18 bytes of margin.
+This proves repeated EL0 execution while the actual deadline-republish path is
+exercised hundreds of times. Forced expiry is deterministic instrumentation, not
+a measurement of natural production latency.
 
-A correct deadline implementation must:
+## Natural virtio-net RX saturation
 
-1. check elapsed time at class boundaries and safe inner-loop boundaries;
-2. stop before starting optional work once the deadline is exhausted;
-3. preserve or republish unfinished class readiness;
-4. retain work in native queues/rings/damage lists where applicable;
-5. record deadline exhaustion;
-6. return toward process dispatch.
+`tools/qemu_runtime_net_stress_test.sh` builds a separate image with
+`ARMONIOS_RUNTIME_NET_STRESS_TEST`; it does not shorten the budget or force the
+clock. After DHCP, QEMU `hostfwd` injects sustained UDP traffic while xHCI
+keyboard events and panel redraw work continue.
 
-The selected threshold must be justified by fixed limits and sustained QEMU
-evidence, not by the current observation threshold alone.
+The final PR #62 stress run recorded:
 
-## RISK-017 exit criteria
+```text
+EL0 yields:                       38,912
+input events consumed:                 16
+redraw submissions:                   738
+virtio-net frames consumed:        29,234
+maximum frames in one pass:            16
+network-cap exhaustions:             1,827
+runtime requeues:                    1,827
+natural deadline overruns:               0
+maximum pass duration:             385,763 ticks
+configured budget:                 625,000 ticks
+maximum / budget:                    61.7%
+input queue overflow:                    0
+kernel panic:                            0
+```
 
-The risk remains open until deterministic and sustained-load QEMU tests prove:
+The run contains 38 coherent EL0 summaries. It demonstrates repeated progress
+while the 16-frame cap is reached and requeued thousands of times, with the
+natural maximum remaining below one timer interval. The instrumented image is
+108438 bytes and is not the release artifact; the production image remains under
+the unchanged 108000-byte gate.
 
-- EL0 heartbeat progress under input, USB, network, and redraw pressure;
-- combined work cannot indefinitely delay dispatch;
-- every exhausted class remains pending or retains work in its native queue;
-- observable queue loss is absent or explicitly counted;
-- maximum complete-pass duration stays below a documented enforced threshold;
-- all existing subsystem gates remain green.
+## Evidence boundary
 
-A later scheduler may promote this work into a wakeable EL1 service, but the
-current bottom half must first become completely bounded and non-blocking.
+The natural saturation gate proves software-visible continuation and latency for
+the tested QEMU workload. It does not prove that every host-submitted packet
+reached a guest descriptor. The current driver exposes no trustworthy device or
+ring-drop counter, so frames dropped or overwritten before software consumption
+remain outside the evidence boundary.
+
+The deadline also cannot preempt an operation already executing. A full redraw or
+driver call may cross the nominal interval once even though the measured
+saturation run did not. Indefinite fairness among all classes is not formally
+proved.
+
+An intermittent EL1 VMM data abort observed once during an existing FAT32 smoke
+run is tracked separately in issue #63 and is not attributed to the runtime RX
+change without reproduction evidence.
+
+## Validation
+
+Final implementation/evidence head:
+`eac4ff990baddbf83406567b4a20e58bcae6600d`.
+
+- `Verify ArmoniOS` run `29896102906` (#290): success;
+- `CI - Tests` run `29896102904` (#430): success;
+- production loadable QEMU kernel: 107918 / 108000 bytes;
+- remaining production margin: 82 bytes;
+- global deadline: PR #60;
+- forced-expiry heartbeat: PR #61;
+- natural RX saturation and strict routing: PR #62.
+
+## RISK-017 remaining exit criteria
+
+Automated runtime evidence is now complete for the current QEMU v0.2 contract.
+Before formal promotion:
+
+1. explicitly accept the lack of device-level RX-drop telemetry or schedule a
+   separate driver counter milestone;
+2. decide whether the full-redraw non-preemptible boundary is acceptable for
+   v0.2;
+3. retain every existing subsystem and stress gate;
+4. record a dated visible desktop pass after the final runtime boundary;
+5. resolve or explicitly disposition issue #63 before tagging v0.2.
+
+A later scheduler may promote the bottom half into a wakeable EL1 service, but
+that is no longer required to demonstrate the current bounded cooperative
+contract.

@@ -35,11 +35,12 @@ fail closed and no physical support claim is made.
 | RISK-014 | P1 v1 | Desktop applications | OPEN | Blocks v1 usability |
 | RISK-015 | P2 | Fault-contained user copy | OPEN | Future mapping hardening |
 | RISK-016 | P1 | Process lifecycle | CLOSED | Parent/wait correctness |
-| RISK-017 | P1 | Deferred runtime execution | OPEN; COUNT BOUNDS LANDED, GLOBAL TIME OPEN | Blocks formal v0.2 |
+| RISK-017 | P1 | Deferred runtime execution | OPEN; AUTOMATED EVIDENCE COMPLETE, RELEASE DISPOSITION OPEN | Blocks formal v0.2 |
+| RISK-018 | P1 | Intermittent VMM fault | OPEN; SINGLE OBSERVATION | Blocks unqualified reproducibility claim |
 
 ## Open risks
 
-### RISK-017 — Deferred runtime execution is partially bounded
+### RISK-017 — Deferred runtime execution needs final release disposition
 
 **Severity:** P1 runtime hardening  
 **Affected scope:** interrupt-to-EL0 latency, responsiveness, fairness,
@@ -58,7 +59,10 @@ Implementation sequence:
 - runtime-state compaction: PR #54 / `39dea455`;
 - bounded USB HID device visits: PR #55 / `53c14402`;
 - bounded virtio-input descriptor draining: PR #56 / `7674b639`;
-- bounded partial compositor damage: PR #58 / `fe4f2a62`.
+- bounded partial compositor damage: PR #58 / `fe4f2a62`;
+- service-wide generic-counter deadline: PR #60 / merge `1e51e818`;
+- QEMU EL0 heartbeat and forced-expiry stress: PR #61 / merge `172496d8`;
+- strict network-phase routing and natural RX saturation: PR #62.
 
 The timer callback performs fixed account/rearm/publication/scheduler work. The
 runtime backend executes after EOI but before process dispatch and `eret`.
@@ -69,111 +73,157 @@ The internal snapshot records:
 
 - requests, coalescing, non-empty and empty passes, and requeues;
 - last, maximum, and cumulative generic-counter duration;
-- passes exceeding one timer interval;
+- global deadline exhaustion through `over_budget_count`;
 - input events produced and consumed;
 - maximum input queue depth, lifetime high-water, and overflow;
 - USB HID polls reaching xHCI;
 - valid virtio-net RX frames consumed;
 - successful redraw submissions;
 - partial-damage rectangles, full redraws, and redraw exhaustion;
-- input/network budget exhaustion;
-- counter frequency, observation threshold, pending bits, and last work.
+- input/network count-budget exhaustion;
+- counter frequency, configured deadline budget, pending bits, and last work.
 
 Each indexed class keeps last-pass, maximum-pass, and cumulative counts. Reports
-outside the active pass are ignored. Production timing uses `CNTPCT_EL0`; the
-approximately 10 ms timer interval remains an observation threshold, not an
-enforced deadline.
+outside the active pass are ignored. Production timing uses `CNTPCT_EL0` and a
+budget of one nominal timer interval, approximately 10 ms at 100 Hz.
 
 #### Bounds implemented
 
 | Work class | Enforced rule | Continuation |
 |---|---|---|
-| Virtio-input producer | `min(queue_size, 16)` used descriptors/call | Used descriptors remain in the ring for the next periodic tick. |
+| Whole service | Deadline at `start + CNTFRQ_EL0 / timer_hz`, checked at safe boundaries | Original work snapshot is conservatively republished on expiry. |
+| Virtio-input producer | `min(queue_size, 16)` used descriptors/call | Used descriptors remain in the ring. |
 | USB HID producer | Four registered device visits/call | Every supported fixed slot fits in one scan. |
-| Shared input consumer | 16 events/active input pass | Requeue only when queue depth remains nonzero. |
-| Partial compositor damage | Eight rectangles/successful redraw | Remaining ordered damage stays dirty for later periodic passes. |
-| Virtio-net RX | 16 valid frames/active network pass | Conservatively republish network readiness at cap. |
+| Shared input consumer | 16 events/active input pass | Requeue when queue depth remains nonzero. |
+| Partial compositor damage | Eight rectangles/successful redraw | Remaining ordered damage stays dirty. |
+| Virtio-net RX | 16 valid frames/active NETWORK pass | Conservatively republish network readiness at cap. |
 
-The network requeue is conservative because retaining a non-consuming queue
-query crossed a linker-alignment boundary and exceeded the 108000-byte kernel
-limit. Exactly 16 frames can therefore produce one empty follow-up pass.
+At a deadline checkpoint, the runtime service records one exhaustion, marks the
+pass expired, ORs the original `last_work` snapshot into `pending_work`, skips
+later optional work, and returns toward process dispatch. Native continuation
+remains in input queues, virtio rings, and the compositor damage list.
 
-Virtio-input returns the number of successfully queued events. A deterministic
-host test negotiates an eight-entry ring, injects ten descriptors, and proves
-8 + 2 continuation with ten events queued.
+Network polling and descriptor receive now consume nothing outside the active
+NETWORK phase. The legacy console-thread poll therefore cannot bypass the count
+or time budgets.
 
-USB HID polling is clamped independently of the public `count` field. A host test
-sets `count` to 255 and proves only four slots are visited.
+#### Deadline boundary
 
-Partial redraw temporarily exposes only the first eight damage rectangles to the
-compositor. After successful submission, that prefix is removed and the ordered
-remainder stays dirty. A failed submission removes nothing. The deterministic
-regression proves 20 rectangles complete as 8 + 8 + 4, a failed five-rectangle
-redraw is fully preserved, and full redraw clears once.
+The deadline is cooperative and cannot asynchronously interrupt an operation
+already executing. A full redraw remains one explicit operation. It may cross the
+nominal deadline before the next checkpoint, after which the pass is counted as
+exhausted and readiness is republished.
 
-A full redraw remains one operation. The count rule does not bound its pixel
-work or elapsed time.
+#### Deterministic validation
+
+The host deadline regression proves:
+
+- periodic expiry can prevent redraw and the later network phase;
+- the network receive loop stops at a checkpoint and retains unconsumed frames;
+- an operation completing after the deadline is detected, counted, and
+  conservatively republished;
+- network polling and receive outside the NETWORK phase consume no descriptors.
+
+#### Forced-expiry heartbeat evidence
+
+PR #61 builds a separate test-only image. Its validated run recorded 509 EL0
+heartbeat markers, 311 deadline republications, input/redraw/network/DHCP
+activity, zero observable input overflow, and zero panic markers.
+
+This demonstrates repeated EL0 progress while the production republish path is
+exercised hundreds of times. Forced expiry is instrumentation rather than natural
+latency evidence.
+
+#### Natural RX saturation evidence
+
+PR #62 builds a second test-only image without shortening the production budget.
+QEMU completes DHCP, injects sustained UDP through `hostfwd`, injects USB keyboard
+input, and keeps panel redraw work active.
+
+Validated head:
+`eac4ff990baddbf83406567b4a20e58bcae6600d`.
+
+- `Verify ArmoniOS` run `29896102906` (#290): success;
+- `CI - Tests` run `29896102904` (#430): success;
+- production loadable kernel: 107918 / 108000 bytes;
+- production margin: 82 bytes;
+- EL0 yields: 38,912;
+- input events consumed: 16;
+- redraw submissions: 738;
+- virtio-net frames consumed: 29,234;
+- maximum frames/pass: 16;
+- network-cap exhaustions: 1,827;
+- runtime requeues: 1,827;
+- natural deadline overruns: 0;
+- maximum pass duration: 385,763 / 625,000 ticks, or 61.7%;
+- observable input overflow: 0;
+- panic markers: 0.
+
+This satisfies the missing software-visible RX backlog, natural-duration, and EL0
+progress evidence for the current QEMU contract.
 
 #### Evidence boundary
 
-The 16-descriptor virtio RX implementation exposes no trustworthy device counter
-for frames dropped, overwritten, or never delivered to software. Consumed-frame
-counts are not proof of zero network loss.
+The 16-descriptor virtio RX implementation exposes no trustworthy counter for
+frames dropped, overwritten, or never delivered to software. The run proves
+continuation for frames that reached software, not loss-free delivery of every
+host-submitted packet.
 
-Cooperative network polling outside the active runtime service remains unbudgeted
-and is outside the post-EOI network guarantee.
-
-#### Validation
-
-Latest redraw-bound head:
-`8b86a8c24f25af0937f1df2e983c1c7c4f489b7d`.
-
-- `Verify ArmoniOS` run `29863653280`: success;
-- `CI - Tests` run `29863653209`: success;
-- loadable QEMU kernel: 107982 / 108000 bytes;
-- remaining margin: 18 bytes;
-- merge: `fe4f2a622f5633e55b0eddb2f8f6767453a9ddca`.
-
-Two UART messages were removed from terminal scheduler idle paths to preserve the
-size ceiling. Scheduler control flow, IRQ restoration, stack freeing, and
-infinite `wfe` behavior are unchanged.
+One already-started full redraw or driver operation can still cross the deadline
+before the next checkpoint. The measured saturation run remained below budget,
+but this does not constitute asynchronous preemption or an indefinite fairness
+proof.
 
 #### Why the risk remains open
 
-During the service pass:
+The automated runtime exit evidence is complete, but formal v0.2 promotion still
+requires explicit decisions:
 
-- execution remains inside the IRQ exception path;
-- the 288-byte frame remains on the EL1 stack;
-- nested IRQ helpers preserve the vector's prior mask state;
-- EL0 remains paused;
-- a full redraw may still consume significant elapsed time;
-- no service-wide generic-counter deadline is enforced;
-- cooperative network polling outside the service is unbounded;
-- no sustained-load QEMU heartbeat proves EL0 progress;
-- only 18 bytes remain under the kernel ceiling.
+1. accept the absence of device-level RX-drop telemetry for v0.2 or schedule a
+   separate driver-counter milestone;
+2. accept the one-operation full-redraw boundary or add finer checkpoints;
+3. retain all current subsystem and stress gates;
+4. record a dated visible desktop pass after the final runtime boundary;
+5. resolve or explicitly disposition RISK-018 / issue #63;
+6. close or accept the residuals and tag v0.2.
 
-Pending state and telemetry remain non-atomic single-core structures valid only
-under the current one-consumer model.
+The bounded bottom half may later become a wakeable EL1 service, but that change
+is no longer required to demonstrate the current cooperative contract.
 
-**Failure mode:** every count-bounded class now stops or retains continuation,
-but their combined finite work—or one expensive full redraw—can still extend one
-exception path and delay EL0. Only a global deadline can bound complete elapsed
-time.
+### RISK-018 — Intermittent EL1 VMM data abort during FAT32 smoke
 
-**Remaining exit criteria:**
+**Severity:** P1 reproducibility/correctness  
+**Tracking:** issue #63  
+**First observed:** PR #62 validation, `Verify ArmoniOS` run `29894678482`, first
+attempt
 
-1. compact production code/state again without changing contracts;
-2. enforce a service-wide generic-counter deadline;
-3. preserve or republish unfinished work at deadline exhaustion;
-4. count deadline exhaustion;
-5. add QEMU stress with an EL0 heartbeat under combined load;
-6. prove pending/native-queue work is not silently lost;
-7. retain all current subsystem gates;
-8. record a dated visible desktop pass;
-9. decide whether the fully bounded bottom half remains or later becomes a
-   wakeable service.
+One existing `qemu-fs-test` boot reached the EL0 panel path and then panicked:
 
-RISK-017 still blocks formal v0.2 promotion.
+```text
+ESR 0x96000004
+ELR 0x40089cac
+FAR 0x00003fdfd5033000
+```
+
+The archived ELF resolves the ELR to the `table[index]` load in `next_table()` in
+`kernel/mm/vmm.c`. The same source commit passed the failed-job rerun, and later
+Verify #287, Verify #290, and CI #430 also passed. The observation is therefore
+intermittent and is not attributed to PR #62 without reproduction evidence.
+
+Possible classes include stale page-table state, premature table reclamation,
+allocator corruption, unrelated memory overwrite, or a timing-sensitive test
+path. It must not be classified as infrastructure-only merely because reruns
+passed.
+
+**Exit criteria:**
+
+1. add a repeated FAT32 boot/soak gate;
+2. capture process, page-table root, virtual address, level/index, and allocator
+   context around VMM failures;
+3. identify and fix the root cause, or establish a bounded external cause with
+   strong repeat evidence;
+4. retain production size and ABI contracts;
+5. update release evidence before v0.2 promotion.
 
 ### RISK-013 — Storage and VFS are too narrow for v1
 
