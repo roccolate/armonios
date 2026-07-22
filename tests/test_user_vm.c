@@ -99,6 +99,11 @@ void test_user_vm_rejects_invalid_inputs_without_regions(void) {
                                  &process, 0, PAGE_SIZE, 0x20ULL));
     TEST_ASSERT_EQUAL_UINT64((uint64_t)USER_VM_ERR_INVAL,
                              (uint64_t)user_vm_map_anonymous(
+                                 &process, 0, PAGE_SIZE,
+                                 USER_VM_PROT_READ | USER_VM_PROT_WRITE |
+                                     USER_VM_PROT_EXEC));
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)USER_VM_ERR_INVAL,
+                             (uint64_t)user_vm_map_anonymous(
                                  &process, 0, 0, 0));
     TEST_ASSERT_EQUAL_UINT64((uint64_t)USER_VM_ERR_INVAL,
                              (uint64_t)user_vm_map_anonymous(
@@ -146,7 +151,7 @@ void test_user_vm_map_physical_maps_registered_region(void) {
     uint64_t entry = vmm_leaf_entry(pgd, vaddr);
     TEST_ASSERT_TRUE((entry & (1ULL << 6)) != 0);
     TEST_ASSERT_TRUE((entry & (1ULL << 54)) == 0);
-    TEST_ASSERT_TRUE((entry & (1ULL << 53)) == 0);
+    TEST_ASSERT_TRUE((entry & (1ULL << 53)) != 0);
 
     free(mem);
 }
