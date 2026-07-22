@@ -41,7 +41,7 @@ Chosen release defaults:
 | Phase | State | Promotion blocker |
 |---|---|---|
 | v0.1 baseline | COMPLETE | None for the recorded QEMU baseline |
-| v0.2 cleanup/hardening | IN PROGRESS / RELEASE CANDIDATE | Compaction, global-time deadline, sustained-load evidence, promotion record |
+| v0.2 cleanup/hardening | IN PROGRESS / RELEASE CANDIDATE | Sustained-load heartbeat, explicit loss evidence, visible pass, promotion record |
 | v0.3 storage/VFS platform | NEXT | Depends on v0.2 promotion |
 | v0.4 real FAT | PLANNED | Depends on v0.3 filesystem interfaces |
 | v0.5 userland runtime/widgets | PLANNED | Depends on stable storage and ABI shapes |
@@ -113,7 +113,7 @@ The post-EOI service measures:
 
 - request, coalescing, requeue, non-empty, and empty pass counts;
 - last, maximum, and cumulative generic-counter duration;
-- one-timer-interval overruns;
+- global deadline exhaustion;
 - input events produced and consumed;
 - input queue depth, lifetime high-water, and overflow;
 - USB HID polling operations;
@@ -127,48 +127,62 @@ Phase 1B was completed through PRs #44-#48.
 | PR | Work class | Rule |
 |---|---|---|
 | #50 | Network RX | 16 valid frames per active post-EOI network pass; conservative requeue |
-| #52 | Shared input consumer | 16 queue events per active input pass; requeue only when work remains |
+| #52 | Shared input consumer | 16 queue events per active input pass; requeue when work remains |
 | #55 | USB HID producer | Four registered device visits per call, even with malformed count |
 | #56 | Virtio-input producer | At most one negotiated ring length and never more than 16 descriptors per call |
 | #58 | Partial compositor damage | Eight rectangles per successful redraw; preserve ordered remainder or all damage on failure |
 
-Runtime state was compacted in PR #54 before the producer bounds. PR #58 also
-removed two terminal scheduler UART messages to preserve the fixed ceiling
-without changing scheduler behavior.
+Runtime state was compacted in PR #54. Additional small diagnostic compaction in
+PR #60 preserved the fixed kernel ceiling while adding the deadline.
 
-Latest validated implementation head:
-`8b86a8c24f25af0937f1df2e983c1c7c4f489b7d`.
+### Landed service-wide deadline
 
-- `Verify ArmoniOS` `29863653280`: success;
-- `CI - Tests` `29863653209`: success;
-- loadable QEMU kernel 107982 / 108000 bytes;
-- remaining margin 18 bytes;
-- partial-redraw merge `fe4f2a622f5633e55b0eddb2f8f6767453a9ddca`.
+PR #60 adds a cooperative generic-counter deadline of one nominal timer interval:
 
-The deterministic runtime regression proves:
+```text
+deadline = start_CNTPCT_EL0 + CNTFRQ_EL0 / timer_hz
+```
 
-- virtio-input ten descriptors on an eight-entry ring complete as 8 + 2;
-- malformed USB count scans only four slots;
-- shared input and network caps preserve continuation;
-- 20 partial rectangles complete as 8 + 8 + 4;
-- failed redraw preserves all five damage rectangles;
-- full redraw clears as one successful operation.
+At safe checkpoints the service:
 
-The virtio-net path still exposes no trustworthy device-level RX-drop counter.
-This remains an explicit evidence gap.
+- detects expiry;
+- increments global exhaustion once;
+- conservatively republishes the original work snapshot;
+- skips later optional work classes;
+- returns toward process dispatch.
+
+The deadline regression proves:
+
+- expiry before redraw prevents the later network phase;
+- the network loop stops at a checkpoint and retains frames;
+- a completed operation crossing the deadline is detected and republished.
+
+Validated implementation head before documentation synchronization:
+`af07d6de6b4b00fb77b37da1efa51b561aa73d9c`.
+
+- `Verify ArmoniOS` `29891251044`: success;
+- `CI - Tests` `29891251026`: success;
+- loadable QEMU kernel 107930 / 108000 bytes;
+- remaining margin 70 bytes;
+- size ceiling unchanged.
+
+The deadline is cooperative, not asynchronous preemption. A full redraw or driver
+operation already executing may cross the nominal interval before the next
+checkpoint. Cooperative network polling outside the active bottom half remains
+outside this guarantee.
 
 ### Remaining runtime work
 
-1. Compact production code/state again; only 18 bytes remain under the ceiling.
-2. Enforce a service-wide generic-counter deadline.
-3. Check the deadline at class and safe inner-loop boundaries.
-4. Preserve or republish unfinished work at deadline exhaustion.
-5. Count deadline exhaustion.
-6. Add sustained-load QEMU tests proving EL0 heartbeat progress and explicit loss
-   accounting.
-7. Decide whether the fully bounded bottom half remains permanent or later becomes
-   a wakeable EL1 service.
-8. Create a formal v0.2 promotion/tag record with exact evidence.
+1. Add a QEMU EL0 heartbeat/progress probe.
+2. Inject sustained input, redraw, and network pressure.
+3. Prove repeated EL0 progress while deadline exhaustion occurs.
+4. Prove unfinished work remains pending or retained in native queues/lists.
+5. Prove input queue loss is absent or explicitly counted.
+6. Preserve all existing hosted, QEMU, RPi4, ABI, stack, and size gates.
+7. Record a dated visible QEMU pass after the final runtime boundary.
+8. Close or explicitly accept `RISK-017` and create the formal v0.2 tag record.
+9. Decide later whether the bounded bottom half should become a wakeable EL1
+   service.
 
 ### Exit criteria
 
@@ -177,10 +191,11 @@ This remains an explicit evidence gap.
   device polling;
 - every budget-relevant class and total service duration are observable;
 - input producers, input consumption, USB, network, partial redraw, and global
-  time are bounded;
+  time follow enforced stop/continuation rules;
 - leftover work remains pending or retained in its native queue/list;
 - every exhaustion is counted;
 - sustained combined load cannot stop an EL0 heartbeat;
+- observable queue loss is absent or explicitly counted;
 - documentation states the exact post-EOI exception-context model;
 - RPi4 remains fail closed and no hardware claim is introduced;
 - a dated visible QEMU pass is recorded;
