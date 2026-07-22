@@ -73,8 +73,6 @@ static int64_t user_buf_range(const process_t *process, uint64_t ptr,
     if (process == 0 || (ptr == 0 && len != 0)) {
         return ERR_INVAL;
     }
-
-    /* Preserve the existing zero-length ABI: no memory is touched. */
     if (len == 0) {
         return 0;
     }
@@ -96,16 +94,9 @@ static int64_t user_buf_range(const process_t *process, uint64_t ptr,
             (entry & USER_PTE_AP_USER) == 0) {
             return ERR_INVAL;
         }
-
-        /*
-         * AArch64 stage-1 mappings have no user write-only encoding. A valid
-         * EL0 leaf is therefore readable; output additionally requires AP_RO
-         * to be clear on every page in the requested range.
-         */
         if (require_write != 0 && (entry & USER_PTE_AP_RO) != 0) {
             return ERR_PERM;
         }
-
         if (page == last_page) {
             break;
         }
@@ -157,7 +148,6 @@ int64_t sys_copy_to_user(const process_t *process, uint64_t ptr,
         return ERR_INVAL;
     }
 
-    /* Validate every covered page before writing the first byte. */
     status = sys_user_buf_out(process, ptr, len);
     if (status != 0) {
         return status;
@@ -186,11 +176,49 @@ int64_t sys_user_copy_cstr(const process_t *process, uint64_t ptr,
         if (sys_copy_from_user(process, &out[i], byte_ptr, 1) != 0) {
             return ERR_INVAL;
         }
-
         if (out[i] == '\0') {
             return 0;
         }
     }
 
     return ERR_INVAL;
+}
+
+int64_t sys_copy_argv_from_user(const process_t *process, uint64_t argv_ptr,
+                                uint32_t argc,
+                                panel_boot_argv_t *kernel_argv) {
+    uint32_t used = 0U;
+
+    if (process == 0 || kernel_argv == 0 ||
+        argc > PANEL_BOOT_ARGV_MAX_STRINGS ||
+        (argc == 0U && argv_ptr != 0U) ||
+        (argc != 0U && argv_ptr == 0U)) {
+        return ERR_INVAL;
+    }
+
+    for (uint32_t i = 0; i < argc; i++) {
+        uint64_t user_pointer;
+        uint64_t offset = (uint64_t)i * sizeof(uint64_t);
+        int64_t status;
+
+        if (argv_ptr > UINT64_MAX - offset ||
+            sys_copy_from_user(process, &user_pointer, argv_ptr + offset,
+                               sizeof(user_pointer)) != 0 ||
+            user_pointer == 0U || used >= PANEL_BOOT_ARGV_MAX_BYTES) {
+            return ERR_INVAL;
+        }
+
+        kernel_argv->offsets[i] = (uint16_t)used;
+        status = sys_user_copy_cstr(process, user_pointer,
+                                    &kernel_argv->bytes[used],
+                                    PANEL_BOOT_ARGV_MAX_BYTES - used);
+        if (status != 0) {
+            return status;
+        }
+        while (kernel_argv->bytes[used++] != '\0') {
+        }
+    }
+
+    kernel_argv->bytes_used = (uint16_t)used;
+    return 0;
 }

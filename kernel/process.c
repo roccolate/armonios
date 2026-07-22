@@ -311,15 +311,23 @@ int process_kill(uint32_t pid, uint64_t exit_code) {
 
 void process_reclaim_zombies(void) {
     for (uint32_t i = 0; i < PROCESS_MAX_PROCESSES; i++) {
-        if (g_processes[i].state == PROCESS_ZOMBIE) {
-            /*
-             * Note: GUI windows were destroyed by
-             * process_mark_exited when the process first became a
-             * zombie. process_release here only needs to free
-             * the page table and mmap pages.
-             */
-            process_release(&g_processes[i]);
+        process_t *zombie = &g_processes[i];
+        process_t *parent;
+
+        if (zombie->state != PROCESS_ZOMBIE) {
+            continue;
         }
+
+        parent = zombie->parent_pid == 0U
+                     ? 0
+                     : process_find(zombie->parent_pid);
+        if (zombie->parent_pid != 0U && parent != 0 &&
+            parent->state != PROCESS_UNUSED &&
+            parent->state != PROCESS_ZOMBIE) {
+            continue;
+        }
+
+        process_release(zombie);
     }
 }
 
@@ -329,6 +337,7 @@ void process_init(process_t *process, uint32_t pid, const char *name) {
     }
 
     process->pid = pid;
+    process->parent_pid = 0;
     process_copy_name(process, name);
     process->sp = 0;
     process->pc = 0;

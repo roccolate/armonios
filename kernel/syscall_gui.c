@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "kernel/gui.h"
+#include "kernel/kstring.h"
 #include "kernel/syscall_helpers.h"
 
 int64_t sys_window_create(process_t *process, uint64_t x, uint64_t y,
@@ -297,13 +298,9 @@ int64_t sys_window_get_bounds(process_t *process, uint64_t window_id,
                               uint64_t out_ptr) {
     gui_desktop_t *desktop;
     gui_window_t *window;
-    uint32_t *out = (uint32_t *)(uintptr_t)out_ptr;
+    uint32_t out[4];
     int64_t status;
 
-    status = sys_user_buf_out(process, out_ptr, sizeof(uint32_t) * 4U);
-    if (status != 0) {
-        return status;
-    }
     status = sys_owner_window(process, window_id, &desktop, &window);
     if (status != 0) {
         return status;
@@ -312,7 +309,7 @@ int64_t sys_window_get_bounds(process_t *process, uint64_t window_id,
     out[1] = window->y;
     out[2] = window->w;
     out[3] = window->h;
-    return 0;
+    return sys_copy_to_user(process, out_ptr, out, sizeof(out));
 }
 
 int64_t sys_window_set_bounds(process_t *process, uint64_t window_id,
@@ -377,14 +374,8 @@ int64_t sys_window_state(process_t *process, uint64_t window_id,
                          uint64_t out_ptr) {
     gui_desktop_t *desktop = gui_desktop();
     gui_window_t *window;
-    uint32_t *out = (uint32_t *)(uintptr_t)out_ptr;
     uint32_t state = 0;
-    int64_t status;
 
-    status = sys_user_buf_out(process, out_ptr, sizeof(uint32_t));
-    if (status != 0) {
-        return status;
-    }
     if (process == 0 || window_id >= GUI_MAX_WINDOWS) {
         return ERR_INVAL;
     }
@@ -402,14 +393,13 @@ int64_t sys_window_state(process_t *process, uint64_t window_id,
         (window->flags & GUI_WINDOW_NO_FOCUS) == 0U) {
         state |= 0x2U;
     }
-    *out = state;
-    return 0;
+    return sys_copy_to_user(process, out_ptr, &state, sizeof(state));
 }
 
 int64_t sys_window_event(process_t *process, uint64_t window_id,
                          uint64_t buf_ptr, uint64_t buf_count) {
     gui_window_t *window;
-    uint32_t *out = (uint32_t *)(uintptr_t)buf_ptr;
+    uint64_t n = 0;
     int64_t status;
 
     if (process == 0 || window_id >= GUI_MAX_WINDOWS ||
@@ -417,7 +407,7 @@ int64_t sys_window_event(process_t *process, uint64_t window_id,
         return ERR_INVAL;
     }
     status = sys_user_buf_out(process, buf_ptr,
-                              buf_count * 3U * sizeof(uint32_t));
+                              buf_count * sizeof(gui_event_t));
     if (status != 0) {
         return status;
     }
@@ -425,20 +415,18 @@ int64_t sys_window_event(process_t *process, uint64_t window_id,
     if (status != 0) {
         return status;
     }
-
     if (window->event_count == 0) {
         return ERR_AGAIN;
     }
 
-    uint64_t n = 0;
     while (n < buf_count && window->event_count > 0) {
         gui_event_t ev;
+
         if (gui_window_pop_event(window, &ev) != 0) {
             break;
         }
-        out[n * 3U + 0U] = ev.type;
-        out[n * 3U + 1U] = (uint32_t)ev.data1;
-        out[n * 3U + 2U] = (uint32_t)ev.data2;
+        kmemcpy((void *)(uintptr_t)(buf_ptr + n * sizeof(ev)),
+                &ev, sizeof(ev));
         n++;
     }
     return (int64_t)n;
