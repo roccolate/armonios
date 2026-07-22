@@ -18,13 +18,7 @@
 #define RUNTIME_REDRAW_FULL       (1U << 4)
 #define RUNTIME_REDRAW_SUCCESS    (1U << 5)
 #define RUNTIME_REDRAW_EXHAUSTED  (1U << 6)
-
-enum {
-    RUNTIME_PHASE_ACTIVE = 1U << 0,
-    RUNTIME_PHASE_INPUT = 1U << 1,
-    RUNTIME_PHASE_NETWORK = 1U << 2,
-    RUNTIME_PHASE_DEADLINE = 1U << 3,
-};
+#define RUNTIME_PHASE_DEADLINE    (1U << 3)
 
 typedef struct {
     irq_handler_fn_t handler;
@@ -67,24 +61,19 @@ static int runtime_service_deadline(void) {
 #if defined(ARMONIOS_TEST) && !defined(ARMONIOS_RUNTIME_DEADLINE_TEST)
     return 0;
 #else
-    uint32_t pending;
+    uint8_t phase = g_runtime_phase;
 
-    if (g_runtime_phase == 0U || g_runtime_stats.budget_ticks == 0U) {
-        return 0;
-    }
-    if ((g_runtime_phase & RUNTIME_PHASE_DEADLINE) != 0U) {
+    if ((phase & RUNTIME_PHASE_DEADLINE) != 0U) {
         return 1;
     }
-    if (runtime_service_counter_now() < g_runtime_stats.last_duration_ticks) {
+    if (phase == 0U || g_runtime_stats.budget_ticks == 0U ||
+        runtime_service_counter_now() < g_runtime_stats.last_duration_ticks) {
         return 0;
     }
 
-    g_runtime_phase |= RUNTIME_PHASE_DEADLINE;
+    g_runtime_stats.pending_work |= phase;
+    g_runtime_phase = RUNTIME_PHASE_DEADLINE;
     g_runtime_stats.over_budget_count++;
-    pending = (g_runtime_phase & RUNTIME_PHASE_NETWORK) != 0U
-                  ? RUNTIME_WORK_NETWORK
-                  : RUNTIME_WORK_PERIODIC | RUNTIME_WORK_INPUT;
-    g_runtime_stats.pending_work |= pending;
     return 1;
 #endif
 }
@@ -112,7 +101,6 @@ void runtime_service_gui_render(struct fb *fb, void *context) {
     uint32_t batch;
 
     if (runtime_service_deadline()) {
-        g_runtime_redraw_state = 0U;
         return;
     }
 
@@ -261,8 +249,7 @@ int runtime_service_input_poll(struct input_event *event) {
     if (g_runtime_phase == 0U) {
         return input_queue_poll((input_event_t *)event);
     }
-    if ((g_runtime_phase & (RUNTIME_PHASE_INPUT | RUNTIME_PHASE_DEADLINE)) !=
-        RUNTIME_PHASE_INPUT) {
+    if ((g_runtime_phase & RUNTIME_WORK_INPUT) == 0U) {
         return -1;
     }
     if (g_runtime_stats.metric_last[RUNTIME_METRIC_INPUT_CONSUMED] <
@@ -279,7 +266,7 @@ int runtime_service_input_poll(struct input_event *event) {
 
 void runtime_service_net_poll(void) {
     if (g_runtime_phase == 0U ||
-        (g_runtime_phase & RUNTIME_PHASE_NETWORK) != 0U) {
+        (g_runtime_phase & RUNTIME_WORK_NETWORK) != 0U) {
         net_poll();
     }
 }
@@ -289,8 +276,7 @@ int runtime_service_virtio_net_recv(virtio_net_device_t *device, void *data,
     if (g_runtime_phase == 0U) {
         return virtio_net_recv(device, data, max_len);
     }
-    if ((g_runtime_phase & (RUNTIME_PHASE_NETWORK | RUNTIME_PHASE_DEADLINE)) !=
-        RUNTIME_PHASE_NETWORK) {
+    if ((g_runtime_phase & RUNTIME_WORK_NETWORK) == 0U) {
         return 0;
     }
     if (g_runtime_stats.metric_last[RUNTIME_METRIC_NETWORK_FRAMES] >=
@@ -324,26 +310,23 @@ uint32_t runtime_service_run_pending(void) {
     started = runtime_service_counter_now();
     g_runtime_stats.last_duration_ticks = started + g_runtime_stats.budget_ticks;
     if ((work & (RUNTIME_WORK_PERIODIC | RUNTIME_WORK_INPUT)) != 0U) {
-        g_runtime_phase = RUNTIME_PHASE_ACTIVE |
-                          (work & RUNTIME_WORK_INPUT);
+        g_runtime_phase = (uint8_t)(work &
+            (RUNTIME_WORK_PERIODIC | RUNTIME_WORK_INPUT));
         kernel_on_timer_tick();
+        (void)runtime_service_deadline();
     }
     if ((work & RUNTIME_WORK_NETWORK) != 0U) {
-        if ((g_runtime_phase & RUNTIME_PHASE_DEADLINE) != 0U) {
+        if (g_runtime_phase == RUNTIME_PHASE_DEADLINE) {
             g_runtime_stats.pending_work |= RUNTIME_WORK_NETWORK;
         } else {
-            g_runtime_phase = RUNTIME_PHASE_ACTIVE | RUNTIME_PHASE_NETWORK;
+            g_runtime_phase = RUNTIME_WORK_NETWORK;
             if (!runtime_service_deadline()) {
                 kernel_io_poll_network();
+                (void)runtime_service_deadline();
             }
         }
     }
     duration = runtime_service_counter_now() - started;
-    if (g_runtime_stats.budget_ticks != 0U &&
-        duration > g_runtime_stats.budget_ticks &&
-        (g_runtime_phase & RUNTIME_PHASE_DEADLINE) == 0U) {
-        g_runtime_stats.over_budget_count++;
-    }
     g_runtime_phase = 0;
 
     g_runtime_stats.run_count++;
