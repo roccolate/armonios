@@ -61,17 +61,21 @@ static int runtime_service_deadline(void) {
 #if defined(ARMONIOS_TEST) && !defined(ARMONIOS_RUNTIME_DEADLINE_TEST)
     return 0;
 #else
-    uint8_t phase;
+    uint64_t now;
 
     if (g_runtime_phase == RUNTIME_PHASE_DEADLINE) {
         return 1;
     }
-    if (runtime_service_counter_now() < g_runtime_stats.last_duration_ticks) {
+#if defined(ARMONIOS_TEST)
+    now = runtime_service_counter_now();
+#else
+    __asm__ volatile("mrs %0, cntpct_el0" : "=r"(now));
+#endif
+    if (now < g_runtime_stats.last_duration_ticks) {
         return 0;
     }
 
-    phase = g_runtime_phase;
-    g_runtime_stats.pending_work |= phase;
+    g_runtime_stats.pending_work |= g_runtime_stats.last_work;
     g_runtime_phase = RUNTIME_PHASE_DEADLINE;
     g_runtime_stats.over_budget_count++;
     return 1;
@@ -99,6 +103,7 @@ void runtime_service_gui_render(struct fb *fb, void *context) {
     gui_desktop_t *desktop;
     uint32_t original_count;
     uint32_t batch;
+    uint32_t state;
 
     if (runtime_service_deadline()) {
         return;
@@ -121,10 +126,11 @@ void runtime_service_gui_render(struct fb *fb, void *context) {
     if (batch > RUNTIME_REDRAW_DAMAGE_BUDGET) {
         batch = RUNTIME_REDRAW_DAMAGE_BUDGET;
     }
-    g_runtime_redraw_state = (uint8_t)(batch + 1U);
+    state = batch + 1U;
     if (original_count > batch) {
-        g_runtime_redraw_state |= RUNTIME_REDRAW_EXHAUSTED;
+        state |= RUNTIME_REDRAW_EXHAUSTED;
     }
+    g_runtime_redraw_state = (uint8_t)state;
     desktop->damage_count = batch;
     gui_render((fb_t *)fb, context);
     desktop->damage_count = original_count;
@@ -315,15 +321,12 @@ uint32_t runtime_service_run_pending(void) {
         kernel_on_timer_tick();
         (void)runtime_service_deadline();
     }
-    if ((work & RUNTIME_WORK_NETWORK) != 0U) {
-        if (g_runtime_phase == RUNTIME_PHASE_DEADLINE) {
-            g_runtime_stats.pending_work |= RUNTIME_WORK_NETWORK;
-        } else {
-            g_runtime_phase = RUNTIME_WORK_NETWORK;
-            if (!runtime_service_deadline()) {
-                kernel_io_poll_network();
-                (void)runtime_service_deadline();
-            }
+    if ((work & RUNTIME_WORK_NETWORK) != 0U &&
+        g_runtime_phase != RUNTIME_PHASE_DEADLINE) {
+        g_runtime_phase = RUNTIME_WORK_NETWORK;
+        if (!runtime_service_deadline()) {
+            kernel_io_poll_network();
+            (void)runtime_service_deadline();
         }
     }
     duration = runtime_service_counter_now() - started;
