@@ -82,6 +82,8 @@ Current limitations:
 
 - `hint` must be zero;
 - `flags == 0` means readable/writable;
+- writable and executable permissions cannot be combined; explicit RWX requests are rejected;
+- executable EL0 pages remain privileged-execute-never (PXN) in EL1;
 - allocations require contiguous physical pages;
 - `munmap` requires an exact region match;
 - image and stack mappings cannot be removed with `sys_munmap`;
