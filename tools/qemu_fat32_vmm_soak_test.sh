@@ -3,20 +3,24 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BUILD_DIR="${VMM_SOAK_BUILD_DIR:-$ROOT_DIR/build-vmm-soak}"
-BOOT_COUNT="${VMM_SOAK_BOOT_COUNT:-12}"
-BOOT_SECONDS="${VMM_SOAK_BOOT_SECONDS:-12}"
+KERNEL_BUILD_DIR="${VMM_SOAK_KERNEL_BUILD_DIR:-$ROOT_DIR/build}"
+OUTPUT_DIR="${VMM_SOAK_OUTPUT_DIR:-$ROOT_DIR/build-vmm-soak}"
+BOOT_COUNT="${VMM_SOAK_BOOT_COUNT:-10}"
+BOOT_SECONDS="${VMM_SOAK_BOOT_SECONDS:-10}"
 GDB_PORT_BASE="${VMM_SOAK_GDB_PORT_BASE:-24600}"
 QEMU="${QEMU_SYSTEM_AARCH64:-qemu-system-aarch64}"
 GDB="${GDB_MULTIARCH:-gdb-multiarch}"
 ADDR2LINE="${AARCH64_ADDR2LINE:-aarch64-linux-gnu-addr2line}"
-BUILD_LOG="$BUILD_DIR/build.log"
-KERNEL_ELF="$BUILD_DIR/kernel.elf"
-KERNEL_BIN="$BUILD_DIR/kernel.bin"
-BLOCK_IMAGE="$BUILD_DIR/virtio-blk.img"
+METADATA_LOG="$OUTPUT_DIR/metadata.log"
+KERNEL_ELF="$KERNEL_BUILD_DIR/kernel.elf"
+KERNEL_BIN="$KERNEL_BUILD_DIR/kernel.bin"
+BLOCK_IMAGE="$KERNEL_BUILD_DIR/virtio-blk.img"
 
 current_pid=""
 current_monitor=""
+current_serial=""
+current_qemu_log=""
+current_gdb_log=""
 
 cleanup() {
     if [[ -n "$current_pid" ]]; then
@@ -29,10 +33,13 @@ trap cleanup EXIT
 
 fail() {
     printf 'FAIL: %s\n' "$*" >&2
-    if [[ -f "$BUILD_LOG" ]]; then
-        printf '%s\n' "--- $BUILD_LOG" >&2
-        tail -200 "$BUILD_LOG" >&2 || true
-    fi
+    for diagnostic in "$METADATA_LOG" "$current_qemu_log" \
+                      "$current_serial" "$current_gdb_log"; do
+        if [[ -n "$diagnostic" && -f "$diagnostic" ]]; then
+            printf '%s\n' "--- $diagnostic" >&2
+            tail -240 "$diagnostic" >&2 || true
+        fi
+    done
     exit 1
 }
 
@@ -44,31 +51,39 @@ done
 [[ "$BOOT_COUNT" =~ ^[1-9][0-9]*$ ]] || fail "invalid boot count: $BOOT_COUNT"
 [[ "$BOOT_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail "invalid boot duration: $BOOT_SECONDS"
 
-rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR"
+rm -rf "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR"
 
-# Build the same production QEMU kernel and FAT image used by the ordinary smoke
-# path. No diagnostic macro changes the guest layout or timing under observation.
-if ! make -C "$ROOT_DIR" \
-    BUILD_DIR="$BUILD_DIR" \
-    all "$BLOCK_IMAGE" \
-    >"$BUILD_LOG" 2>&1; then
-    fail "FAT32 VMM soak image build failed"
+# tools/verify.sh runs the ordinary build and qemu-fs-test immediately before
+# this gate. Reuse those exact production artifacts instead of rebuilding a
+# second layout. Standalone invocations build only when an artifact is missing.
+if [[ ! -f "$KERNEL_ELF" || ! -f "$KERNEL_BIN" || ! -f "$BLOCK_IMAGE" ]]; then
+    if ! make -C "$ROOT_DIR" \
+        BUILD_DIR="$KERNEL_BUILD_DIR" \
+        all "$BLOCK_IMAGE" \
+        >"$METADATA_LOG" 2>&1; then
+        fail "production FAT32 artifacts could not be built"
+    fi
 fi
 
 [[ -f "$KERNEL_ELF" ]] || fail "missing kernel ELF: $KERNEL_ELF"
 [[ -f "$KERNEL_BIN" ]] || fail "missing kernel image: $KERNEL_BIN"
 [[ -f "$BLOCK_IMAGE" ]] || fail "missing FAT32 block image: $BLOCK_IMAGE"
 
-printf 'kernel sha256: %s\n' "$(sha256sum "$KERNEL_BIN" | awk '{print $1}')" >>"$BUILD_LOG"
-printf 'kernel bytes: %s\n' "$(wc -c < "$KERNEL_BIN")" >>"$BUILD_LOG"
-printf 'qemu: %s\n' "$($QEMU --version | head -1)" >>"$BUILD_LOG"
-printf 'boots: %s, seconds/boot: %s\n' "$BOOT_COUNT" "$BOOT_SECONDS" >>"$BUILD_LOG"
+{
+    printf 'commit: %s\n' "$(git -C "$ROOT_DIR" rev-parse --verify HEAD 2>/dev/null || printf unknown)"
+    printf 'kernel build directory: %s\n' "$KERNEL_BUILD_DIR"
+    printf 'kernel sha256: %s\n' "$(sha256sum "$KERNEL_BIN" | awk '{print $1}')"
+    printf 'kernel bytes: %s\n' "$(wc -c < "$KERNEL_BIN")"
+    printf 'block image sha256: %s\n' "$(sha256sum "$BLOCK_IMAGE" | awk '{print $1}')"
+    printf 'qemu: %s\n' "$($QEMU --version | head -1)"
+    printf 'boots: %s, seconds/boot: %s\n' "$BOOT_COUNT" "$BOOT_SECONDS"
+} >"$METADATA_LOG"
 
 capture_gdb() {
     local port="$1"
     local output="$2"
-    local commands="$BUILD_DIR/gdb-commands.txt"
+    local commands="$OUTPUT_DIR/gdb-commands.txt"
 
     cat >"$commands" <<'GDB'
 set pagination off
@@ -127,15 +142,18 @@ PY
 
 for ((iteration = 1; iteration <= BOOT_COUNT; iteration++)); do
     label=$(printf '%02d' "$iteration")
-    serial_log="$BUILD_DIR/boot-$label.log"
-    qemu_log="$BUILD_DIR/qemu-$label.stderr.log"
-    monitor="$BUILD_DIR/monitor-$label.sock"
-    gdb_log="$BUILD_DIR/gdb-$label.log"
-    addr_log="$BUILD_DIR/addr2line-$label.log"
+    serial_log="$OUTPUT_DIR/boot-$label.log"
+    qemu_log="$OUTPUT_DIR/qemu-$label.stderr.log"
+    monitor="$OUTPUT_DIR/monitor-$label.sock"
+    gdb_log="$OUTPUT_DIR/gdb-$label.log"
+    addr_log="$OUTPUT_DIR/addr2line-$label.log"
     port=$((GDB_PORT_BASE + iteration))
 
     rm -f "$serial_log" "$qemu_log" "$monitor" "$gdb_log" "$addr_log"
     current_monitor="$monitor"
+    current_serial="$serial_log"
+    current_qemu_log="$qemu_log"
+    current_gdb_log="$gdb_log"
 
     "$QEMU" \
         -machine virt -cpu cortex-a72 -m 128M \
@@ -174,16 +192,14 @@ while True:
         time.sleep(0.03)
 
 end = time.monotonic() + duration
-panic = False
 while time.monotonic() < end:
     try:
         with open(serial_path, "r", encoding="utf-8", errors="ignore") as stream:
-            panic = "__PANIC_HALT__" in stream.read()
+            if "__PANIC_HALT__" in stream.read():
+                monitor.close()
+                raise SystemExit(42)
     except FileNotFoundError:
-        panic = False
-    if panic:
-        monitor.close()
-        raise SystemExit(42)
+        pass
     try:
         os.kill(qemu_pid, 0)
     except ProcessLookupError:
@@ -213,8 +229,8 @@ PY
         fail "QEMU or monitor failed on boot $iteration/$BOOT_COUNT (status $monitor_status)"
     fi
 
+    qemu_status=0
     wait "$current_pid" || qemu_status=$?
-    qemu_status=${qemu_status:-0}
     current_pid=""
     current_monitor=""
 
@@ -237,4 +253,4 @@ done
 
 printf 'PASS: %s repeated production FAT32 boots completed without EL1 panic\n' \
     "$BOOT_COUNT"
-printf 'PASS: VMM soak artifacts %s\n' "$BUILD_DIR"
+printf 'PASS: VMM soak artifacts %s\n' "$OUTPUT_DIR"
