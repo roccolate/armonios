@@ -1,262 +1,371 @@
 # Architecture
 
 ArmoniOS is a compact monolithic AArch64 operating system. Its verified runtime
-platform is QEMU `virt`; Raspberry Pi 4 remains a separate build/host-verified,
+platform is QEMU `virt`. Raspberry Pi 4 remains a separate build/host-verified,
 fail-closed hardware track.
 
-This document describes implemented architecture, not roadmap intent.
-Operational evidence lives in `CURRENT_STATE.md`, active risks in
-`TECHNICAL_RISKS.md`, and milestone ordering in `ROADMAP.md`.
+This document describes implemented design and current contracts. It does not
+serve as release evidence.
+
+- Operational evidence: `CURRENT_STATE.md`
+- Open risks: `TECHNICAL_RISKS.md`
+- Milestone sequencing: `ROADMAP.md`
+- Practical development workflow: `DEVELOPMENT_GUIDE.md`
+- Exact runtime-service contract: `RUNTIME_SERVICE.md`
 
 ## Design profile
 
-- freestanding AArch64 kernel written primarily in C with narrow assembly entry
-  boundaries;
-- monolithic EL1 kernel and linked-in drivers;
-- freestanding EL0 applications in the KLI1 image format;
+- freestanding AArch64 kernel, primarily C11 with narrow GNU assembly boundaries;
+- monolithic EL1 kernel with linked-in drivers;
+- freestanding EL0 KLI1 applications;
 - no libc, POSIX layer, dynamic linker, package manager, or hosted runtime;
 - single-core execution model;
+- fixed-capacity tables and queues;
 - QEMU-first verification policy;
-- fixed-capacity tables and queues chosen for readability and bounded memory.
+- explicit ownership and fail-closed optional capabilities;
+- small production image constrained by a fixed 108000-byte ceiling.
+
+## System overview
+
+```text
+QEMU / board firmware
+  -> boot/start.S
+  -> kernel_main(dtb)
+       -> board + UART + DTB memory
+       -> PMM + heap + page tables + MMU
+       -> process table + VFS + filesystems
+       -> timer + IRQ + runtime service
+       -> optional storage, GPU, network, input, PCI, xHCI
+       -> load Panel KLI1 image
+       -> enter preemptive EL0 runtime
+
+EL0 application
+  -> svc #0
+  -> syscall dispatcher
+  -> kernel-owned validation/copy boundary
+  -> VFS / GUI / IPC / process service
+
+Timer IRQ
+  -> fixed timer callback
+  -> EOI
+  -> bounded post-EOI runtime pass
+  -> process dispatch
+  -> eret
+```
 
 ## Privilege and execution modes
 
-### EL1
+### EL1 kernel
 
-EL1 contains:
+EL1 owns:
 
-- kernel initialization and board orchestration;
+- initialization and board orchestration;
 - exception and IRQ entry/dispatch;
-- PMM, VMM, heap, and process management;
-- syscall dispatch and user-copy helpers;
+- physical and virtual memory management;
+- process lifecycle and context activation;
+- syscall dispatch and user-copy validation;
 - VFS and filesystem adapters;
-- GUI compositor and window manager;
-- input, storage, USB, and network drivers;
-- the post-EOI deferred runtime bottom half;
+- kernel compositor/window manager;
+- storage, input, USB, and network drivers;
+- the measured post-EOI runtime service;
 - cooperative helper threads.
 
-### EL0
+### EL0 applications
 
-EL0 runs KLI1 applications such as Panel, Shell, Editor, Files, Monitor, Control,
-and Clock. Applications invoke the kernel with `svc #0` through `libkarm` and
-`libkarmdesk` wrappers.
+Panel, Shell, Editor, Files, Monitor, Control, and Clock run as freestanding KLI1
+images. They call the kernel through `svc #0` wrappers in `programs/libkarm/` and
+GUI wrappers in `programs/libkarmdesk/`.
 
 ### EL2 and EL3
 
-The verified QEMU path does not use EL2 or EL3 after entry. Physical boards may
-enter at a higher exception level and require deliberate transition and core
-parking before the normal EL1 path is valid.
+The verified QEMU path transitions to and remains in EL1 after entry. Physical
+boards may enter at a higher exception level and require deliberate transition,
+core parking, and board-specific setup before the generic EL1 path is valid.
 
-## Boot flow
+## Boot and initialization
 
 ```text
-QEMU loader
-  -> load kernel at board linker address
-  -> pass DTB pointer in x0
+loader
+  -> kernel at board load address
+  -> DTB pointer in x0
 
 boot/start.S
-  -> preserve DTB pointer
-  -> install early stack
-  -> install exception vectors
+  -> preserve DTB
+  -> establish early stack
+  -> establish exception vectors
   -> clear BSS
   -> call kernel_main(dtb)
 
 kernel_main
-  -> board early initialization and UART
+  -> board early init and UART
   -> DTB memory discovery
-  -> PMM and process table
-  -> console and heap
-  -> VMM/MMU identity mappings
+  -> reserve kernel and DTB
+  -> PMM, process table, console, heap
+  -> kernel page tables and MMU
   -> VFS, bootfs, tmpfs
-  -> timer, IRQ, process dispatch, runtime pending state
-  -> optional block storage and FAT32
+  -> timer, IRQ, runtime timing, scheduler state
+  -> optional block device and FAT32
   -> optional virtio GPU
-  -> optional network
+  -> optional virtio network
   -> input, PCI, xHCI, USB HID
-  -> launch Panel in EL0
-  -> enter normal process/IRQ runtime
+  -> spawn Panel and activate EL0
 ```
 
-Initialization phase status is recorded through `kernel/init_status.{c,h}` and
-reported on the kernel console.
+Initialization status is recorded through `kernel/init_status.{c,h}`. Optional
+capabilities must report explicit failure rather than silently succeeding.
 
 ## Memory architecture
 
 ### Physical memory manager
 
-The PMM uses one fixed bitmap and manages at most 128 MiB. It reserves the loaded
-kernel and DTB before allocating pages for:
+`kernel/mm/pmm.c` uses a fixed bitmap and manages at most 128 MiB. The current
+limit matches the default QEMU configuration and is not a general hardware memory
+policy.
 
-- page tables;
-- application images;
-- user stacks;
-- anonymous mappings;
+The PMM supplies physical pages for:
+
+- page-table hierarchies;
+- application images and user stacks;
+- anonymous user mappings;
 - GUI backing buffers;
-- kernel heap arenas.
+- kernel heap arenas;
+- other explicitly owned kernel allocations.
 
-The 128 MiB cap matches the current default QEMU configuration and is not a
-general physical-board memory policy.
+The PMM records used/free state but is not a reference-counting allocator. Higher
+layers must provide correct ownership and exactly-once release.
 
-### Virtual memory
+### Virtual memory manager
 
-The VMM implements AArch64 stage-1 translation with 4 KiB pages and four-level
-page tables.
+`kernel/mm/vmm.c` implements AArch64 stage-1 translation with 4 KiB pages and a
+four-level table hierarchy.
 
 Current mapping policy:
 
-- kernel text: read/execute;
-- kernel rodata: read-only, non-executable;
-- kernel data, BSS, and stack: read/write, non-executable;
-- remaining RAM: read/write, non-executable;
-- MMIO: device memory, non-executable;
-- process image: user read/execute;
-- process stack and ordinary anonymous mappings: user read/write unless another
-  supported protection is requested.
+| Region | Permissions |
+|---|---|
+| Kernel text | EL1 read/execute |
+| Kernel rodata | EL1 read-only, non-executable |
+| Kernel data/BSS/stack | EL1 read/write, non-executable |
+| Remaining RAM identity map | EL1 read/write, non-executable |
+| MMIO | Device memory, non-executable |
+| User image | EL0 read/execute |
+| User stack and ordinary anonymous mappings | EL0 read/write unless another supported protection is requested |
 
-Mutable kernel globals are zero-initialized and subsystems establish non-zero
-defaults during initialization. This keeps the loadable `.data` section empty
-while preserving W^X boundaries.
+Mutable kernel globals are zero-initialized and non-zero defaults are established
+at runtime. This preserves an empty loadable `.data` section.
 
-Each process owns a TTBR0 root, but that root currently also contains the kernel
-and RAM identity map required while handling exceptions. TTBR1 is disabled.
-Process switches replace TTBR0 and invalidate the complete EL1 TLB.
+Each process owns one TTBR0 root. That root currently includes the kernel/RAM
+identity mappings required while handling exceptions. TTBR1 is disabled. Context
+switches replace TTBR0 and use broad EL1 TLB invalidation.
 
-This is adequate for the current v0.1 isolation baseline, but it is not a
-hardened split-address-space design. Future hardening requires TTBR1, user-only
-TTBR0 roots, ASIDs, and scoped TLB invalidation.
+This is sufficient for the current baseline but not a hardened split address
+space. Future work under `RISK-008` includes TTBR1, user-only TTBR0 roots, ASIDs,
+scoped invalidation, and stale-translation tests.
+
+### Page ownership
+
+The VMM owns page-table pages. The caller owns physical leaf pages mapped by those
+tables.
+
+Examples:
+
+- process image/stack pages are registered as process-owned regions;
+- anonymous mapping pages are returned by user-VM cleanup;
+- `vmm_free_table()` releases only table pages;
+- process teardown releases owned mapped pages and then the table hierarchy.
+
+This distinction is a core correctness invariant. The intermittent VMM fault in
+`RISK-018` is investigated without changing this ownership contract until a root
+cause is demonstrated.
 
 ### Process user regions
 
-Each process records at most eight disjoint user regions. Region records contain
-virtual range, physical base, and ownership flags. They support:
+Each process records at most eight disjoint user regions containing:
 
-- image and stack ownership checks;
-- anonymous mapping allocation and release;
-- syscall pointer range validation;
-- cleanup during process exit.
+- virtual start and end;
+- physical base where applicable;
+- ownership flags.
 
-The syscall boundary checks both the registered range and the process page table.
-Readable input and writable output permissions are distinguished. The remaining
-limitation is that the final byte copy is an ordinary EL1 load/store sequence,
-not a fault-recoverable copy primitive.
+They support:
 
-## Processes and scheduling
+- image and stack ownership;
+- anonymous mapping allocation/release;
+- user-pointer range validation;
+- mapping-permission checks;
+- cleanup on exit.
+
+The syscall boundary validates both registered ranges and page-table permissions.
+The final byte copy still uses ordinary EL1 loads/stores and is not protected by
+exception-table fixups (`RISK-015`).
+
+## Process and scheduling architecture
 
 ### Process model
 
-The process table contains 16 fixed slots. A process records:
+The fixed process table contains 16 slots. A process records:
 
 - PID and parent PID;
 - name and state;
-- saved x0-x30 registers;
+- saved x0-x30 register state;
 - user SP, PC, and PSTATE;
 - TTBR0 root;
-- user regions and owned pages;
+- user regions and physical ownership;
 - exit code and zombie state;
 - next anonymous mapping address.
 
-Spawn records the current process as parent. A child zombie remains observable
-until its parent successfully calls non-blocking `sys_wait`. Automatic zombie
-reclamation is restricted to kernel-owned or orphaned processes.
+Spawn records the current process as parent. A child zombie remains visible until
+its parent completes non-blocking wait. Automatic reclamation is limited to
+kernel-owned or orphaned zombies.
+
+Process cleanup closes owned VFS descriptors, destroys owned GUI windows, releases
+owned user pages, frees page-table pages, and returns the fixed slot.
 
 ### EL0 dispatch
 
 EL0 processes are preemptive:
 
-1. IRQ entry masks normal IRQs and saves a 288-byte exception frame on the EL1
-   stack.
-2. `irq_handler_frame()` saves the interrupted process state.
+1. IRQ entry saves a 288-byte exception frame on the EL1 stack.
+2. The interrupted process context is saved.
 3. The acknowledged IRQ handler runs.
 4. The board interrupt controller receives EOI.
-5. One deferred runtime pass runs if work is pending.
-6. `process_dispatch_next()` may select another ready process.
-7. The selected TTBR0 and trap frame are activated.
-8. `eret` restores EL0 execution and the saved interrupt-mask state.
+5. A pending post-EOI runtime pass executes.
+6. `process_dispatch_next()` selects a ready process when required.
+7. The selected TTBR0 and frame are activated.
+8. `eret` restores EL0 and the saved interrupt-mask state.
 
-Voluntary yield, exit, kill, and lower-EL fault paths use the same process context
-activation machinery where applicable.
+Yield, exit, kill, and lower-EL fault paths use the same context activation model
+where applicable.
 
-### EL1 helper threads
+### Cooperative EL1 helpers
 
-The scheduler under `kernel/sched/` is cooperative. EL1 helper threads change
-only through explicit yield or exit boundaries. Timer ticks update counters but
-do not preempt an executing helper.
+`kernel/sched/` provides cooperative EL1 helper threads. They switch only through
+explicit yield or exit. Timer ticks update their counters but do not preempt an
+executing helper.
 
-The current helper scheduler cannot wake and interleave a kernel service while a
-long-lived EL0 process remains active. That is why periodic desktop work is not
-yet implemented as a helper thread.
+The current helper scheduler does not independently wake and interleave a kernel
+service while an EL0 process runs. Periodic GUI/input/network work therefore uses
+the post-EOI runtime service rather than an EL1 helper thread.
 
-### Deferred runtime bottom half
+## Deferred runtime service
 
-The timer callback publishes `RUNTIME_WORK_PERIODIC` into one coalescing pending
-bitmask. After EOI, the IRQ dispatcher snapshots and clears pending bits, then
-calls the backend.
+The runtime service is a non-preemptible post-EOI EL1 bottom half, not a thread.
+The timer publishes readiness; the IRQ dispatcher consumes it after EOI and before
+process selection and `eret`.
 
-Current backend work:
+### Pending work
 
-- poll UART, board, and direct USB HID input producers;
-- drain the shared input queue into GUI routing;
-- flush dirty GUI redraw;
-- poll the small network stack.
+One coalescing pending word contains:
 
-Clearing the snapshot before backend execution preserves a request published
-during the current pass.
+```text
+RUNTIME_WORK_PERIODIC
+RUNTIME_WORK_INPUT
+RUNTIME_WORK_NETWORK
+```
 
-Important semantics:
+The timer publishes all three readiness classes. The service snapshots and clears
+the word before running, so requests published during the pass survive for the
+next pass.
 
-- EOI has occurred, but CPU exception return has not;
-- IRQs remain masked by the vector entry;
-- EL0 remains paused;
-- the exception frame remains on the EL1 stack;
-- the bottom half is not preemptible by normal IRQs;
-- no per-pass work or duration budget currently exists.
+Readiness bits are not exact event counters. Exact continuation remains in native
+structures such as device rings, the shared input queue, and the compositor damage
+list.
 
-The pending word is safe only for the current single-core, masked-IRQ,
-one-consumer model. `volatile` does not provide SMP-safe atomicity.
+### Deadline
 
-See `RUNTIME_SERVICE.md` and `RISK-017`.
+At 100 Hz, QEMU configures one nominal timer interval as the service budget:
 
-The accurate runtime description is:
+```text
+deadline = start_CNTPCT_EL0 + CNTFRQ_EL0 / timer_hz
+```
 
-> preemptive EL0 processes, a non-preemptible post-EOI runtime bottom half, and
-> cooperative EL1 helper threads.
+At safe checkpoints, expiry:
+
+1. marks the active phase as deadline-exhausted;
+2. increments `over_budget_count` once;
+3. republishes the original work snapshot;
+4. skips later optional classes;
+5. returns toward process dispatch.
+
+The deadline is cooperative. It cannot interrupt one already-started operation.
+A full redraw or driver call may cross the nominal interval before the next
+checkpoint.
+
+### Count budgets
+
+| Work class | Bound | Continuation |
+|---|---:|---|
+| Virtio-input producer | `min(negotiated ring, 16)` descriptors/call | Later used descriptors stay in the ring. |
+| USB HID producer | Four device visits/call | All supported direct slots fit in one scan. |
+| Shared input consumer | 16 events/active pass | INPUT requeued when events remain. |
+| Partial compositor damage | Eight rectangles/successful submission | Ordered remainder stays dirty; failed submission consumes none. |
+| Virtio-net RX | 16 valid frames/NETWORK pass | NETWORK conservatively requeued at cap. |
+
+### Strict network routing
+
+Existing network calls are routed through runtime wrappers. Both network polling
+and descriptor receive consume nothing unless the active phase is NETWORK. The
+legacy cooperative console poll therefore cannot bypass the count and time
+contracts.
+
+### Telemetry
+
+The kernel-internal snapshot records:
+
+- requests, coalescing, empty/non-empty passes, and requeues;
+- last, maximum, and cumulative pass duration;
+- deadline exhaustion;
+- produced and consumed input events;
+- input queue depth, high-water, and overflow;
+- USB HID poll operations;
+- valid network frames consumed;
+- redraws, damage items, full redraws, and redraw exhaustion;
+- input and network count-budget exhaustion;
+- configured counter frequency, budget, pending work, and last work.
+
+Reports are accepted only while the service is active. The layout is not a public
+ABI; Monitor integration requires a versioned diagnostic interface.
+
+The exact contract and stress evidence are documented in `RUNTIME_SERVICE.md`.
 
 ## Exceptions and faults
 
 - `svc #0` from EL0 enters syscall dispatch.
 - Other synchronous lower-EL exceptions mark the current process exited and try
   to dispatch another ready process.
-- Unexpected EL1 exceptions enter a fatal diagnostic path and wait forever.
-- Normal IRQ entry prevents nesting until exception return.
+- Unexpected EL1 exceptions enter a fatal serial diagnostic path and halt.
+- Normal IRQ entry keeps normal IRQs masked until exception return.
 
-The kernel does not yet have exception-table fixups for user-copy faults.
+Fatal EL1 diagnostics report ESR, ELR, FAR, SP, exception kind, and a panic marker.
+Issue #63 / `RISK-018` tracks one intermittent data abort resolved to
+`next_table()` during a FAT32 smoke run.
 
-## Syscall boundary
+The kernel does not yet provide exception-table fixups for user-copy faults.
 
-The ABI uses:
+## Syscall and user-copy boundary
+
+Register ABI:
 
 ```text
 x8      syscall number
 x0..x6  arguments
-x0      return value or negative kernel error
+x0      result or negative kernel error
 ```
 
-Numbers are frozen in `kernel/syscall_numbers.h`; new calls must append numbers.
+Syscall numbers are append-only in `kernel/syscall_numbers.h`.
 
-Public pointer handling is centralized in `kernel/syscall_helpers.{c,h}`.
-Covered syscall paths:
+`kernel/syscall_helpers.{c,h}` centralizes public pointer handling:
 
-- validate process-owned ranges;
-- walk user page tables;
-- distinguish readable and writable mappings;
-- copy c-strings and bounded byte ranges;
-- import argv into pointer-free kernel storage;
-- build output in kernel-owned buffers;
-- validate complete output destinations before consuming IPC or GUI events.
+- process-owned range validation;
+- user page-table walks;
+- readable/writable distinction;
+- bounded strings and byte copies;
+- pointer-free argv import;
+- kernel-owned output construction;
+- full destination validation before consuming IPC or GUI events.
 
-Fault-contained copying remains future hardening.
+Lower subsystems should receive kernel-owned data, not user pointers.
 
-See `SYSCALLS.md` for the exact ABI.
+See `SYSCALLS.md` and `GUI_ABI_NOTES.md` for exact public contracts.
 
 ## VFS and file descriptors
 
@@ -266,107 +375,105 @@ The VFS is a fixed-capacity kernel facade:
 - four mounts;
 - 64-byte absolute paths;
 - eight descriptors per process;
-- a global internal handle pool sized for all process slots.
+- a global internal handle pool covering all process slots.
 
-Descriptors `3..10` are local to the current process. Internal handles store the
-owner PID, local descriptor, node, offset, and flags. Foreign use is rejected,
-dead owners can be reaped, and `process_mark_exited()` closes all descriptors for
-the exiting PID.
+Descriptors `3..10` are local to the owning process. Internal handles store owner
+PID, local descriptor, node, offset, and flags. Foreign descriptor use is rejected
+and process exit closes all owned handles.
 
-Mount callbacks currently support open, list, unlink, and rename. Generic VFS
-code selects the mount and does not include FAT32 policy directly.
+Mount callbacks currently provide the narrow operations required by bootfs,
+tmpfs, and the FAT32 bridge. Generic VFS code selects the mount; it must not embed
+FAT-specific policy.
 
-The VFS does not yet provide:
+Missing v0.3 foundations:
 
-- common path normalization/traversal;
-- structured directory entries;
-- rich metadata;
-- mkdir or truncate;
-- general filesystem driver lifecycle;
-- POSIX semantics.
+- common path normalization and traversal policy;
+- structured directory entries and metadata;
+- rich block-device identity/capacity/read-only/flush contract;
+- generic mkdir and truncate;
+- structured stat, readdir, and filesystem-info ABI;
+- complete filesystem driver lifecycle.
 
-## Filesystems and storage
+## Storage and filesystems
 
 ### bootfs
 
-Shipping KLI1 application images are embedded in the kernel and exposed at
+Shipping KLI1 images are embedded in the kernel and exposed under
 `/armonios/<name>`.
 
 ### tmpfs
 
-A small fixed in-memory filesystem supports simple VFS and test workflows.
+A small fixed in-memory filesystem supports tests and temporary workflows.
 
-### FAT32 bridge
+### FAT32 compatibility bridge
 
 The current writable FAT path supports:
 
 - 512-byte sectors;
-- one FAT32 volume;
+- primary-MBR FAT32 discovery for QEMU images;
+- one mounted FAT32 volume;
 - root-directory short 8.3 names;
-- list/open/create/read/write/rename/delete;
+- list, open, create, read, write, rename, and delete;
 - cluster-chain growth;
-- dynamic `/fat/<name>` nodes;
+- dynamic `/fat/<name>` VFS nodes;
 - dynamic-node invalidation after rename/delete.
 
 It does not support long names, subdirectories, FAT12/16, GPT, extended
-partitions, journaling, crash recovery, or broad interoperability testing.
+partitions, journaling, crash recovery, or broad interoperability.
 
-A reusable primary-MBR FAT32 parser and bounded block view exist. The RPi4
-read-only diagnostic path uses those components without exposing normal writable
-hardware storage.
-
-The QEMU path is verified through storage smoke and visible-target wiring tests.
-The latest visible create/edit/save/rename/reopen/delete evidence is dated
-2026-07-17.
+Reusable MBR parsing and bounded block views are shared with the opt-in Raspberry
+Pi read-only diagnostic path. Normal Raspberry Pi storage remains unavailable.
 
 ### ext2
 
-No ext2 implementation currently exists.
+No ext2 implementation exists.
 
 ## GUI architecture
 
 The GUI is a kernel compositor/window manager rather than a userland display
 server.
 
-Responsibilities are separated into:
+Main responsibilities:
 
-- `gui_events`: 32-entry per-window queues;
-- `gui_cursor`: cursor shape, buttons, and drag state;
-- `gui_input`: hit testing and event routing;
-- `gui_backing`: lazily allocated content buffers;
-- `gui_pool`: 16-window lifecycle, ownership, lookup, z-order, and focus;
-- `gui_compositor`: damage tracking and rendering.
+| Component | Responsibility |
+|---|---|
+| `gui_pool` | Fixed 16-window lifecycle, ownership, lookup, z-order, focus |
+| `gui_events` | 32-entry per-window event queues |
+| `gui_cursor` | Cursor shape, buttons, drag state |
+| `gui_input` | Hit testing and event routing |
+| `gui_backing` | Lazily allocated content buffers |
+| `gui_damage` | Ordered damage-list management |
+| `gui_compositor` | Partial/full rendering and board submission |
 
-Windows carry owner PID. Most mutating syscalls require ownership. Panel-facing
-focus, restore, lookup, and state calls are intentionally cross-process.
+Windows carry owner PIDs. Most mutations require ownership. Panel-facing focus,
+restore, lookup, and state operations are intentionally cross-process.
 
-Applications draw into backing buffers and flush damage rectangles. When damage
-tracking fills, the compositor may collapse work to a full redraw.
+Applications draw into backing buffers and submit damage. Partial redraw consumes
+at most eight ordered rectangles after a successful board submission. Failed
+submissions preserve all damage. Damage-list overflow may collapse to one full
+redraw, which remains one non-preemptible operation.
 
-Timer-originated input routing and redraw now run through the deferred runtime
-bottom half. Redraw cost is not yet budgeted.
-
-There is no shared userland widget toolkit. Each application currently implements
-its own layout and interaction state.
+No shared userland widget toolkit exists; applications currently implement their
+own layout and interaction state.
 
 ## Input architecture
 
-One shared 64-event producer queue receives events from:
+One shared 64-event queue receives events from:
 
 - UART/ANSI keyboard translation;
 - virtio-input;
-- directly attached USB boot-protocol keyboard and mouse devices.
+- directly attached xHCI boot-protocol keyboard and mouse devices.
 
-The runtime service currently drains all available producer events and routes
-them to the GUI. Queue overflow/fairness and per-pass limits require stronger
-instrumentation.
+Producer work and shared consumption run through the runtime service. Producer,
+consumer, device-visit, queue-pressure, and overflow metrics are explicit.
+Overflow is counted but not prevented.
 
-USB support is a basic QEMU xHCI path. Hubs and general USB class support are not
-claimed.
+USB support is intentionally narrow: four direct HID slots, no hubs, and no
+general USB class framework.
 
 ## Networking
 
-The direct virtio-net stack contains enough:
+The direct virtio-net stack implements enough:
 
 - Ethernet;
 - ARP;
@@ -374,96 +481,108 @@ The direct virtio-net stack contains enough:
 - UDP;
 - DHCP
 
-to obtain a QEMU user-network lease.
+to acquire a QEMU user-network lease.
 
-There is no application socket ABI, TCP, general UDP API, DNS query interface, or
-HTTP client. Network polling currently contributes to the unbounded runtime-pass
-risk.
+There is no application socket ABI, TCP, DNS interface, HTTP client, or general
+user UDP API.
 
-## Board boundary
+Valid RX consumption is bounded and strictly routed through NETWORK phase. The
+current device interface does not expose trustworthy dropped/overwritten frame
+counters. Software consumption metrics therefore do not prove loss-free delivery.
 
-Generic kernel code uses `drivers/board.h`. Board-specific addresses, interrupt
-controller details, capability reporting, and device initialization live under
-`drivers/boards/<board>/`.
+## Board abstraction
 
-QEMU is the reference backend and implements the verified display, input,
-storage, and network paths.
+Generic kernel code uses `drivers/board.h`. Board-specific physical addresses,
+interrupt-controller behavior, capabilities, and device initialization belong
+under `drivers/boards/<board>/`.
+
+### QEMU `virt`
+
+The reference backend implements the verified display, input, storage, network,
+timer, and interrupt paths.
+
+### Raspberry Pi 4
 
 The RPi4 backend:
 
-- satisfies the build contract;
-- exposes safe failure for unsupported display/input;
-- contains SDHCI, mailbox clock, telemetry, MBR, block-view, and read-only probe
+- satisfies the cross-build contract;
+- fails unsupported normal display/input/storage capabilities closed;
+- contains EMMC2, mailbox-clock, telemetry, MBR, block-view, and read-only probe
   scaffolding;
-- advertises no normal capabilities requiring unproven hardware behavior.
+- has no promoted physical runtime evidence.
 
-No physical Raspberry Pi runtime claim is valid until `RISK-007` exit criteria
-are met.
+No physical support claim is valid until `RISK-007` exit criteria are met.
 
 ## Userland and KLI1
 
 Applications link against:
 
-- `programs/libkarm`: startup, syscall trampolines, I/O, strings, and small
-  helpers;
+- `programs/libkarm`: startup, syscall trampolines, I/O, strings, and small helpers;
 - `programs/libkarmdesk`: typed GUI wrappers.
 
 Shipping applications:
 
-- `panel`;
-- `shell`;
-- `editor`;
-- `files`;
-- `monitor`;
-- `control`;
-- `clock`.
+- Panel;
+- Shell;
+- Editor;
+- Files;
+- Monitor;
+- Control;
+- Clock.
 
-KLI1 is a flat image with fixed header and entry offsets. Shipping images may
-contain header, text, and rodata, but mutable `.data` and `.bss` are forbidden by
-linker assertions and regression tests. Large mutable application state uses
-`SYS_MMAP`.
+KLI1 is a flat image with a fixed header and entry offsets. Shipping images may
+contain header, text, and rodata. Mutable static `.data` and `.bss` are forbidden
+by linker assertions and regression tests. Large mutable state uses `SYS_MMAP`.
 
 The applications demonstrate process, GUI, storage, and syscall behavior but are
-not yet complete daily tools. See `CURRENT_STATE.md` for exact limits.
+not yet complete daily tools.
 
-## Testing architecture
+## Verification architecture
 
-Evidence is divided into distinct classes:
+Evidence classes remain separate:
 
 - static inspection;
 - native host tests;
-- build/link verification;
-- deterministic QEMU serial-marker tests;
-- visible manual QEMU use;
+- build/link/size/stack checks;
+- deterministic QEMU serial assertions;
+- QEMU stress tests;
+- visible manual QEMU workflows;
 - physical hardware evidence.
 
-Host tests validate pure-C contracts and mocked driver paths, but cannot prove
-real MMIO or complete exception-return timing.
+Host tests prove pure-C or mocked contracts, not MMIO or complete exception timing.
+A successful build proves compatibility, not boot. A serial marker proves the
+asserted guest state, not visible usability.
 
-Deterministic QEMU tests cover:
+`bash tools/verify.sh` is the full automated promotion gate. It covers the normal
+build, size and `.data`, RPi4 build/diagnostic contracts, host suites, runtime
+contracts, storage smoke, user-copy/focus, device markers, both runtime stress
+modes, and visible-target FAT + GPU wiring.
 
-- FAT storage smoke;
-- invalid user-copy rejection;
-- focus transitions;
-- framebuffer/window readiness;
-- USB initialization and two HID devices;
-- DHCP lease;
-- FAT + display + panel wiring.
+`make qemu-fb-visible` is a separate manual evidence path.
 
-The runtime-service host gate covers coalescing, requeue preservation, mocked EOI
-ordering, and a static timer-source boundary. It does not prove latency or
-fairness under load.
+## Architectural invariants
 
-`bash tools/verify.sh` is the full promotion gate.
+- Keep the hard timer callback fixed and bounded.
+- Keep post-EOI work count- and time-bounded at documented checkpoints.
+- Preserve continuation in native queues/rings/lists.
+- Preserve strict NETWORK-phase routing.
+- Preserve page, table, descriptor, window, mapping, and process ownership.
+- Keep generic VFS free of FAT-specific policy.
+- Keep board addresses and behavior behind the board boundary.
+- Preserve `.data == 0`, W^X, the production size ceiling, KLI1, and stack gates.
+- Append public ABI; do not silently rewrite it.
+- Do not upgrade QEMU evidence into hardware evidence.
 
 ## Near-term design direction
 
-1. Instrument and bound the deferred runtime service.
-2. Record formal v0.2 promotion evidence.
-3. Build the v0.3 block-device, path, mount, and structured filesystem platform.
-4. Replace the root-only bridge with real FAT long-name/directory support.
-5. Add a shared userland runtime and widgets.
-6. Make the seven applications support the v1 workflow.
-7. Add ext2 read-only support.
-8. Harden address spaces, user copy, and hardware ports without overstating
-   evidence.
+1. Complete or disposition issue #63 / `RISK-018`.
+2. Record the final v0.2 visible workflow and residual-risk decisions.
+3. Promote and tag v0.2 with exact automated and manual evidence.
+4. Build v0.3 as staged block-descriptor, path-normalizer, mount-resolver, and
+   structured-metadata cuts.
+5. Replace the root-only compatibility bridge with real FAT names/directories.
+6. Add a shared userland runtime and widget layer.
+7. Complete the seven applications around the v1 workflow.
+8. Add ext2 read-only support.
+9. Harden address spaces, user-copy faults, and physical-board ports without
+   overstating evidence.
