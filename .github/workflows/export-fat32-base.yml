@@ -1,9 +1,7 @@
 name: Export FAT32 base
 
 on:
-  push:
-    branches:
-      - internal/export-fat32-base
+  pull_request:
 
 permissions:
   contents: read
