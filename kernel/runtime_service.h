@@ -71,6 +71,12 @@ void runtime_service_report_input_queue(uint32_t depth, uint32_t high_water,
                                         uint64_t overflow_count);
 void runtime_service_get_stats(runtime_service_stats_t *stats);
 
+/*
+ * Safe-boundary deadline check. Outside an active pass it always succeeds.
+ * On expiry it counts the deadline once and republishes the supplied work.
+ */
+int runtime_service_continue(uint32_t work);
+
 /* Wrappers used by kernel orchestration and deterministic host tests. */
 int runtime_service_input_poll(struct input_event *event);
 void runtime_service_net_poll(void);
