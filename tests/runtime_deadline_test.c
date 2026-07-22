@@ -123,7 +123,8 @@ static void periodic_expiry_defers_later_network(void) {
     assert(g_periodic_calls == 1U);
     assert(g_render_calls == 0U);
     assert(g_network_calls == 0U);
-    assert(stats.pending_work == RUNTIME_WORK_ALL);
+    assert(stats.pending_work ==
+           (RUNTIME_WORK_PERIODIC | RUNTIME_WORK_NETWORK));
     assert(stats.over_budget_count == 1U);
     assert(stats.requeue_count == 1U);
     assert(stats.last_duration_ticks == 12U);
@@ -152,19 +153,19 @@ static void network_loop_stops_at_deadline(void) {
     assert(g_counter_index == g_counter_count);
 }
 
-static void completed_operation_overrun_is_counted(void) {
-    static const uint64_t values[] = {100U, 115U};
+static void completed_operation_overrun_is_rechecked(void) {
+    static const uint64_t values[] = {100U, 111U, 115U};
     runtime_service_stats_t stats;
 
-    prepare(values, 2U);
+    prepare(values, 3U);
     runtime_service_request(RUNTIME_WORK_PERIODIC);
     assert(runtime_service_run_pending() == RUNTIME_WORK_PERIODIC);
     stats = snapshot();
 
     assert(g_periodic_calls == 1U);
-    assert(stats.pending_work == 0U);
+    assert(stats.pending_work == RUNTIME_WORK_PERIODIC);
     assert(stats.over_budget_count == 1U);
-    assert(stats.requeue_count == 0U);
+    assert(stats.requeue_count == 1U);
     assert(stats.last_duration_ticks == 15U);
     assert(g_counter_index == g_counter_count);
 }
@@ -172,7 +173,7 @@ static void completed_operation_overrun_is_counted(void) {
 int main(void) {
     periodic_expiry_defers_later_network();
     network_loop_stops_at_deadline();
-    completed_operation_overrun_is_counted();
+    completed_operation_overrun_is_rechecked();
     puts("deferred runtime service global deadline: ok");
     return 0;
 }
