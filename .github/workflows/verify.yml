@@ -62,6 +62,9 @@ jobs:
       - name: Run native host tests
         run: make -C tests test
 
+      - name: Test libarmdesk foundation
+        run: bash tests/run_libarmdesk_foundation_test.sh
+
       - name: Test deferred runtime service
         run: |
           set -o pipefail
