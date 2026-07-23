@@ -12,7 +12,7 @@ mkdir -p "$BUILD_DIR"
 
 "$CC" \
     -std=c11 -O0 -g -Wall -Wextra -Werror -DARMONIOS_TEST \
-    -I"$ROOT_DIR" \
+    -I"$ROOT_DIR" -I"$ROOT_DIR/drivers" \
     "$ROOT_DIR/kernel/fat32.c" \
     "$ROOT_DIR/kernel/kstring.c" \
     "$ROOT_DIR/tests/test_fat32_corruption_standalone.c" \
