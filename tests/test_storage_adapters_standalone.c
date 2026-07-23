@@ -87,10 +87,10 @@ static void set_csd_bits(uint32_t response[4], uint32_t start,
 
 static void normalized_csd_to_raw(const uint32_t response[4],
                                   uint32_t raw[4]) {
-    raw[0] = response[3] >> 8U;
-    raw[1] = (response[2] >> 8U) | (response[3] << 24U);
-    raw[2] = (response[1] >> 8U) | (response[2] << 24U);
-    raw[3] = (response[0] >> 8U) | (response[1] << 24U);
+    raw[0] = (response[2] << 24U) | (response[3] >> 8U);
+    raw[1] = (response[1] << 24U) | (response[2] >> 8U);
+    raw[2] = (response[0] << 24U) | (response[1] >> 8U);
+    raw[3] = response[0] >> 8U;
 }
 
 static void build_high_capacity_csd(uint32_t raw[4], uint32_t c_size) {
