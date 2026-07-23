@@ -3,13 +3,13 @@
 // Creates a window that displays the current uptime as HH:MM:SS, reads
 // timer ticks via SYS_TIMEINFO, and redraws once per second using a
 // yield-based delay. 'q' closes the app; a click on the kernel-drawn
-// close box fires GUI_EVENT_CLOSE and exits cleanly. Runtime buffers live in
-// anonymous user memory so the app does not park event arrays at the top edge
-// of the fixed 4 KB EL0 stack.
+// close box fires GUI_EVENT_CLOSE and exits cleanly. Runtime state lives in
+// one libkarm arena backed by a single anonymous mapping.
 
 #include <stdint.h>
 
 #include "libarmdesk/gui.h"
+#include "libkarm/arena.h"
 #include "libkarm/syscall.h"
 
 #define WIN_W            200
@@ -17,6 +17,7 @@
 #define TITLE_BAR_H       16
 #define EVENT_CAP          4
 #define YIELDS_PER_SEC   200
+#define CLOCK_ARENA_SIZE 4096U
 
 typedef struct {
     long wid;
@@ -25,14 +26,6 @@ typedef struct {
     char text[9];
     gui_event_t events[EVENT_CAP];
 } clock_state_t;
-
-static void zero_clock_state(clock_state_t *state) {
-    uint8_t *bytes = (uint8_t *)(uintptr_t)state;
-
-    for (uint32_t i = 0; i < sizeof(*state); i++) {
-        bytes[i] = 0;
-    }
-}
 
 static void format_hhmmss(uint64_t ticks, char *out) {
     // 100 Hz timer: seconds = ticks / 100.
@@ -64,23 +57,38 @@ static void redraw(clock_state_t *state) {
     (void)gui_window_flush(state->wid, 0, 0, WIN_W, WIN_H - TITLE_BAR_H);
 }
 
+static int close_clock(kli_arena_t *arena, clock_state_t *state) {
+    (void)gui_window_destroy(state->wid);
+    (void)kli_arena_destroy(arena);
+    return 0;
+}
+
 int main(int argc, char **argv) {
+    kli_arena_t arena;
+    clock_state_t *state;
+
     (void)argc;
     (void)argv;
 
     kli_write_cstr(ARM_FD_STDOUT, "clock: starting\n");
 
-    long state_addr = kli_mmap(0, sizeof(clock_state_t), 0);
-    if (state_addr < 0) {
-        kli_write_cstr(ARM_FD_STDOUT, "clock: state mmap failed\n");
+    if (kli_arena_init(&arena, CLOCK_ARENA_SIZE) < 0) {
+        kli_write_cstr(ARM_FD_STDOUT, "clock: arena mmap failed\n");
         return 1;
     }
-    clock_state_t *state = (clock_state_t *)(uintptr_t)state_addr;
-    zero_clock_state(state);
+
+    state = (clock_state_t *)kli_arena_alloc_zero(&arena, sizeof(*state));
+    if (state == 0) {
+        kli_write_cstr(ARM_FD_STDOUT, "clock: arena allocation failed\n");
+        (void)kli_arena_destroy(&arena);
+        return 1;
+    }
+
     state->wid = gui_window_create(440, 64, WIN_W, WIN_H,
                                    0xff202830LL, 0xff808080LL, "clock");
     if (state->wid < 0) {
         kli_write_cstr(ARM_FD_STDOUT, "clock: window create failed\n");
+        (void)kli_arena_destroy(&arena);
         return 1;
     }
     (void)gui_window_set_title(state->wid, "clock", TITLE_BAR_H);
@@ -94,14 +102,12 @@ int main(int argc, char **argv) {
         if (n > 0) {
             for (long i = 0; i < n; i++) {
                 if (state->events[i].type == GUI_EVENT_CLOSE) {
-                    (void)gui_window_destroy(state->wid);
-                    return 0;
+                    return close_clock(&arena, state);
                 }
                 if (state->events[i].type == GUI_EVENT_KEY_PRESS &&
                     (state->events[i].data1 == 'q' ||
                      state->events[i].data1 == 'Q')) {
-                    (void)gui_window_destroy(state->wid);
-                    return 0;
+                    return close_clock(&arena, state);
                 }
             }
         }
