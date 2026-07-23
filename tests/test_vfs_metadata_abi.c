@@ -113,7 +113,7 @@ int main(void) {
                  "file stat") ||
         !require(stat.type == ARM_FILE_TYPE_REGULAR, "regular type") ||
         !require(stat.size == 12, "regular size") ||
-        !require(stat.attributes == ARM_FILE_ATTRIBUTE_ARCHIVE,
+        !require(stat.attributes == ARM_FILE_ATTR_ARCHIVE,
                  "archive attribute")) {
         return 1;
     }
@@ -125,7 +125,7 @@ int main(void) {
                  "first name") ||
         !require(entries[0].type == ARM_FILE_TYPE_REGULAR &&
                      entries[0].size == 12 &&
-                     entries[0].attributes == ARM_FILE_ATTRIBUTE_ARCHIVE,
+                     entries[0].attributes == ARM_FILE_ATTR_ARCHIVE,
                  "first metadata") ||
         !require(strcmp(entries[1].name, "SUB") == 0,
                  "directory name without slash") ||
