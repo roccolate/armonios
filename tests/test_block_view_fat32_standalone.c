@@ -92,16 +92,6 @@ static int fake_flush(void *context) {
     return 0;
 }
 
-static int fat32_read_device_sector(void *context, uint32_t lba,
-                                    uint8_t *buffer) {
-    const block_device_t *device = (const block_device_t *)context;
-
-    if (device == 0 || device->block_size != FAT32_SECTOR_SIZE) {
-        return -1;
-    }
-    return block_device_read(device, lba, 1U, buffer);
-}
-
 static void build_fat32_boot_sector(uint8_t *sector) {
     memset(sector, 0, FAT32_SECTOR_SIZE);
     put_le16(&sector[11], FAT32_SECTOR_SIZE);
@@ -153,8 +143,7 @@ int main(void) {
     ASSERT_EQ_U32(8U, fat_device->block_count);
     ASSERT_EQ_U32(FAT32_SECTOR_SIZE, fat_device->block_size);
 
-    ASSERT_EQ_U32(0U, fat32_mount(&fs, fat32_read_device_sector,
-                                  (void *)fat_device));
+    ASSERT_EQ_U32(0U, fat32_mount_device(&fs, fat_device));
     ASSERT_TRUE(fs.mounted != 0U);
     ASSERT_EQ_U32(8U, disk.last_lba);
 
@@ -166,7 +155,7 @@ int main(void) {
     ASSERT_TRUE(block_device_read(fat_device, 8U, 1U, sector) != 0);
     ASSERT_EQ_U32(reads_before, disk.read_count);
     ASSERT_TRUE(block_device_write(fat_device, 0U, 1U, sector) != 0);
-    ASSERT_EQ_U32(0U, block_device_flush(fat_device));
+    ASSERT_EQ_U32(0U, fat32_flush(&fs));
     ASSERT_EQ_U32(1U, disk.flush_count);
 
     ASSERT_EQ_U32(0U, block_device_view_init(&writable_view, &parent,
