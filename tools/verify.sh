@@ -36,6 +36,7 @@ run_gate process-parent-wait bash tests/run_process_parent_wait_test.sh
 run_gate process-fd-isolation bash tests/run_vfs_process_fd_test.sh
 run_gate usercopy-host bash tests/run_user_copy_permissions_test.sh
 run_gate kli1-contract bash tests/run_kli1_contract_test.sh
+run_gate vmm-soak-lifecycle-host bash tests/run_vmm_soak_lifecycle_test.sh
 run_gate stack-check make stack-check
 run_gate qemu-fs-test make qemu-fs-test
 run_gate qemu-fat32-vmm-soak bash tools/qemu_fat32_vmm_soak_test.sh
