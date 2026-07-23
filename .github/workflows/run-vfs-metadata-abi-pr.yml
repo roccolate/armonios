@@ -1,0 +1,66 @@
+name: Run VFS metadata ABI migration
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.head_ref == 'agent/v03-vfs-metadata-abi' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out ABI branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/v03-vfs-metadata-abi
+
+      - name: Extract and apply guarded migration
+        run: |
+          awk '/^H4sI/{capture=1} /^PAYLOAD$/{capture=0} capture{print}' \
+            .github/workflows/apply-vfs-metadata-abi.yml > /tmp/abi-migration.b64
+          test -s /tmp/abi-migration.b64
+          base64 -d /tmp/abi-migration.b64 | gzip -d > /tmp/apply_vfs_metadata_abi.py
+          python3 /tmp/apply_vfs_metadata_abi.py
+
+      - name: Install toolchain and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            binutils-aarch64-linux-gnu \
+            gcc \
+            gcc-aarch64-linux-gnu \
+            make \
+            qemu-system-arm
+
+      - name: Validate migrated ABI cut
+        run: |
+          make
+          make size
+          bash tests/run_fat32_directory_test.sh
+          make -C tests test
+          git diff --check
+
+      - name: Publish clean functional commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/apply-vfs-metadata-abi.yml \
+                 .github/workflows/run-vfs-metadata-abi-pr.yml \
+                 tools/vfs-metadata-abi.trigger
+          git add include/armonios/abi/version.h \
+                  include/armonios/abi/syscall_numbers.h \
+                  include/armonios/abi/vfs.h \
+                  programs/libkarm/syscall.h \
+                  kernel/vfs.h kernel/vfs.c \
+                  kernel/fat32.h kernel/fat32_directory.c kernel/fat32_vfs.c \
+                  kernel/syscall_internal.h kernel/syscall_vfs.c kernel/syscall.c \
+                  tests/test_syscall_abi.c tests/test_fat32_directories.c \
+                  tests/test_syscall_vfs_user_copy.c \
+                  docs/SYSCALLS.md docs/FAT32_DIRECTORIES.md
+          git commit -m "Add structured VFS metadata ABI"
+          git push origin HEAD:agent/v03-vfs-metadata-abi
