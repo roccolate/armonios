@@ -1,7 +1,18 @@
 # Structured VFS metadata ABI
 
-ArmoniOS ABI 1.1 adds structured file metadata without changing the frozen
-`SYS_STAT` and `SYS_READDIR` contracts.
+ArmoniOS remains on public ABI 1.0 until the first official release. This
+pre-release addition introduces structured file metadata without changing the
+frozen `SYS_STAT` and `SYS_READDIR` contracts.
+
+## Version policy
+
+The global ABI identifier stays at 1.0 during pre-release development. The
+first official release will establish the compatibility baseline; later
+additive public changes may advance the minor version intentionally.
+
+The `v2` suffix below identifies the successor metadata interfaces and payload
+layouts. It does not imply that the global ArmoniOS ABI has advanced to 1.1 or
+2.0.
 
 ## Compatibility
 
@@ -15,8 +26,7 @@ New applications may use:
 - `SYS_STAT_V2` (`49`)
 - `SYS_READDIR_V2` (`50`)
 
-A standalone user image that only knows ABI 1.0 continues to use the old
-numbers and layouts.
+Existing user images continue to use the old numbers and layouts unchanged.
 
 ## `arm_stat_v2_t`
 
