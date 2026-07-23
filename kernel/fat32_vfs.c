@@ -51,32 +51,55 @@ static fat32_fs_t *fat32_vfs_fs(void *context) {
     return fs != 0 && fs->mounted != 0 ? fs : 0;
 }
 
-static int fat32_vfs_root_name(const char *path, char *out,
-                               uint64_t out_size) {
-    const char *suffix = vfs_strip_prefix(path, FAT32_VFS_ROOT_PATH "/");
-    uint64_t i;
+static int fat32_vfs_relative_path(const char *path,
+                                   char out[VFS_MAX_PATH]) {
+    const char *suffix;
+    uint32_t i = 0;
 
-    if (suffix == 0 || out == 0 || out_size == 0) {
+    if (path == 0 || out == 0) {
         return -1;
     }
+    if (path[0] == '/' && path[1] == 'f' && path[2] == 'a' &&
+        path[3] == 't' && path[4] == '\0') {
+        out[0] = '\0';
+        return 0;
+    }
 
-    for (i = 0; i + 1U < out_size; i++) {
-        char c = suffix[i];
-
-        if (c == '\0') {
-            break;
-        }
-        if (c == '/') {
+    suffix = vfs_strip_prefix(path, FAT32_VFS_ROOT_PATH);
+    if (suffix == 0 || suffix[0] != '/' || suffix[1] == '\0') {
+        return -1;
+    }
+    suffix++;
+    while (suffix[i] != '\0') {
+        if (i + 1U >= VFS_MAX_PATH) {
             return -1;
         }
-        out[i] = c;
-    }
-
-    if (suffix[i] != '\0') {
-        return -1;
+        out[i] = suffix[i];
+        i++;
     }
     out[i] = '\0';
-    return i == 0 ? -1 : 0;
+    return 0;
+}
+
+static int fat32_vfs_root_name(const char *path, char *out,
+                               uint64_t out_size) {
+    char relative[VFS_MAX_PATH];
+    uint64_t i = 0;
+
+    if (out == 0 || out_size == 0 ||
+        fat32_vfs_relative_path(path, relative) != 0 || relative[0] == '\0') {
+        return -1;
+    }
+
+    while (relative[i] != '\0') {
+        if (relative[i] == '/' || i + 1U >= out_size) {
+            return -1;
+        }
+        out[i] = relative[i];
+        i++;
+    }
+    out[i] = '\0';
+    return 0;
 }
 
 static int fat32_vfs_read(void *context, uint64_t offset, uint8_t *buffer,
@@ -86,7 +109,6 @@ static int fat32_vfs_read(void *context, uint64_t offset, uint8_t *buffer,
     if (mounted == 0 || mounted->fs == 0) {
         return -1;
     }
-
     return fat32_read(mounted->fs, &mounted->file, offset, buffer, capacity,
                       bytes_read);
 }
@@ -99,7 +121,6 @@ static int fat32_vfs_write(void *context, uint64_t offset,
     if (mounted == 0 || mounted->fs == 0) {
         return -1;
     }
-
     return fat32_write(mounted->fs, &mounted->file, offset, buffer, size,
                        bytes_written);
 }
@@ -110,9 +131,36 @@ static int fat32_vfs_stat(void *context, vfs_stat_t *stat) {
     if (mounted == 0 || mounted->fs == 0 || stat == 0) {
         return -1;
     }
-
     stat->size = mounted->file.size;
     return 0;
+}
+
+static int fat32_vfs_stat_path(void *context, const char *path,
+                               vfs_stat_t *stat) {
+    char relative[VFS_MAX_PATH];
+    fat32_path_info_t info;
+    fat32_fs_t *fs = fat32_vfs_fs(context);
+
+    if (fs == 0 || stat == 0 ||
+        fat32_vfs_relative_path(path, relative) != 0 ||
+        fat32_lookup_path(fs, relative, &info) != 0) {
+        return -1;
+    }
+    stat->size = info.size;
+    return 0;
+}
+
+static int fat32_vfs_list_path(void *context, const char *path,
+                               uint64_t offset, uint8_t *buffer,
+                               uint64_t capacity, uint64_t *bytes_written) {
+    char relative[VFS_MAX_PATH];
+    fat32_fs_t *fs = fat32_vfs_fs(context);
+
+    if (fs == 0 || fat32_vfs_relative_path(path, relative) != 0) {
+        return -1;
+    }
+    return fat32_list_path_at(fs, relative, offset, buffer, capacity,
+                              bytes_written);
 }
 
 static int fat32_vfs_list_root(void *context, uint64_t offset,
@@ -123,36 +171,38 @@ static int fat32_vfs_list_root(void *context, uint64_t offset,
     if (fs == 0) {
         return -1;
     }
-    return fat32_list_root_at(fs, offset, buffer, capacity, bytes_written);
+    return fat32_list_path_at(fs, "", offset, buffer, capacity,
+                              bytes_written);
 }
 
 static int fat32_vfs_open_path(void *context, const char *path,
                                uint32_t flags) {
-    char name[VFS_MAX_PATH];
+    char relative[VFS_MAX_PATH];
+    char root_name[VFS_MAX_PATH];
     fat32_file_t file;
     fat32_fs_t *fs = fat32_vfs_fs(context);
 
-    if (fs == 0 ||
-        fat32_vfs_root_name(path, name, sizeof(name)) != 0) {
+    if (fs == 0 || fat32_vfs_relative_path(path, relative) != 0 ||
+        relative[0] == '\0') {
         return -1;
     }
 
-    if (fat32_open_root(fs, name, &file) != 0) {
+    if (fat32_open_path(fs, relative, &file) != 0) {
         if ((flags & VFS_O_CREAT) == 0 ||
-            fat32_create(fs, name, &file) != 0) {
+            fat32_vfs_root_name(path, root_name, sizeof(root_name)) != 0 ||
+            fat32_create(fs, root_name, &file) != 0) {
             return -1;
         }
     }
 
-    return fat32_mount_vfs_file(fs, path, name);
+    return fat32_mount_vfs_file(fs, path, relative);
 }
 
 static int fat32_vfs_unlink_path(void *context, const char *path) {
     char name[VFS_MAX_PATH];
     fat32_fs_t *fs = fat32_vfs_fs(context);
 
-    if (fs == 0 ||
-        fat32_vfs_root_name(path, name, sizeof(name)) != 0) {
+    if (fs == 0 || fat32_vfs_root_name(path, name, sizeof(name)) != 0) {
         return -1;
     }
     return fat32_delete(fs, name);
@@ -175,6 +225,8 @@ static int fat32_vfs_rename_path(void *context, const char *old_path,
 static const vfs_mount_ops_t g_fat32_vfs_ops = {
     .open = fat32_vfs_open_path,
     .list = fat32_vfs_list_root,
+    .stat_path = fat32_vfs_stat_path,
+    .list_path = fat32_vfs_list_path,
     .unlink = fat32_vfs_unlink_path,
     .rename = fat32_vfs_rename_path,
 };
@@ -186,7 +238,6 @@ void fat32_vfs_reset(void) {
     g_fat32_vfs_count = 0;
     g_fat32_vfs_mount.fs = 0;
 
-    /* FAT32 owns the current /fat policy; the generic VFS does not. */
     g_fat32_vfs_registered =
         vfs_mount(FAT32_VFS_ROOT_PATH, &g_fat32_vfs_ops,
                   &g_fat32_vfs_mount) == 0;
@@ -214,7 +265,7 @@ int fat32_mount_vfs_file(fat32_fs_t *fs, const char *path,
     }
 
     clear_vfs_slot(index);
-    if (fat32_open_root(fs, name, &g_fat32_vfs_files[index].file) != 0) {
+    if (fat32_open_path(fs, name, &g_fat32_vfs_files[index].file) != 0) {
         return -1;
     }
 
