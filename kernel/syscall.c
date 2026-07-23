@@ -1,11 +1,4 @@
-/*
- * EL0 syscall dispatcher.
- *
- * Syscall numbers and argument registers are ABI. Domain-specific syscall
- * bodies live in syscall_*.c; this file stays at the trap boundary: pump
- * asynchronous work, save the current context, dispatch, and write back x0.
- */
-
+/* EL0 syscall dispatcher. */
 #include "kernel/syscall.h"
 
 #include <stdint.h>
@@ -79,6 +72,10 @@ static uint64_t syscall_call(process_t *current, const uint64_t x[31]) {
         return (uint64_t)sys_unlink(current, x[0]);
     case SYS_RENAME:
         return (uint64_t)sys_rename(current, x[0], x[1]);
+    case SYS_STAT_V2:
+        return (uint64_t)sys_stat_v2(current, x[0], x[1]);
+    case SYS_READDIR_V2:
+        return (uint64_t)sys_readdir_v2(current, x[0], x[1], x[2], x[3]);
     case SYS_IPC_SEND:
         return (uint64_t)sys_ipc_send(current, x[0], x[1], x[2]);
     case SYS_IPC_RECV:
