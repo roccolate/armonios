@@ -41,6 +41,8 @@ The static archive contains reusable runtime members:
 syscall.o
 io.o
 string.o
+arena.o
+arena_map.o
 ```
 
 Applications link against the archive instead of selecting those objects by
@@ -49,7 +51,45 @@ existing `-ffunction-sections`, `-fdata-sections`, and `--gc-sections` settings
 remove unused sections from extracted members.
 
 This replaces the old per-application `APP_LIBS_*` lists without forcing every
-application to carry all string or I/O helpers.
+application to carry all runtime helpers.
+
+## Arena allocator
+
+The first dynamic-memory primitive is an explicit monotonic arena:
+
+```c
+kli_arena_t arena;
+
+if (kli_arena_map(&arena, 64 * 1024) < 0) {
+    return 1;
+}
+
+void *tokens = kli_arena_alloc(&arena, token_bytes);
+void *nodes = kli_arena_alloc_aligned(&arena, node_bytes, 16);
+
+kli_arena_reset(&arena);
+(void)kli_arena_destroy(&arena);
+```
+
+The design is intentionally small:
+
+- no global allocator state;
+- one `SYS_MMAP` region can serve many small allocations;
+- allocations are overflow checked;
+- custom alignment must be a power of two;
+- failed allocations do not consume capacity;
+- `reset` releases all allocations logically in constant time;
+- `destroy` uses the same requested mapping size with `SYS_MUNMAP`;
+- failed unmap preserves the arena state so callers can retry or diagnose it.
+
+`kli_arena_init` can also place an arena over caller-provided storage. The pure
+allocation core therefore has focused host tests independent from the syscall
+layer. `arena_map.c` is tested with syscall stubs for mmap/unmap lifecycle and
+error propagation.
+
+An arena is not a general-purpose heap. Individual objects cannot be freed and
+a caller must destroy an existing mapped arena before mapping another region
+into the same `kli_arena_t`.
 
 ## In-tree application link
 
@@ -93,6 +133,8 @@ the supported application linker script.
   lists.
 - Runtime modules should use function/data sections so unused code remains
   removable.
+- Runtime objects must not introduce hidden mutable globals while KLI1 forbids
+  mutable `.data` and `.bss` in shipping applications.
 - A change to startup calling convention, argument construction, or process
   exit behavior is an ABI-sensitive change and requires dedicated tests and
   documentation.
@@ -100,6 +142,6 @@ the supported application linker script.
 ## Current limitations
 
 `libkarm` is not yet a complete libc. It currently provides syscall wrappers,
-minimal output, memory/string helpers, and integer conversion. Heap allocation,
-dynamic strings, buffers, formatted output, and higher-level file helpers are
-future runtime cuts built on top of this archive foundation.
+minimal output, memory/string helpers, integer conversion, and monotonic arenas.
+A reusable free-list heap, dynamic strings, buffers, formatted output, and
+higher-level file helpers are future runtime cuts built on this foundation.
