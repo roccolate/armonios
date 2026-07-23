@@ -29,7 +29,8 @@ SRCS=unity/unity.c main.c \
      test_panel_boot_recovery.c \
      test_irq.c test_sched.c test_vfs.c test_vfs_mount_dispatch.c \
      test_vfs_fat32_invalidation.c test_fat32_vfs_registration.c \
-     test_tmpfs.c test_fat32.c test_dhcp_options.c \
+     test_tmpfs.c test_fat32.c test_fat32_directories.c \
+     test_dhcp_options.c \
      test_ipc.c test_font.c \
      test_gui.c test_fb.c test_dtb.c test_virtio_blk.c test_virtio_net.c \
      test_input.c test_virtio_input.c \
