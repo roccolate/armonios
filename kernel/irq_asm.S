@@ -72,3 +72,25 @@ irq_disable:
     add w2, w2, #1
     str w2, [x1]
     ret
+
+/*
+ * The vector always saves a complete exception_frame_t, but only an IRQ that
+ * interrupted EL0 owns a schedulable user trap frame. An IRQ taken while EL1
+ * is executing a syscall or another kernel path must service the device and
+ * return to that exact kernel context; passing its frame to irq_handler_frame
+ * would let process preemption overwrite EL1 registers and switch TTBR0.
+ *
+ * x0: exception_frame_t * captured by exception_vectors.S
+ */
+.global irq_handler_frame_from_vector
+.type irq_handler_frame_from_vector, %function
+
+irq_handler_frame_from_vector:
+    cbz x0, .Lirq_origin_dispatch
+    ldr x1, [x0, #256]
+    and x1, x1, #0x0f
+    cbz x1, .Lirq_origin_dispatch
+    mov x0, xzr
+
+.Lirq_origin_dispatch:
+    b irq_handler_frame
