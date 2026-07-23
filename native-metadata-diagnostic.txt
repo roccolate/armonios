@@ -1,1 +1,5 @@
-tests/run_fat32_directory_test.sh: line 23:  2891 Illegal instruction     (core dumped) "$BINARY"
+ASSERT_LINE=193
+tests/run_fat32_directory_test.sh: line 23:  2924 Illegal instruction     (core dumped) "$BINARY"
+
+original gate:
+tests/run_fat32_directory_test.sh: line 23:  2888 Illegal instruction     (core dumped) "$BINARY"
