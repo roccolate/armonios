@@ -29,7 +29,8 @@ SRCS=unity/unity.c main.c \
      test_panel_boot_recovery.c \
      test_irq.c test_sched.c test_vfs.c test_vfs_mount_dispatch.c \
      test_vfs_fat32_invalidation.c test_fat32_vfs_registration.c \
-     test_tmpfs.c test_fat32.c test_dhcp_options.c \
+     test_tmpfs.c test_fat32.c test_fat32_directories.c \
+     test_dhcp_options.c \
      test_ipc.c test_font.c \
      test_gui.c test_fb.c test_dtb.c test_virtio_blk.c test_virtio_net.c \
      test_input.c test_virtio_input.c \
@@ -41,7 +42,8 @@ SRCS=unity/unity.c main.c \
      ../kernel/mm/pmm.c ../kernel/mm/kheap.c ../kernel/mm/vmm.c \
      ../kernel/boot_program.c ../kernel/bootfs.c \
      ../kernel/panel_boot_argv.c ../kernel/panel_boot_recovery.c \
-     ../kernel/fat32.c ../kernel/fat32_vfs.c ../kernel/net/dhcp_options.c \
+     ../kernel/fat32.c ../kernel/fat32_directory.c ../kernel/fat32_vfs.c \
+     ../kernel/net/dhcp_options.c \
      ../kernel/font.c ../kernel/gui_backing.c \
      ../kernel/gui_cursor.c ../kernel/gui_damage.c \
      ../kernel/gui_events.c ../kernel/gui_input.c ../kernel/gui_pool.c \

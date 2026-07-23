@@ -52,12 +52,18 @@ typedef struct {
 } vfs_node_t;
 
 /*
- * A mount owns operations for paths directly below one absolute prefix.
- * Filesystem adapters may materialize a file as a normal VFS node from open().
- * The VFS selects the mount; it never knows which filesystem implements it.
+ * A mount owns operations below one absolute prefix. Path-aware callbacks
+ * receive the canonical absolute path selected by the VFS. The legacy `list`
+ * callback remains for mounts that only expose their exact root.
  */
 typedef int (*vfs_mount_open_fn_t)(void *context, const char *path,
                                    uint32_t flags);
+typedef int (*vfs_mount_stat_path_fn_t)(void *context, const char *path,
+                                        vfs_stat_t *stat);
+typedef int (*vfs_mount_list_path_fn_t)(void *context, const char *path,
+                                        uint64_t offset, uint8_t *buffer,
+                                        uint64_t capacity,
+                                        uint64_t *bytes_written);
 typedef int (*vfs_mount_unlink_fn_t)(void *context, const char *path);
 typedef int (*vfs_mount_rename_fn_t)(void *context, const char *old_path,
                                      const char *new_path);
@@ -65,6 +71,8 @@ typedef int (*vfs_mount_rename_fn_t)(void *context, const char *old_path,
 typedef struct {
     vfs_mount_open_fn_t open;
     vfs_list_fn_t list;
+    vfs_mount_stat_path_fn_t stat_path;
+    vfs_mount_list_path_fn_t list_path;
     vfs_mount_unlink_fn_t unlink;
     vfs_mount_rename_fn_t rename;
 } vfs_mount_ops_t;

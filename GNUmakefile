@@ -12,7 +12,8 @@ include Makefile
 
 STORAGE_FOUNDATION_OBJS := \
     $(BUILD_DIR)/drivers/storage/block_device.o \
-    $(BUILD_DIR)/kernel/fat32_device.o
+    $(BUILD_DIR)/kernel/fat32_device.o \
+    $(BUILD_DIR)/kernel/fat32_directory.o
 
 # RPi4 diagnostic builds already add mbr.o through STORAGE_DEV. Every other
 # production build now needs it because kernel storage can open bounded MBR
