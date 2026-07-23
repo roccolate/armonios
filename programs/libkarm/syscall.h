@@ -2,7 +2,7 @@
 //
 // Typed C wrappers for every ArmoniOS syscall that is part of the
 // stable process / memory / I/O / IPC / system-info surface (numbers
-// 1..8, 20..21, 40..48, 60..61, 100..102). Each wrapper takes the
+// 1..8, 20..21, 40..50, 60..61, 100..102). Each wrapper takes the
 // syscall number from the public ArmoniOS ABI header and dispatches
 // through the raw trampolines in syscall.S.
 //
@@ -120,6 +120,24 @@ static inline long kli_stat(const char *path, void *stat_ptr) {
 static inline long kli_readdir(const char *path, void *buf, size_t len) {
     return __syscall3(SYS_READDIR, (long)(uintptr_t)path,
                       (long)(uintptr_t)buf, (long)len);
+}
+
+/*
+ * Structured metadata calls. Before kli_stat_v2, initialize version and
+ * struct_size with ARM_VFS_METADATA_VERSION and sizeof(*stat_ptr).
+ * kli_readdir_v2 returns the number of complete entries copied.
+ */
+static inline long kli_stat_v2(const char *path, arm_stat_v2_t *stat_ptr) {
+    return __syscall2(SYS_STAT_V2, (long)(uintptr_t)path,
+                      (long)(uintptr_t)stat_ptr);
+}
+
+static inline long kli_readdir_v2(const char *path, uint64_t start_index,
+                                  arm_dirent_v2_t *entries,
+                                  size_t max_entries) {
+    return __syscall4(SYS_READDIR_V2, (long)(uintptr_t)path,
+                      (long)start_index, (long)(uintptr_t)entries,
+                      (long)max_entries);
 }
 
 static inline long kli_unlink(const char *path_ptr) {

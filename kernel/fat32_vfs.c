@@ -150,6 +150,92 @@ static int fat32_vfs_stat_path(void *context, const char *path,
     return 0;
 }
 
+
+static uint32_t fat32_vfs_attributes(uint8_t attributes) {
+    uint32_t value = 0;
+
+    if ((attributes & FAT32_ATTR_READ_ONLY) != 0U) {
+        value |= VFS_ATTRIBUTE_READ_ONLY;
+    }
+    if ((attributes & FAT32_ATTR_HIDDEN) != 0U) {
+        value |= VFS_ATTRIBUTE_HIDDEN;
+    }
+    if ((attributes & FAT32_ATTR_SYSTEM) != 0U) {
+        value |= VFS_ATTRIBUTE_SYSTEM;
+    }
+    if ((attributes & FAT32_ATTR_ARCHIVE) != 0U) {
+        value |= VFS_ATTRIBUTE_ARCHIVE;
+    }
+    return value;
+}
+
+static int fat32_vfs_metadata_path(void *context, const char *path,
+                                   vfs_metadata_t *metadata) {
+    char relative[VFS_MAX_PATH];
+    fat32_path_info_t info;
+    fat32_fs_t *fs = fat32_vfs_fs(context);
+
+    if (fs == 0 || metadata == 0 ||
+        fat32_vfs_relative_path(path, relative) != 0 ||
+        fat32_lookup_path(fs, relative, &info) != 0) {
+        return -1;
+    }
+    metadata->size = info.size;
+    metadata->type = (info.attributes & FAT32_ATTR_DIRECTORY) != 0U
+                         ? VFS_FILE_TYPE_DIRECTORY
+                         : VFS_FILE_TYPE_REGULAR;
+    metadata->attributes = fat32_vfs_attributes(info.attributes);
+    return 0;
+}
+
+static int fat32_vfs_readdir_path(void *context, const char *path,
+                                  uint64_t start_index,
+                                  vfs_dirent_t *entries,
+                                  uint64_t max_entries,
+                                  uint64_t *entries_written) {
+    char relative[VFS_MAX_PATH];
+    fat32_dirent_t native[VFS_READDIR_MAX_ENTRIES];
+    fat32_fs_t *fs = fat32_vfs_fs(context);
+    uint64_t written = 0;
+
+    if (entries_written != 0) {
+        *entries_written = 0;
+    }
+    if (fs == 0 || entries == 0 || entries_written == 0 ||
+        max_entries == 0 || max_entries > VFS_READDIR_MAX_ENTRIES ||
+        fat32_vfs_relative_path(path, relative) != 0 ||
+        fat32_readdir_path(fs, relative, start_index, native, max_entries,
+                           &written) != 0 ||
+        written > max_entries) {
+        return -1;
+    }
+
+    for (uint64_t i = 0; i < written; i++) {
+        uint32_t j = 0;
+
+        for (; j + 1U < VFS_NAME_MAX && native[i].name[j] != '\0'; j++) {
+            entries[i].name[j] = native[i].name[j];
+        }
+        if (native[i].name[j] != '\0') {
+            return -1;
+        }
+        entries[i].name[j] = '\0';
+        for (j++; j < VFS_NAME_MAX; j++) {
+            entries[i].name[j] = '\0';
+        }
+        entries[i].metadata.size = native[i].size;
+        entries[i].metadata.type =
+            (native[i].attributes & FAT32_ATTR_DIRECTORY) != 0U
+                ? VFS_FILE_TYPE_DIRECTORY
+                : VFS_FILE_TYPE_REGULAR;
+        entries[i].metadata.attributes =
+            fat32_vfs_attributes(native[i].attributes);
+    }
+
+    *entries_written = written;
+    return 0;
+}
+
 static int fat32_vfs_list_path(void *context, const char *path,
                                uint64_t offset, uint8_t *buffer,
                                uint64_t capacity, uint64_t *bytes_written) {
@@ -227,6 +313,8 @@ static const vfs_mount_ops_t g_fat32_vfs_ops = {
     .list = fat32_vfs_list_root,
     .stat_path = fat32_vfs_stat_path,
     .list_path = fat32_vfs_list_path,
+    .metadata_path = fat32_vfs_metadata_path,
+    .readdir_path = fat32_vfs_readdir_path,
     .unlink = fat32_vfs_unlink_path,
     .rename = fat32_vfs_rename_path,
 };

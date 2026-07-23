@@ -150,6 +150,7 @@ static void test_nested_fat32_paths(void) {
     fat32_fs_t fs;
     fat32_path_info_t info;
     fat32_file_t file;
+    fat32_dirent_t entries[2];
     uint8_t buffer[32] = {0};
     uint64_t count = 0;
 
@@ -181,6 +182,17 @@ static void test_nested_fat32_paths(void) {
     count = 0;
     DIR_EQ(0, fat32_list_path(&fs, "docs/sub", buffer, sizeof(buffer), &count));
     DIR_CHECK(directory_text_equal(buffer, count, "NOTE.TXT\n"));
+    count = 0;
+    DIR_EQ(0, fat32_readdir_path(&fs, "docs", 0, entries, 2, &count));
+    DIR_EQ(2U, count);
+    DIR_CHECK(directory_text_equal((const uint8_t *)entries[0].name,
+                                   3, "SUB"));
+    DIR_CHECK((entries[0].attributes & FAT32_ATTR_DIRECTORY) != 0U);
+    DIR_CHECK(directory_text_equal((const uint8_t *)entries[1].name,
+                                   10, "README.TXT"));
+    DIR_EQ(4U, entries[1].size);
+    DIR_CHECK((entries[1].attributes & FAT32_ATTR_ARCHIVE) != 0U);
+
     DIR_EQ(-1, fat32_list_path(&fs, "docs/readme.txt", buffer,
                                sizeof(buffer), &count));
 }
@@ -189,6 +201,8 @@ static void test_nested_paths_through_vfs(void) {
     directory_test_disk_t disk;
     fat32_fs_t fs;
     vfs_stat_t stat;
+    vfs_metadata_t metadata;
+    vfs_dirent_t entries[2];
     uint8_t buffer[32] = {0};
     uint64_t count = 0;
     int fd;
@@ -209,6 +223,24 @@ static void test_nested_paths_through_vfs(void) {
     DIR_EQ(0U, stat.size);
     DIR_EQ(0, vfs_stat("/fat/docs/sub/note.txt", &stat));
     DIR_EQ(5U, stat.size);
+
+    DIR_EQ(0, vfs_metadata("/fat/docs/sub", &metadata));
+    DIR_EQ(VFS_FILE_TYPE_DIRECTORY, metadata.type);
+    DIR_EQ(0, vfs_metadata("/fat/docs/sub/note.txt", &metadata));
+    DIR_EQ(VFS_FILE_TYPE_REGULAR, metadata.type);
+    DIR_EQ(5U, metadata.size);
+    DIR_CHECK((metadata.attributes & VFS_ATTRIBUTE_ARCHIVE) != 0U);
+
+    count = 0;
+    DIR_EQ(0, vfs_readdir("/fat/docs", 0, entries, 2, &count));
+    DIR_EQ(2U, count);
+    DIR_CHECK(directory_text_equal((const uint8_t *)entries[0].name,
+                                   3, "SUB"));
+    DIR_EQ(VFS_FILE_TYPE_DIRECTORY, entries[0].metadata.type);
+    DIR_CHECK(directory_text_equal((const uint8_t *)entries[1].name,
+                                   10, "README.TXT"));
+    DIR_EQ(VFS_FILE_TYPE_REGULAR, entries[1].metadata.type);
+    DIR_EQ(4U, entries[1].metadata.size);
 
     fd = vfs_open("/fat/docs/sub/../sub/note.txt");
     DIR_CHECK(fd >= 0);

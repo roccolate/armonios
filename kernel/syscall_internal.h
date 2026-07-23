@@ -7,7 +7,6 @@
 #include "kernel/exceptions.h"
 #include "kernel/process.h"
 
-/* Historical kernel spellings retained as aliases of the public ABI. */
 #define FD_STDIN     ARM_FD_STDIN
 #define FD_STDOUT    ARM_FD_STDOUT
 #define FD_STDERR    ARM_FD_STDERR
@@ -23,6 +22,11 @@ int64_t sys_seek(uint64_t fd, uint64_t offset, uint64_t whence);
 int64_t sys_stat(process_t *process, uint64_t path_ptr, uint64_t stat_ptr);
 int64_t sys_readdir(process_t *process, uint64_t path_ptr, uint64_t buf,
                     uint64_t len);
+int64_t sys_stat_v2(process_t *process, uint64_t path_ptr,
+                    uint64_t stat_ptr);
+int64_t sys_readdir_v2(process_t *process, uint64_t path_ptr,
+                       uint64_t start_index, uint64_t entries_ptr,
+                       uint64_t max_entries);
 int64_t sys_unlink(process_t *process, uint64_t path_ptr);
 int64_t sys_rename(process_t *process, uint64_t old_ptr, uint64_t new_ptr);
 

@@ -113,6 +113,8 @@ static void vfs_clear_mount(vfs_mount_t *mount) {
     mount->ops.list = 0;
     mount->ops.stat_path = 0;
     mount->ops.list_path = 0;
+    mount->ops.metadata_path = 0;
+    mount->ops.readdir_path = 0;
     mount->ops.unlink = 0;
     mount->ops.rename = 0;
     mount->context = 0;
@@ -508,7 +510,8 @@ int vfs_mount(const char *path, const vfs_mount_ops_t *ops, void *context) {
 
     if (vfs_normalize_path(path, canonical) != 0 || ops == 0 ||
         (ops->open == 0 && ops->list == 0 && ops->stat_path == 0 &&
-         ops->list_path == 0 && ops->unlink == 0 && ops->rename == 0) ||
+         ops->list_path == 0 && ops->metadata_path == 0 &&
+         ops->readdir_path == 0 && ops->unlink == 0 && ops->rename == 0) ||
         vfs_find_mount_exact(canonical) != 0) {
         return -1;
     }
@@ -737,6 +740,244 @@ int vfs_list_at(const char *path, uint64_t offset, uint8_t *buffer,
 int vfs_list(const char *path, uint8_t *buffer, uint64_t capacity,
              uint64_t *bytes_written) {
     return vfs_list_at(path, 0, buffer, capacity, bytes_written);
+}
+
+
+#define VFS_STRUCTURED_SCAN_LIMIT 4096U
+
+static void vfs_metadata_clear(vfs_metadata_t *metadata) {
+    metadata->size = 0;
+    metadata->type = VFS_FILE_TYPE_UNKNOWN;
+    metadata->attributes = 0;
+}
+
+static void vfs_dirent_clear(vfs_dirent_t *entry) {
+    for (uint32_t i = 0; i < VFS_NAME_MAX; i++) {
+        entry->name[i] = '\0';
+    }
+    vfs_metadata_clear(&entry->metadata);
+}
+
+static int vfs_metadata_type_valid(uint32_t type) {
+    return type == VFS_FILE_TYPE_UNKNOWN ||
+           type == VFS_FILE_TYPE_REGULAR ||
+           type == VFS_FILE_TYPE_DIRECTORY;
+}
+
+static int vfs_dirent_name_valid(const char name[VFS_NAME_MAX]) {
+    if (name == 0 || name[0] == '\0') {
+        return 0;
+    }
+    for (uint32_t i = 0; i < VFS_NAME_MAX; i++) {
+        if (name[i] == '\0') {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int vfs_dirent_copy_name(char destination[VFS_NAME_MAX],
+                                const char *source, uint32_t length) {
+    if (destination == 0 || source == 0 || length == 0 ||
+        length >= VFS_NAME_MAX) {
+        return -1;
+    }
+    for (uint32_t i = 0; i < length; i++) {
+        destination[i] = source[i];
+    }
+    destination[length] = '\0';
+    return 0;
+}
+
+static int vfs_metadata_child_path(const char *directory, const char *name,
+                                   char child[VFS_MAX_PATH]) {
+    uint32_t out = 0;
+
+    if (directory == 0 || name == 0 || child == 0 || directory[0] != '/') {
+        return -1;
+    }
+    while (directory[out] != '\0') {
+        if (out + 1U >= VFS_MAX_PATH) {
+            return -1;
+        }
+        child[out] = directory[out];
+        out++;
+    }
+    if (out > 1U) {
+        if (out + 1U >= VFS_MAX_PATH) {
+            return -1;
+        }
+        child[out++] = '/';
+    }
+    for (uint32_t i = 0; name[i] != '\0'; i++) {
+        if (out + 1U >= VFS_MAX_PATH) {
+            return -1;
+        }
+        child[out++] = name[i];
+    }
+    child[out] = '\0';
+    return 0;
+}
+
+int vfs_metadata(const char *path, vfs_metadata_t *metadata) {
+    char canonical[VFS_MAX_PATH];
+    const vfs_node_t *node;
+    vfs_mount_t *mount;
+    vfs_stat_t legacy;
+    uint8_t probe = 0;
+    uint64_t listed = 0;
+    int status;
+
+    if (metadata == 0 || vfs_normalize_path(path, canonical) != 0) {
+        return -1;
+    }
+    vfs_metadata_clear(metadata);
+
+    node = vfs_find_canonical(canonical);
+    if (node != 0) {
+        if (vfs_node_size(node, &metadata->size) != 0) {
+            return -1;
+        }
+        metadata->type = VFS_FILE_TYPE_REGULAR;
+        return 0;
+    }
+
+    mount = vfs_find_mount_exact(canonical);
+    if (mount == 0) {
+        mount = vfs_find_mount_for_path(canonical);
+    }
+    if (mount != 0 && mount->ops.metadata_path != 0) {
+        status = mount->ops.metadata_path(mount->context, canonical, metadata);
+        if (status != 0 || !vfs_metadata_type_valid(metadata->type)) {
+            vfs_metadata_clear(metadata);
+            return status != 0 ? status : -1;
+        }
+        return 0;
+    }
+
+    if (mount != 0 && mount->ops.stat_path != 0) {
+        if (mount->ops.stat_path(mount->context, canonical, &legacy) != 0) {
+            return -1;
+        }
+        metadata->size = legacy.size;
+        metadata->type =
+            vfs_list_at(canonical, 0, &probe, 1, &listed) == 0
+                ? VFS_FILE_TYPE_DIRECTORY
+                : VFS_FILE_TYPE_REGULAR;
+        return 0;
+    }
+
+    if (vfs_list_at(canonical, 0, &probe, 1, &listed) == 0) {
+        metadata->type = VFS_FILE_TYPE_DIRECTORY;
+        return 0;
+    }
+    return -1;
+}
+
+int vfs_readdir(const char *path, uint64_t start_index,
+                vfs_dirent_t *entries, uint64_t max_entries,
+                uint64_t *entries_written) {
+    char canonical[VFS_MAX_PATH];
+    vfs_mount_t *mount;
+    char line[VFS_NAME_MAX + 1U];
+    uint64_t byte_offset = 0;
+    uint64_t logical_index = 0;
+    uint64_t output = 0;
+    uint32_t line_length = 0;
+    int status;
+
+    if (entries_written != 0) {
+        *entries_written = 0;
+    }
+    if (entries == 0 || entries_written == 0 || max_entries == 0 ||
+        max_entries > VFS_READDIR_MAX_ENTRIES ||
+        vfs_normalize_path(path, canonical) != 0) {
+        return -1;
+    }
+
+    mount = vfs_find_mount_exact(canonical);
+    if (mount == 0) {
+        mount = vfs_find_mount_for_path(canonical);
+    }
+    if (mount != 0 && mount->ops.readdir_path != 0) {
+        status = mount->ops.readdir_path(mount->context, canonical, start_index,
+                                         entries, max_entries, entries_written);
+        if (status != 0 || *entries_written > max_entries) {
+            *entries_written = 0;
+            return status != 0 ? status : -1;
+        }
+        for (uint64_t i = 0; i < *entries_written; i++) {
+            if (!vfs_dirent_name_valid(entries[i].name) ||
+                !vfs_metadata_type_valid(entries[i].metadata.type)) {
+                *entries_written = 0;
+                return -1;
+            }
+        }
+        return 0;
+    }
+
+    for (uint64_t scanned = 0; scanned < VFS_STRUCTURED_SCAN_LIMIT; scanned++) {
+        uint8_t value = 0;
+        uint64_t count = 0;
+
+        if (vfs_list_at(canonical, byte_offset, &value, 1, &count) != 0) {
+            return -1;
+        }
+        if (count == 0) {
+            if (line_length != 0) {
+                return -1;
+            }
+            *entries_written = output;
+            return 0;
+        }
+        byte_offset++;
+
+        if (value != '\n') {
+            if (line_length >= VFS_NAME_MAX) {
+                return -1;
+            }
+            line[line_length++] = (char)value;
+            continue;
+        }
+        if (line_length == 0) {
+            continue;
+        }
+        if (logical_index++ < start_index) {
+            line_length = 0;
+            continue;
+        }
+
+        vfs_dirent_t *entry = &entries[output];
+        uint32_t name_length = line_length;
+        uint8_t directory_hint = 0;
+        char child[VFS_MAX_PATH];
+
+        vfs_dirent_clear(entry);
+        if (line[name_length - 1U] == '/') {
+            name_length--;
+            directory_hint = 1;
+        }
+        if (vfs_dirent_copy_name(entry->name, line, name_length) != 0) {
+            return -1;
+        }
+        if (vfs_metadata_child_path(canonical, entry->name, child) == 0 &&
+            vfs_metadata(child, &entry->metadata) == 0) {
+            /* Native metadata resolved through the ordinary path. */
+        } else {
+            entry->metadata.type = directory_hint != 0
+                                       ? VFS_FILE_TYPE_DIRECTORY
+                                       : VFS_FILE_TYPE_REGULAR;
+        }
+
+        output++;
+        line_length = 0;
+        if (output == max_entries) {
+            *entries_written = output;
+            return 0;
+        }
+    }
+
+    return -1;
 }
 
 int vfs_open_flags(const char *path, uint32_t flags) {

@@ -63,6 +63,9 @@ jobs:
       - name: Test nested FAT32 directories
         run: bash tests/run_fat32_directory_test.sh
 
+      - name: Test structured VFS metadata ABI
+        run: bash tests/run_vfs_metadata_abi_test.sh
+
       - name: Upload RPi4 EMMC2 probe package
         uses: actions/upload-artifact@v4
         with:

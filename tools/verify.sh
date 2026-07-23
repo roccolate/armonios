@@ -30,6 +30,7 @@ run_gate mbr-fat32-host bash tests/run_mbr_fat32_test.sh
 run_gate block-view-fat32-host bash tests/run_block_view_fat32_test.sh
 run_gate fat32-corruption-host bash tests/run_fat32_corruption_test.sh
 run_gate fat32-directory-host bash tests/run_fat32_directory_test.sh
+run_gate vfs-metadata-abi bash tests/run_vfs_metadata_abi_test.sh
 run_gate rpi-mailbox-host bash tests/run_rpi_mailbox_test.sh
 run_gate host-tests make -C tests test
 run_gate runtime-service bash tests/run_runtime_service_test.sh

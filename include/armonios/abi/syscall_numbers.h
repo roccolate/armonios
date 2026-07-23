@@ -71,6 +71,14 @@ _Static_assert(SYS_UNLINK == 47ULL,
 _Static_assert(SYS_RENAME == 48ULL,
                "ABI drift: SYS_RENAME — see docs/SYSCALLS.md");
 
+#define SYS_STAT_V2            49ULL
+_Static_assert(SYS_STAT_V2 == 49ULL,
+               "ABI drift: SYS_STAT_V2 — see docs/SYSCALLS.md");
+
+#define SYS_READDIR_V2         50ULL
+_Static_assert(SYS_READDIR_V2 == 50ULL,
+               "ABI drift: SYS_READDIR_V2 — see docs/SYSCALLS.md");
+
 #define SYS_IPC_SEND           60ULL
 _Static_assert(SYS_IPC_SEND == 60ULL,
                "ABI drift: SYS_IPC_SEND — see docs/SYSCALLS.md");
@@ -164,7 +172,7 @@ _Static_assert(SYS_EXIT          >= 1ULL  && SYS_SPAWN_ARGV <= 8ULL,
                "ABI drift: process range");
 _Static_assert(SYS_MMAP          >= 20ULL && SYS_MUNMAP <= 21ULL,
                "ABI drift: memory range");
-_Static_assert(SYS_OPEN          >= 40ULL && SYS_RENAME <= 48ULL,
+_Static_assert(SYS_OPEN          >= 40ULL && SYS_READDIR_V2 <= 50ULL,
                "ABI drift: vfs range");
 _Static_assert(SYS_IPC_SEND      >= 60ULL && SYS_IPC_RECV <= 61ULL,
                "ABI drift: ipc range");
