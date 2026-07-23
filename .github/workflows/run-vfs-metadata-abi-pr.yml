@@ -19,6 +19,20 @@ jobs:
         with:
           ref: agent/v03-vfs-metadata-abi
 
+      - name: Capture source snapshot
+        run: |
+          tar -czf source-snapshot.tar.gz \
+            include/armonios/abi/version.h \
+            include/armonios/abi/syscall_numbers.h \
+            include/armonios/abi/vfs.h \
+            programs/libkarm/syscall.h \
+            kernel/vfs.h kernel/vfs.c \
+            kernel/fat32.h kernel/fat32_directory.c kernel/fat32_vfs.c \
+            kernel/syscall_internal.h kernel/syscall_vfs.c kernel/syscall.c \
+            tests/test_syscall_abi.c tests/test_fat32_directories.c \
+            tests/test_syscall_vfs_user_copy.c \
+            docs/SYSCALLS.md docs/FAT32_DIRECTORIES.md
+
       - name: Extract and apply guarded migration
         id: apply
         continue-on-error: true
@@ -70,6 +84,7 @@ jobs:
           path: |
             migration-output.log
             apply_vfs_metadata_abi.py
+            source-snapshot.tar.gz
           if-no-files-found: error
           retention-days: 7
 
