@@ -50,7 +50,7 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git rm .github/workflows/diagnose-fat32-directory-build.yml build-diagnostic.txt
+          git rm .github/workflows/diagnose-fat32-directory-build.yml build-diagnostic.txt tools/finalize-fat32-directory.trigger
           git add kernel/vfs.c
           git commit -m "Avoid libc memcpy in VFS mount registration"
           git push origin HEAD:agent/v03-fat32-directory-traversal
