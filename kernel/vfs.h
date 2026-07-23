@@ -26,9 +26,10 @@
 /*
  * Fixed-table kernel VFS facade.
  *
- * Paths are absolute, copied into VFS-owned storage at mount time, and capped
- * by VFS_MAX_PATH. File descriptors are local to the current process; the VFS
- * translates them to kernel-private open-file handles and owns their offsets.
+ * Paths are absolute, canonicalized into VFS-owned storage at mount time, and
+ * capped by VFS_MAX_PATH. File descriptors are local to the current process;
+ * the VFS translates them to kernel-private open-file handles and owns their
+ * offsets.
  */
 typedef arm_stat_t vfs_stat_t;
 
@@ -69,6 +70,14 @@ typedef struct {
 } vfs_mount_ops_t;
 
 void vfs_reset(void);
+
+/*
+ * Convert one bounded absolute path into the unique VFS representation.
+ * Repeated separators and '.' are removed, '..' pops one component, attempts
+ * to escape above '/' are rejected, and only '/' retains a trailing slash.
+ */
+int vfs_normalize_path(const char *path, char normalized[VFS_MAX_PATH]);
+
 int vfs_mount_static(const vfs_node_t *nodes, uint32_t count);
 
 /*
@@ -102,8 +111,8 @@ int vfs_close(int fd);
 uint32_t vfs_close_all_for_pid(uint32_t pid);
 
 /*
- * Mutation is dispatched through the mount that owns the path. Filesystems
- * without unlink or rename callbacks reject the operation.
+ * Mutation is dispatched through the mount that owns the canonical path.
+ * Filesystems without unlink or rename callbacks reject the operation.
  */
 int vfs_unlink(const char *path);
 int vfs_rename(const char *old_path, const char *new_path);

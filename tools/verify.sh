@@ -35,6 +35,7 @@ run_gate runtime-service bash tests/run_runtime_service_test.sh
 run_gate input-queue-telemetry bash tests/run_input_queue_stats_test.sh
 run_gate process-parent-wait bash tests/run_process_parent_wait_test.sh
 run_gate process-fd-isolation bash tests/run_vfs_process_fd_test.sh
+run_gate vfs-path-resolution bash tests/run_vfs_path_test.sh
 run_gate usercopy-host bash tests/run_user_copy_permissions_test.sh
 run_gate kli1-contract bash tests/run_kli1_contract_test.sh
 run_gate vmm-soak-lifecycle-host bash tests/run_vmm_soak_lifecycle_test.sh
