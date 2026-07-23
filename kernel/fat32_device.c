@@ -19,6 +19,7 @@ static int fat32_device_write_sector(void *context, uint32_t lba,
 int fat32_mount_device(fat32_fs_t *fs, const block_device_t *device) {
     if (fs == 0 || device == 0 || device->read == 0 ||
         device->block_count == 0U || device->block_size != FAT32_SECTOR_SIZE ||
+        (device->flags & ~BLOCK_DEVICE_FLAG_READ_ONLY) != 0U ||
         ((device->flags & BLOCK_DEVICE_FLAG_READ_ONLY) == 0U &&
          device->write == 0)) {
         return -1;
