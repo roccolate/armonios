@@ -16,11 +16,17 @@
 
 #include <stdint.h>
 
+#include "include/armonios/abi/base.h"
 #include "include/armonios/abi/errors.h"
+#include "include/armonios/abi/memory.h"
+#include "include/armonios/abi/process.h"
 #include "include/armonios/abi/syscall_numbers.h"
+#include "include/armonios/abi/system.h"
 #include "include/armonios/abi/version.h"
+#include "include/armonios/abi/vfs.h"
 #include "kernel/process.h"
 #include "kernel/syscall_helpers.h"
+#include "kernel/syscall_numbers.h"
 #include "kernel/user_exit.h"
 #include "kernel/user_vm.h"
 #include "kernel/vfs.h"
@@ -31,6 +37,14 @@ void test_syscall_abi_implemented_numbers_match_dispatch(void) {
     TEST_ASSERT_EQUAL_UINT64(1U, ARMONIOS_ABI_MAJOR);
     TEST_ASSERT_EQUAL_UINT64(0U, ARMONIOS_ABI_MINOR);
     TEST_ASSERT_EQUAL_UINT64(0x00010000U, ARMONIOS_ABI_VERSION);
+
+    TEST_ASSERT_EQUAL_UINT64(8U, sizeof(arm_status_t));
+    TEST_ASSERT_EQUAL_UINT64(4U, sizeof(arm_pid_t));
+    TEST_ASSERT_EQUAL_UINT64(4U, sizeof(arm_fd_t));
+    TEST_ASSERT_EQUAL_UINT64(16U, sizeof(arm_meminfo_t));
+    TEST_ASSERT_EQUAL_UINT64(24U, sizeof(arm_timeinfo_t));
+    TEST_ASSERT_EQUAL_UINT64(24U, sizeof(arm_process_entry_t));
+    TEST_ASSERT_EQUAL_UINT64(8U, sizeof(arm_stat_t));
 
     /* Implemented numbers must match the rows in docs/SYSCALLS.md under
      * "Implemented Now". A drift here means a number was renumbered
@@ -126,55 +140,68 @@ void test_syscall_abi_error_codes_match_documented_constants(void) {
 }
 
 void test_syscall_abi_vfs_open_flags_match_documentation(void) {
-    TEST_ASSERT_EQUAL_UINT64(0ULL, VFS_O_RDONLY);
-    TEST_ASSERT_EQUAL_UINT64(1ULL, VFS_O_WRONLY);
-    TEST_ASSERT_EQUAL_UINT64(2ULL, VFS_O_RDWR);
-    TEST_ASSERT_EQUAL_UINT64(0x40ULL, VFS_O_CREAT);
-    TEST_ASSERT_EQUAL_UINT64(0x43ULL, VFS_O_ALLOWED);
+    TEST_ASSERT_EQUAL_UINT64(0ULL, ARM_O_RDONLY);
+    TEST_ASSERT_EQUAL_UINT64(1ULL, ARM_O_WRONLY);
+    TEST_ASSERT_EQUAL_UINT64(2ULL, ARM_O_RDWR);
+    TEST_ASSERT_EQUAL_UINT64(0x40ULL, ARM_O_CREAT);
+    TEST_ASSERT_EQUAL_UINT64(0x43ULL, ARM_O_ALLOWED);
+
+    TEST_ASSERT_EQUAL_UINT64(ARM_O_RDONLY, VFS_O_RDONLY);
+    TEST_ASSERT_EQUAL_UINT64(ARM_O_WRONLY, VFS_O_WRONLY);
+    TEST_ASSERT_EQUAL_UINT64(ARM_O_RDWR, VFS_O_RDWR);
+    TEST_ASSERT_EQUAL_UINT64(ARM_O_CREAT, VFS_O_CREAT);
+    TEST_ASSERT_EQUAL_UINT64(ARM_O_ALLOWED, VFS_O_ALLOWED);
+
+    TEST_ASSERT_EQUAL_UINT64(0ULL, ARM_FD_STDIN);
+    TEST_ASSERT_EQUAL_UINT64(1ULL, ARM_FD_STDOUT);
+    TEST_ASSERT_EQUAL_UINT64(2ULL, ARM_FD_STDERR);
+    TEST_ASSERT_EQUAL_UINT64(3ULL, ARM_FD_FILE_BASE);
+    TEST_ASSERT_EQUAL_UINT64(0ULL, ARM_SEEK_SET);
 }
 
 void test_syscall_abi_user_exit_codes_match_documented_constants(void) {
     /* sys_kill and lower-EL fault handling expose these exit codes to
-     * waiters. They are part of the observable process ABI, not just
-     * local implementation details. */
-    TEST_ASSERT_EQUAL_UINT64(0x80ULL, KERNEL_USER_KILL_EXIT_CODE);
-    TEST_ASSERT_EQUAL_UINT64(0xfffffffffffffff0ULL,
+     * waiters. They are part of the observable process ABI. */
+    TEST_ASSERT_EQUAL_UINT64(0x80ULL, ARM_PROCESS_EXIT_KILLED);
+    TEST_ASSERT_EQUAL_UINT64(0xfffffffffffffff0ULL, ARM_PROCESS_EXIT_FAULT);
+    TEST_ASSERT_EQUAL_UINT64(ARM_PROCESS_EXIT_KILLED,
+                             KERNEL_USER_KILL_EXIT_CODE);
+    TEST_ASSERT_EQUAL_UINT64(ARM_PROCESS_EXIT_FAULT,
                              KERNEL_USER_FAULT_EXIT_CODE);
-    TEST_ASSERT_TRUE(KERNEL_USER_KILL_EXIT_CODE != KERNEL_USER_FAULT_EXIT_CODE);
+    TEST_ASSERT_TRUE(ARM_PROCESS_EXIT_KILLED != ARM_PROCESS_EXIT_FAULT);
+
+    TEST_ASSERT_EQUAL_UINT64(ARM_PROCESS_UNUSED, PROCESS_UNUSED);
+    TEST_ASSERT_EQUAL_UINT64(ARM_PROCESS_READY, PROCESS_READY);
+    TEST_ASSERT_EQUAL_UINT64(ARM_PROCESS_RUNNING, PROCESS_RUNNING);
+    TEST_ASSERT_EQUAL_UINT64(ARM_PROCESS_BLOCKED, PROCESS_BLOCKED);
+    TEST_ASSERT_EQUAL_UINT64(ARM_PROCESS_ZOMBIE, PROCESS_ZOMBIE);
+
+    TEST_ASSERT_EQUAL_UINT64(ARM_VM_PROT_READ, USER_VM_PROT_READ);
+    TEST_ASSERT_EQUAL_UINT64(ARM_VM_PROT_WRITE, USER_VM_PROT_WRITE);
+    TEST_ASSERT_EQUAL_UINT64(ARM_VM_PROT_EXEC, USER_VM_PROT_EXEC);
+    TEST_ASSERT_EQUAL_UINT64(ARM_MAP_SHARED, USER_VM_MAP_SHARED);
+    TEST_ASSERT_EQUAL_UINT64(ARM_MAP_FIXED, USER_VM_MAP_FIXED);
 }
 
 void test_syscall_abi_user_range_validation_rejects_out_of_region(void) {
     /* Every syscall that takes a user pointer must reject pointers
      * outside the caller's registered regions. The dispatcher delegates
      * to process_user_range_contains; if that function ever grows lax,
-     * the syscall ABI loses its isolation promise.
-     *
-     * This is the kernel-side half of the contract; the same helper is
-     * exercised through every public syscall in the host suite via the
-     * syscall_dispatch entry, but pinning it here makes the intent
-     * explicit and catches a regression that would otherwise need a
-     * full EL0 image to surface. */
+     * the syscall ABI loses its isolation promise. */
     process_t process;
     process_init(&process, 4242U, "abi_range");
 
-    /* Register one small region. */
     TEST_ASSERT_EQUAL_UINT64(0,
                              (uint64_t)process_add_user_region(
                                  &process, 0x1000ULL, 0x100ULL));
 
-    /* In range. */
     TEST_ASSERT_TRUE(process_user_range_contains(&process, 0x1000ULL, 0x100ULL));
     TEST_ASSERT_TRUE(process_user_range_contains(&process, 0x1050ULL, 0x10ULL));
 
-    /* Out of range: just before, just after, and overlaps. */
     TEST_ASSERT_TRUE(!process_user_range_contains(&process, 0x0fffULL, 1ULL));
     TEST_ASSERT_TRUE(!process_user_range_contains(&process, 0x1100ULL, 1ULL));
     TEST_ASSERT_TRUE(!process_user_range_contains(&process, 0x10f0ULL, 0x20ULL));
 
-    /* Zero-length query is vacuously true at any address — the kernel
-     * treats it as "no bytes, no overlap to check". This is a deliberate
-     * choice for syscall hot paths that want to validate the pointer
-     * before computing a length. */
     TEST_ASSERT_TRUE(process_user_range_contains(&process, 0x1000ULL, 0ULL));
     TEST_ASSERT_TRUE(process_user_range_contains(&process, 0x1100ULL, 0ULL));
     TEST_ASSERT_TRUE(process_user_range_contains(&process, 0x0ULL, 0ULL));

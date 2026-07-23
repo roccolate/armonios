@@ -3,13 +3,15 @@
 
 #include <stdint.h>
 
+#include "include/armonios/abi/vfs.h"
 #include "kernel/exceptions.h"
 #include "kernel/process.h"
 
-#define FD_STDIN  0ULL
-#define FD_STDOUT 1ULL
-#define FD_STDERR 2ULL
-#define FD_FILE_BASE 3ULL
+/* Historical kernel spellings retained as aliases of the public ABI. */
+#define FD_STDIN     ARM_FD_STDIN
+#define FD_STDOUT    ARM_FD_STDOUT
+#define FD_STDERR    ARM_FD_STDERR
+#define FD_FILE_BASE ARM_FD_FILE_BASE
 
 int64_t sys_write(process_t *process, uint64_t fd, uint64_t buf,
                   uint64_t len);
