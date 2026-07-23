@@ -1,5 +1,54 @@
 make: Entering directory '/home/runner/work/armonios/armonios/tests'
-make: *** No rule to make target '../build/programs/apps/shell.host_blob.o', needed by 'run_tests'.  Stop.
+objcopy -I binary -O elf64-x86-64 -B i386:x86-64 \
+    --rename-section .data=.app_host_blob,alloc,load,readonly,data,contents \
+    --add-section .note.GNU-stack=/dev/null \
+    --set-section-flags .note.GNU-stack=readonly \
+    ../build/programs/apps/shell.bin ../build/programs/apps/shell.host_blob.o
+objcopy -I binary -O elf64-x86-64 -B i386:x86-64 \
+    --rename-section .data=.app_host_blob,alloc,load,readonly,data,contents \
+    --add-section .note.GNU-stack=/dev/null \
+    --set-section-flags .note.GNU-stack=readonly \
+    ../build/programs/apps/editor.bin ../build/programs/apps/editor.host_blob.o
+objcopy -I binary -O elf64-x86-64 -B i386:x86-64 \
+    --rename-section .data=.app_host_blob,alloc,load,readonly,data,contents \
+    --add-section .note.GNU-stack=/dev/null \
+    --set-section-flags .note.GNU-stack=readonly \
+    ../build/programs/apps/files.bin ../build/programs/apps/files.host_blob.o
+objcopy -I binary -O elf64-x86-64 -B i386:x86-64 \
+    --rename-section .data=.app_host_blob,alloc,load,readonly,data,contents \
+    --add-section .note.GNU-stack=/dev/null \
+    --set-section-flags .note.GNU-stack=readonly \
+    ../build/programs/apps/monitor.bin ../build/programs/apps/monitor.host_blob.o
+objcopy -I binary -O elf64-x86-64 -B i386:x86-64 \
+    --rename-section .data=.app_host_blob,alloc,load,readonly,data,contents \
+    --add-section .note.GNU-stack=/dev/null \
+    --set-section-flags .note.GNU-stack=readonly \
+    ../build/programs/apps/clock.bin ../build/programs/apps/clock.host_blob.o
+objcopy -I binary -O elf64-x86-64 -B i386:x86-64 \
+    --rename-section .data=.app_host_blob,alloc,load,readonly,data,contents \
+    --add-section .note.GNU-stack=/dev/null \
+    --set-section-flags .note.GNU-stack=readonly \
+    ../build/programs/apps/panel.bin ../build/programs/apps/panel.host_blob.o
+objcopy -I binary -O elf64-x86-64 -B i386:x86-64 \
+    --rename-section .data=.app_host_blob,alloc,load,readonly,data,contents \
+    --add-section .note.GNU-stack=/dev/null \
+    --set-section-flags .note.GNU-stack=readonly \
+    ../build/programs/apps/control.bin ../build/programs/apps/control.host_blob.o
+gcc -I.. -I../drivers -I../programs -Iunity -g -O0 -Wall -Wextra -DARMONIOS_TEST unity/unity.c main.c test_pmm.c test_kheap.c test_vmm.c test_process.c test_init_status.c test_boot_program.c test_bootfs.c test_user_image.c test_user_vm.c test_user_image_runtime.c test_panel_boot_argv.c test_panel_boot_recovery.c test_irq.c test_sched.c test_vfs.c test_vfs_mount_dispatch.c test_vfs_fat32_invalidation.c test_fat32_vfs_registration.c test_tmpfs.c test_fat32.c test_fat32_directories.c test_dhcp_options.c test_ipc.c test_font.c test_gui.c test_fb.c test_dtb.c test_virtio_blk.c test_virtio_net.c test_input.c test_virtio_input.c test_hid.c test_pci.c test_hid_driver.c test_usb_core.c test_pci_assign.c test_hid_state.c test_hid_init.c test_syscall_abi.c test_syscall_helpers.c test_syscall_vfs_user_copy.c test_syscall_boundary_user_copy.c test_syscall_gui_info_user_copy.c test_process_isolation.c test_window_abi.c ../kernel/mm/pmm.c ../kernel/mm/kheap.c ../kernel/mm/vmm.c ../kernel/boot_program.c ../kernel/bootfs.c ../kernel/panel_boot_argv.c ../kernel/panel_boot_recovery.c ../kernel/fat32.c ../kernel/fat32_directory.c ../kernel/fat32_vfs.c ../kernel/net/dhcp_options.c ../kernel/font.c ../kernel/gui_backing.c ../kernel/gui_cursor.c ../kernel/gui_damage.c ../kernel/gui_events.c ../kernel/gui_input.c ../kernel/gui_pool.c ../kernel/gui_compositor.c ../kernel/init_status.c ../kernel/print.c ../kernel/ipc.c ../kernel/irq.c ../kernel/process.c ../kernel/sched/sched.c ../kernel/tmpfs.c ../kernel/syscall_helpers.c ../kernel/syscall_ipc.c ../kernel/syscall_gui.c ../kernel/syscall_info.c ../kernel/syscall_vfs.c ../kernel/kstring.c ../kernel/user_image.c ../kernel/user_vm.c ../kernel/vfs.c ../kernel/dtb.c ../kernel/dtb_framebuffer.c ../drivers/fb/fb.c ../drivers/storage/virtio_blk.c ../drivers/net/virtio_net.c ../drivers/input/input.c ../drivers/input/keymap.c ../drivers/input/virtio_input.c ../drivers/usb/hid.c ../drivers/usb/hid_driver.c ../drivers/usb/xhci.c ../drivers/usb/usb_core.c ../drivers/pci/pci.c test_pl011_stub.c test_panel_boot_recovery_stub.c ../build/programs/apps/shell.host_blob.o ../build/programs/apps/editor.host_blob.o ../build/programs/apps/files.host_blob.o ../build/programs/apps/monitor.host_blob.o ../build/programs/apps/clock.host_blob.o ../build/programs/apps/panel.host_blob.o ../build/programs/apps/control.host_blob.o -o run_tests
+test_syscall_abi.c: In function ‘test_syscall_abi_error_codes_match_documented_constants’:
+test_syscall_abi.c:88:5: warning: implicit declaration of function ‘TEST_ASSERT_EQUAL_INT64’; did you mean ‘TEST_ASSERT_EQUAL_UINT64’? [-Wimplicit-function-declaration]
+   88 |     TEST_ASSERT_EQUAL_INT64(-2, ARMONIOS_ERR_NOMEM);
+      |     ^~~~~~~~~~~~~~~~~~~~~~~
+      |     TEST_ASSERT_EQUAL_UINT64
+/usr/bin/ld: /tmp/ccQg6Ihf.o: in function `test_syscall_abi_error_codes_match_documented_constants':
+/home/runner/work/armonios/armonios/tests/test_syscall_abi.c:88:(.text+0x30): undefined reference to `TEST_ASSERT_EQUAL_INT64'
+/usr/bin/ld: /home/runner/work/armonios/armonios/tests/test_syscall_abi.c:89:(.text+0x46): undefined reference to `TEST_ASSERT_EQUAL_INT64'
+/usr/bin/ld: /home/runner/work/armonios/armonios/tests/test_syscall_abi.c:90:(.text+0x5c): undefined reference to `TEST_ASSERT_EQUAL_INT64'
+/usr/bin/ld: /home/runner/work/armonios/armonios/tests/test_syscall_abi.c:91:(.text+0x72): undefined reference to `TEST_ASSERT_EQUAL_INT64'
+/usr/bin/ld: /home/runner/work/armonios/armonios/tests/test_syscall_abi.c:92:(.text+0x88): undefined reference to `TEST_ASSERT_EQUAL_INT64'
+/usr/bin/ld: /tmp/ccQg6Ihf.o:/home/runner/work/armonios/armonios/tests/test_syscall_abi.c:93: more undefined references to `TEST_ASSERT_EQUAL_INT64' follow
+collect2: error: ld returned 1 exit status
+make: *** [Makefile:82: run_tests] Error 1
 make: Leaving directory '/home/runner/work/armonios/armonios/tests'
 
 status=2
