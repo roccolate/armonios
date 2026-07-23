@@ -6,7 +6,14 @@
 #include "storage/block_device.h"
 
 #define FAT32_SECTOR_SIZE 512U
+#define FAT32_SHORT_NAME_MAX 13U
+
+#define FAT32_ATTR_READ_ONLY 0x01U
+#define FAT32_ATTR_HIDDEN    0x02U
+#define FAT32_ATTR_SYSTEM    0x04U
+#define FAT32_ATTR_VOLUME_ID 0x08U
 #define FAT32_ATTR_DIRECTORY 0x10U
+#define FAT32_ATTR_ARCHIVE   0x20U
 
 /*
  * FAT32 storage facade.
@@ -57,6 +64,12 @@ typedef struct {
     uint8_t attributes;
 } fat32_path_info_t;
 
+typedef struct {
+    char name[FAT32_SHORT_NAME_MAX];
+    uint32_t size;
+    uint8_t attributes;
+} fat32_dirent_t;
+
 int fat32_mount_device(fat32_fs_t *fs, const block_device_t *device);
 int fat32_flush(fat32_fs_t *fs);
 
@@ -85,6 +98,9 @@ int fat32_rename(fat32_fs_t *fs, const char *old_name,
 int fat32_lookup_path(fat32_fs_t *fs, const char *path,
                       fat32_path_info_t *info);
 int fat32_open_path(fat32_fs_t *fs, const char *path, fat32_file_t *file);
+int fat32_readdir_path(fat32_fs_t *fs, const char *path,
+                       uint64_t start_index, fat32_dirent_t *entries,
+                       uint64_t max_entries, uint64_t *entries_written);
 int fat32_list_path_at(fat32_fs_t *fs, const char *path, uint64_t offset,
                        uint8_t *buffer, uint64_t capacity,
                        uint64_t *bytes_written);
