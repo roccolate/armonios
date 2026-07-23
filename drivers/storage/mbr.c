@@ -19,7 +19,7 @@ static int mbr_type_is_fat32(uint8_t type) {
 }
 
 int mbr_find_fat32_partition(const uint8_t sector[MBR_SECTOR_SIZE],
-                             mbr_partition_t *partition) {
+                              mbr_partition_t *partition) {
     if (sector == 0 || partition == 0 ||
         sector[510] != 0x55U || sector[511] != 0xaaU) {
         return -1;
@@ -52,4 +52,20 @@ int mbr_find_fat32_partition(const uint8_t sector[MBR_SECTOR_SIZE],
     }
 
     return -1;
+}
+
+int mbr_open_fat32_partition(const block_device_t *device,
+                              block_device_view_t *view,
+                              mbr_partition_t *partition) {
+    uint8_t sector[MBR_SECTOR_SIZE];
+
+    if (device == 0 || view == 0 || partition == 0 ||
+        device->block_size != MBR_SECTOR_SIZE ||
+        block_device_read(device, 0U, 1U, sector) != 0 ||
+        mbr_find_fat32_partition(sector, partition) != 0) {
+        return -1;
+    }
+
+    return block_device_view_init(view, device, partition->start_lba,
+                                  partition->sector_count, 0U);
 }
