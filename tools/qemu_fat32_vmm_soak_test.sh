@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KERNEL_BUILD_DIR="${VMM_SOAK_KERNEL_BUILD_DIR:-$ROOT_DIR/build}"
 OUTPUT_DIR="${VMM_SOAK_OUTPUT_DIR:-$ROOT_DIR/build-vmm-soak}"
-BOOT_COUNT="${VMM_SOAK_BOOT_COUNT:-10}"
+BOOT_COUNT="${VMM_SOAK_BOOT_COUNT:-30}"
 BOOT_SECONDS="${VMM_SOAK_BOOT_SECONDS:-10}"
 GDB_PORT_BASE="${VMM_SOAK_GDB_PORT_BASE:-24600}"
 GDB_TIMEOUT_SECONDS="${VMM_SOAK_GDB_TIMEOUT_SECONDS:-20}"
@@ -126,7 +126,17 @@ p/x $sctlr_el1
 p/x $esr_el1
 p/x $far_el1
 p/x $elr_el1
-x/32gx $sp
+set $addr_mask = 0x0000fffffffff000
+set $root = $ttbr0_el1 & $addr_mask
+p/x $root
+x/8gx $root
+set $l0e = *(unsigned long long *)$root
+p/x $l0e
+set $l1 = $l0e & $addr_mask
+p/x $l1
+x/16gx $l1
+x/gx ($l1 + 32)
+x/96gx $sp
 disassemble /r next_table
 bt 32
 GDB
@@ -297,8 +307,8 @@ PY
         fail "boot $iteration did not initialize storage"
     grep -Fq "FAT32 root: mounted" "$serial_log" || \
         fail "boot $iteration did not mount the FAT32 root"
-    grep -Fq "panel:" "$serial_log" || \
-        fail "boot $iteration did not reach the panel path"
+    grep -Fq "panel: starting" "$serial_log" || \
+        fail "boot $iteration did not enter the panel application"
     if grep -Fq "__PANIC_HALT__" "$serial_log"; then
         fail "boot $iteration recorded a late panic"
     fi
