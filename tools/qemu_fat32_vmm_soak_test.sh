@@ -8,6 +8,7 @@ OUTPUT_DIR="${VMM_SOAK_OUTPUT_DIR:-$ROOT_DIR/build-vmm-soak}"
 BOOT_COUNT="${VMM_SOAK_BOOT_COUNT:-10}"
 BOOT_SECONDS="${VMM_SOAK_BOOT_SECONDS:-10}"
 GDB_PORT_BASE="${VMM_SOAK_GDB_PORT_BASE:-24600}"
+GDB_TIMEOUT_SECONDS="${VMM_SOAK_GDB_TIMEOUT_SECONDS:-20}"
 QEMU="${QEMU_SYSTEM_AARCH64:-qemu-system-aarch64}"
 GDB="${GDB_MULTIARCH:-gdb-multiarch}"
 ADDR2LINE="${AARCH64_ADDR2LINE:-aarch64-linux-gnu-addr2line}"
@@ -56,13 +57,15 @@ fail() {
     exit 1
 }
 
-for command in python3 "$QEMU" "$GDB" "$ADDR2LINE"; do
+for command in python3 timeout "$QEMU" "$GDB" "$ADDR2LINE"; do
     command -v "$command" >/dev/null 2>&1 || \
         fail "required command not found: $command"
 done
 
 [[ "$BOOT_COUNT" =~ ^[1-9][0-9]*$ ]] || fail "invalid boot count: $BOOT_COUNT"
 [[ "$BOOT_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail "invalid boot duration: $BOOT_SECONDS"
+[[ "$GDB_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || \
+    fail "invalid GDB timeout: $GDB_TIMEOUT_SECONDS"
 
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
@@ -91,6 +94,7 @@ fi
     printf 'block image sha256: %s\n' "$(sha256sum "$BLOCK_IMAGE" | awk '{print $1}')"
     printf 'qemu: %s\n' "$($QEMU --version | head -1)"
     printf 'boots: %s, seconds/boot: %s\n' "$BOOT_COUNT" "$BOOT_SECONDS"
+    printf 'gdb timeout seconds: %s\n' "$GDB_TIMEOUT_SECONDS"
 } >"$METADATA_LOG"
 
 capture_gdb() {
@@ -101,9 +105,8 @@ capture_gdb() {
     cat >"$commands" <<'GDB'
 set pagination off
 set confirm off
+set backtrace limit 32
 info registers
-info all-registers
-bt
 p/x g_current_process
 p/x &g_current_process
 x/gx &g_current_process
@@ -123,10 +126,13 @@ p/x $sctlr_el1
 p/x $esr_el1
 p/x $far_el1
 p/x $elr_el1
+x/32gx $sp
 disassemble /r next_table
+bt 32
 GDB
 
-    "$GDB" -q -batch \
+    timeout --signal=TERM --kill-after=2s "${GDB_TIMEOUT_SECONDS}s" \
+        "$GDB" -q -batch \
         -ex "file $KERNEL_ELF" \
         -ex "target remote 127.0.0.1:$port" \
         -x "$commands" \
