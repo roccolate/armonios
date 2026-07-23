@@ -1,5 +1,7 @@
 #include "kernel/kstring.h"
 
+#include <stddef.h>
+
 int kstreq(const char *a, const char *b) {
     if (a == 0 || b == 0) {
         return 0;
@@ -20,6 +22,22 @@ void *kmemcpy(void *dst, const void *src, uint32_t len) {
     uint8_t *d = (uint8_t *)dst;
     const uint8_t *s = (const uint8_t *)src;
     for (uint32_t i = 0; i < len; i++) {
+        d[i] = s[i];
+    }
+    return dst;
+}
+
+/*
+ * GCC may lower a structure assignment to the freestanding C `memcpy` symbol
+ * even with builtins disabled. Keep the compiler-support entry point separate
+ * from the uint32_t-sized kernel helper so arbitrary size_t copies are not
+ * truncated.
+ */
+void *memcpy(void *dst, const void *src, size_t len) {
+    uint8_t *d = (uint8_t *)dst;
+    const uint8_t *s = (const uint8_t *)src;
+
+    for (size_t i = 0; i < len; i++) {
         d[i] = s[i];
     }
     return dst;
