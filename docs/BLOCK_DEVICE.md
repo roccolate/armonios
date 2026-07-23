@@ -2,9 +2,21 @@
 
 ## Status
 
-This document defines the first v0.3 storage foundation. The contract is
-host-testable and transport-neutral. It does not yet replace every legacy board
-or FAT32 callback.
+The v0.3 storage foundation now has two completed layers:
+
+1. a transport-neutral descriptor and bounded view contract;
+2. transport adapters for QEMU virtio-blk and diagnostic EMMC.
+
+The QEMU board uses its writable block-device descriptor internally while
+retaining the existing `board_storage_read()` and `board_storage_write()`
+functions as compatibility wrappers. FAT32 still consumes those wrappers until
+the canonical device mount lands in the next cut.
+
+The EMMC adapter is read-only because the current driver does not implement
+writes. It derives the card capacity from the CSD response and refuses to
+publish a descriptor when the device is not ready or its capacity is invalid.
+The Raspberry Pi 4 backend still does not advertise generic storage support;
+EMMC remains an opt-in diagnostic path until physical hardware evidence exists.
 
 ## Descriptor
 
@@ -25,7 +37,9 @@ including the end of the device.
 A writable descriptor must provide a write callback. A read-only descriptor
 rejects writes even if an underlying callback exists. A missing flush callback
 means the device has no deferred flush work at this abstraction boundary, so
-`block_device_flush()` succeeds as a no-op.
+`block_device_flush()` succeeds as a no-op. This does not claim persistence;
+there is no durable-write guarantee until a transport and filesystem flush
+policy is explicitly implemented and tested.
 
 ## Views
 
@@ -46,9 +60,38 @@ This is the intended basis for MBR partitions and future nested storage views.
 Filesystem code should receive the bounded view rather than manually adding a
 partition offset.
 
+## Transport adapters
+
+### QEMU virtio-blk
+
+`virtio_blk_block_device.h` publishes:
+
+- the capacity reported by the virtio configuration space;
+- 512-byte logical blocks;
+- writable read and write callbacks;
+- no flush callback until virtio flush negotiation is implemented.
+
+The QEMU board initializes this descriptor after the transport queue is ready.
+Its legacy board callbacks delegate through the descriptor, so the production
+path now exercises the shared storage vocabulary without changing the kernel or
+FAT32 API yet.
+
+### Diagnostic EMMC
+
+`emmc_block_device.h` publishes:
+
+- capacity decoded from CSD v1 or high-capacity CSD layouts;
+- 512-byte logical blocks;
+- read-only state;
+- the existing multi-sector EMMC read operation;
+- no write or flush callbacks.
+
+The adapter is separately host-tested. Its presence does not change RPi4 board
+capabilities and does not claim that physical SD/eMMC bring-up is complete.
+
 ## Current evidence
 
-`tests/run_block_view_fat32_test.sh` builds a host test that proves:
+`tests/run_block_view_fat32_test.sh` builds host tests that prove:
 
 - invalid descriptors are rejected;
 - reads and writes cannot cross device or view bounds;
@@ -56,14 +99,17 @@ partition offset.
 - flush reaches the parent;
 - writable views translate writes correctly;
 - nested views translate to the expected physical block;
-- FAT32 mounts and lists through a read-only block-device view.
+- FAT32 mounts and lists through a read-only block-device view;
+- virtio adapters preserve capacity and multi-block translation;
+- EMMC CSD v1 and high-capacity layouts produce bounded sector counts;
+- the EMMC descriptor remains read-only and rejects an unready transport.
 
 ## Migration sequence
 
-1. Establish and test the generic descriptor and view contract.
-2. Add board adapters that publish QEMU virtio-blk and diagnostic EMMC as block
-   devices with honest capacity and read-only metadata.
-3. Add a canonical `fat32_mount_device()` path while retaining callback
+1. **Complete:** establish and test the generic descriptor and view contract.
+2. **Complete:** publish QEMU virtio-blk and diagnostic EMMC as block devices
+   with honest capacity and read-only metadata.
+3. **Next:** add a canonical `fat32_mount_device()` path while retaining callback
    compatibility temporarily.
 4. Replace the legacy `block_view_t` callback wrapper with block-device views.
 5. Make partition discovery return bounded descriptors rather than raw offsets.
