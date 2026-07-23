@@ -25,16 +25,37 @@ jobs:
       - name: Run focused metadata gate
         run: bash tests/run_vfs_metadata_abi_test.sh
       - name: Run nested FAT32 gate
-        run: bash tests/run_fat32_directory_test.sh
+        id: nested
+        shell: bash
+        run: |
+          set +e
+          bash tests/run_fat32_directory_test.sh > native-metadata-gate.log 2>&1
+          status=$?
+          tail -n 120 native-metadata-gate.log
+          exit "$status"
+      - name: Publish concise failure diagnostic
+        if: failure() && steps.nested.outcome == 'failure'
+        run: |
+          tail -n 120 native-metadata-gate.log > native-metadata-diagnostic.txt
+          git reset --hard HEAD
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add native-metadata-diagnostic.txt
+          git commit -m "Record temporary native metadata diagnostic"
+          git push origin HEAD:agent/v03-vfs-metadata-abi-v2
       - name: Build kernel and userland
+        if: success()
         run: make
       - name: Enforce kernel size
+        if: success()
         run: make size
       - name: Remove one-shot refinement files
+        if: success()
         run: |
           git rm tools/refine_vfs_metadata_native.py
           git rm .github/workflows/refine-vfs-metadata-native.yml
       - name: Commit native metadata refinement
+        if: success()
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
