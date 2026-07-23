@@ -22,11 +22,24 @@ current_serial=""
 current_qemu_log=""
 current_gdb_log=""
 
+force_stop_qemu() {
+    local pid="$1"
+
+    [[ -n "$pid" ]] || return 0
+    kill -TERM "$pid" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+        if ! kill -0 "$pid" >/dev/null 2>&1; then
+            wait "$pid" >/dev/null 2>&1 || true
+            return 0
+        fi
+        sleep 0.05
+    done
+    kill -KILL "$pid" >/dev/null 2>&1 || true
+    wait "$pid" >/dev/null 2>&1 || true
+}
+
 cleanup() {
-    if [[ -n "$current_pid" ]]; then
-        kill "$current_pid" >/dev/null 2>&1 || true
-        wait "$current_pid" >/dev/null 2>&1 || true
-    fi
+    force_stop_qemu "$current_pid"
     rm -f "$current_monitor"
 }
 trap cleanup EXIT
@@ -140,6 +153,40 @@ for _ in range(100):
 PY
 }
 
+# QEMU normally exits immediately after the monitor receives `quit`. Bound the
+# reap anyway: a stuck monitor/teardown must not consume the whole CI job. A
+# forced teardown is acceptable after the serial contract has been observed;
+# its marker remains in the artifact for diagnosis.
+reap_qemu() {
+    local pid="$1"
+    local marker="$2"
+    local status=0
+    local watchdog
+
+    rm -f "$marker"
+    (
+        sleep 2
+        if kill -0 "$pid" >/dev/null 2>&1; then
+            printf 'QEMU did not exit within two seconds after monitor quit\n' >"$marker"
+            kill -TERM "$pid" >/dev/null 2>&1 || true
+            sleep 1
+            kill -KILL "$pid" >/dev/null 2>&1 || true
+        fi
+    ) &
+    watchdog=$!
+
+    wait "$pid" || status=$?
+    kill "$watchdog" >/dev/null 2>&1 || true
+    wait "$watchdog" >/dev/null 2>&1 || true
+
+    if [[ -f "$marker" ]]; then
+        printf 'NOTE: forced bounded QEMU teardown for pid %s\n' "$pid" | \
+            tee -a "$METADATA_LOG"
+        return 0
+    fi
+    return "$status"
+}
+
 for ((iteration = 1; iteration <= BOOT_COUNT; iteration++)); do
     label=$(printf '%02d' "$iteration")
     serial_log="$OUTPUT_DIR/boot-$label.log"
@@ -147,9 +194,11 @@ for ((iteration = 1; iteration <= BOOT_COUNT; iteration++)); do
     monitor="$OUTPUT_DIR/monitor-$label.sock"
     gdb_log="$OUTPUT_DIR/gdb-$label.log"
     addr_log="$OUTPUT_DIR/addr2line-$label.log"
+    teardown_marker="$OUTPUT_DIR/teardown-$label.forced"
     port=$((GDB_PORT_BASE + iteration))
 
-    rm -f "$serial_log" "$qemu_log" "$monitor" "$gdb_log" "$addr_log"
+    rm -f "$serial_log" "$qemu_log" "$monitor" "$gdb_log" "$addr_log" \
+        "$teardown_marker"
     current_monitor="$monitor"
     current_serial="$serial_log"
     current_qemu_log="$qemu_log"
@@ -219,18 +268,18 @@ PY
             "$ADDR2LINE" -e "$KERNEL_ELF" -f -C "$elr" >"$addr_log" 2>&1 || true
         fi
         quit_monitor "$monitor"
-        wait "$current_pid" >/dev/null 2>&1 || true
+        reap_qemu "$current_pid" "$teardown_marker" || true
         current_pid=""
         fail "EL1 panic reproduced on FAT32 soak boot $iteration/$BOOT_COUNT"
     elif [[ "$monitor_status" -ne 0 ]]; then
         quit_monitor "$monitor"
-        wait "$current_pid" >/dev/null 2>&1 || true
+        reap_qemu "$current_pid" "$teardown_marker" || true
         current_pid=""
         fail "QEMU or monitor failed on boot $iteration/$BOOT_COUNT (status $monitor_status)"
     fi
 
     qemu_status=0
-    wait "$current_pid" || qemu_status=$?
+    reap_qemu "$current_pid" "$teardown_marker" || qemu_status=$?
     current_pid=""
     current_monitor=""
 
