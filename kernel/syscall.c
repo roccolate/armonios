@@ -1,4 +1,11 @@
-/* EL0 syscall dispatcher. */
+/*
+ * EL0 syscall dispatcher.
+ *
+ * Syscall numbers and argument registers are ABI. Domain-specific syscall
+ * bodies live in syscall_*.c; this file stays at the trap boundary: pump
+ * asynchronous work, save the current context, dispatch, and write back x0.
+ */
+
 #include "kernel/syscall.h"
 
 #include <stdint.h>
