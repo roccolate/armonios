@@ -21,7 +21,6 @@ typedef int (*fat32_write_sector_fn_t)(void *context, uint32_t lba,
                                         const uint8_t *buffer);
 
 typedef struct {
-    const block_device_t *device;
     fat32_read_sector_fn_t read_sector;
     fat32_write_sector_fn_t write_sector;
     void *context;
