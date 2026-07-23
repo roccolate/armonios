@@ -37,8 +37,8 @@ jobs:
           Path('/tmp/abi-migration.b64').write_text(payload + '\n')
           PY
             test -s /tmp/abi-migration.b64
-            base64 -d /tmp/abi-migration.b64 | gzip -d > /tmp/apply_vfs_metadata_abi.py
-            python3 /tmp/apply_vfs_metadata_abi.py
+            base64 -d /tmp/abi-migration.b64 | gzip -d > apply_vfs_metadata_abi.py
+            python3 apply_vfs_metadata_abi.py
           } > migration-output.log 2>&1
 
       - name: Upload migration diagnostic
@@ -46,7 +46,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vfs-metadata-abi-migration-error
-          path: migration-output.log
+          path: |
+            migration-output.log
+            apply_vfs_metadata_abi.py
           if-no-files-found: error
           retention-days: 7
 
