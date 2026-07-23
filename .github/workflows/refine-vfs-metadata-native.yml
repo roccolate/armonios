@@ -22,6 +22,22 @@ jobs:
           sudo apt-get install -y binutils-aarch64-linux-gnu gcc gcc-aarch64-linux-gnu make
       - name: Apply guarded refinement
         run: python3 tools/refine_vfs_metadata_native.py
+      - name: Preserve directory name before secondary FAT reads
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('kernel/fat32_directory.c')
+          text = p.read_text()
+          old = '''                if (dir_fill_info(fs, entry, lba, entry_offset, &info) != 0 ||
+                      dir_copy_name(entry, entries[output].name) != 0) {
+          '''
+          new = '''                if (dir_copy_name(entry, entries[output].name) != 0 ||
+                      dir_fill_info(fs, entry, lba, entry_offset, &info) != 0) {
+          '''
+          if old not in text:
+              raise SystemExit('missing FAT directory copy ordering block')
+          p.write_text(text.replace(old, new, 1))
+          PY
       - name: Run focused metadata gate
         run: bash tests/run_vfs_metadata_abi_test.sh
       - name: Run nested FAT32 gate
@@ -67,7 +83,7 @@ jobs:
           set +e
           bash tests/run_fat32_directory_test.sh > /tmp/native-metadata-diagnostic.txt 2>&1
           printf '\nsource context:\n' >> /tmp/native-metadata-diagnostic.txt
-          nl -ba tests/test_fat32_directories.c | sed -n '185,205p' >> /tmp/native-metadata-diagnostic.txt
+          nl -ba tests/test_fat32_directories.c | sed -n '185,235p' >> /tmp/native-metadata-diagnostic.txt
           printf '\noriginal gate:\n' >> /tmp/native-metadata-diagnostic.txt
           tail -n 20 native-metadata-gate.log >> /tmp/native-metadata-diagnostic.txt
           git reset --hard HEAD
