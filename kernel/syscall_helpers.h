@@ -12,15 +12,21 @@
 
 #include <stdint.h>
 
+#include "include/armonios/abi/errors.h"
 #include "kernel/gui.h"
 #include "kernel/panel_boot_argv.h"
 #include "kernel/process.h"
 
-#define ERR_NOENT (-3LL)
-#define ERR_BADF  (-5LL)
-#define ERR_INVAL (-7LL)
-#define ERR_AGAIN (-11LL)
-#define ERR_PERM  (-13LL)
+/*
+ * Compatibility names for existing kernel syscall implementations. Public
+ * userland code should use ARMONIOS_ERR_* through libkarm rather than including
+ * this kernel-private helper header.
+ */
+#define ERR_NOENT ARMONIOS_ERR_NOENT
+#define ERR_BADF  ARMONIOS_ERR_BADF
+#define ERR_INVAL ARMONIOS_ERR_INVAL
+#define ERR_AGAIN ARMONIOS_ERR_AGAIN
+#define ERR_PERM  ARMONIOS_ERR_PERM
 
 int64_t sys_owner_window(process_t *process, uint64_t window_id,
                          gui_desktop_t **out_desktop,
