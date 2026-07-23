@@ -1,0 +1,46 @@
+name: Diagnose verification failure
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnose-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            binutils-aarch64-linux-gnu \
+            gcc \
+            gcc-aarch64-linux-gnu \
+            make \
+            qemu-system-arm
+      - name: Run verification with bounded failure output
+        run: |
+          set +e
+          bash tools/verify.sh > verify-full.log 2>&1
+          status=$?
+          echo "verification status: $status"
+          echo "recent gates:"
+          grep '^==>' verify-full.log | tail -n 8 || true
+          echo "last 160 lines:"
+          tail -n 160 verify-full.log
+          exit "$status"
+      - name: Upload complete verification log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-full-${{ github.sha }}
+          path: verify-full.log
+          if-no-files-found: warn
+          retention-days: 7
