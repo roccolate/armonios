@@ -2,6 +2,19 @@
 
 #include "../kernel/vfs.h"
 
+#if defined(ARMONIOS_VFS_PATH_STANDALONE)
+#include "../kernel/process.h"
+
+process_t *process_current(void) {
+    return 0;
+}
+
+process_t *process_find(uint32_t pid) {
+    (void)pid;
+    return 0;
+}
+#endif
+
 typedef struct {
     uint32_t open_calls;
     uint32_t unlink_calls;
@@ -210,7 +223,6 @@ static void test_canonical_mount_resolution_prefers_longest_prefix(void) {
 }
 
 static void test_static_nodes_use_canonical_identity(void) {
-    static const uint8_t value = 0x33;
     vfs_node_t node = {
         .path = "/boot//tools/./../app/",
         .size = 1,
@@ -222,7 +234,6 @@ static void test_static_nodes_use_canonical_identity(void) {
         .read = mounted_read,
     };
 
-    (void)value;
     vfs_reset();
     CHECK_EQ(0, vfs_mount_static(&node, 1));
     CHECK_TRUE(vfs_find("/boot/./app") != 0);
@@ -266,3 +277,9 @@ static void test_vfs_mount_dispatch_constructor(void) {
     test_static_nodes_use_canonical_identity();
     test_mutation_stays_inside_one_canonical_mount();
 }
+
+#if defined(ARMONIOS_VFS_PATH_STANDALONE)
+int main(void) {
+    return 0;
+}
+#endif
