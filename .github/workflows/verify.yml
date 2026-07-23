@@ -70,6 +70,9 @@ jobs:
           set -o pipefail
           bash tests/run_runtime_service_test.sh 2>&1 | tee runtime-service-test.log
 
+      - name: Test VMM soak lifecycle
+        run: bash tests/run_vmm_soak_lifecycle_test.sh
+
       - name: Upload runtime-service log
         if: always()
         uses: actions/upload-artifact@v4
