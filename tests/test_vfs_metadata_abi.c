@@ -70,7 +70,7 @@ int main(void) {
     arm_dirent_v2_t entries[2];
     uint64_t count = 0;
 
-    if (!require(ARMONIOS_ABI_VERSION == 0x00010001U, "ABI version") ||
+    if (!require(ARMONIOS_ABI_VERSION == 0x00010000U, "ABI version") ||
         !require(SYS_STAT == 45ULL && SYS_READDIR == 46ULL,
                  "legacy syscall numbers") ||
         !require(SYS_STAT_V2 == 49ULL && SYS_READDIR_V2 == 50ULL,
