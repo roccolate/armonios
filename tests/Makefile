@@ -1,6 +1,6 @@
 CC=gcc
 OBJCOPY=objcopy
-CFLAGS=-I.. -I../drivers -Iunity -g -O0 -Wall -Wextra -DARMONIOS_TEST
+CFLAGS=-I.. -I../drivers -I../programs -Iunity -g -O0 -Wall -Wextra -DARMONIOS_TEST
 BUILD_DIR := ../build
 APPS_DIR  := programs/apps
 
@@ -64,11 +64,18 @@ SRCS=unity/unity.c main.c \
      $(APP_BLOB_OBJS)
 
 TARGET=run_tests
+LIBKARM_ARENA_TARGET=run_libkarm_arena_tests
+LIBKARM_ARENA_SRCS=unity/unity.c test_libkarm_arena.c \
+                   ../programs/libkarm/arena.c \
+                   ../programs/libkarm/arena_map.c
 
-all: $(TARGET)
+all: $(TARGET) $(LIBKARM_ARENA_TARGET)
 
 $(TARGET): $(SRCS) $(APP_BLOB_OBJS)
 	$(CC) $(CFLAGS) $(SRCS) -o $@
+
+$(LIBKARM_ARENA_TARGET): $(LIBKARM_ARENA_SRCS)
+	$(CC) $(CFLAGS) $(LIBKARM_ARENA_SRCS) -o $@
 
 %.host_blob.o: %.bin
 	$(OBJCOPY) -I binary -O elf64-x86-64 -B i386:x86-64 \
@@ -81,8 +88,9 @@ $(TARGET): $(SRCS) $(APP_BLOB_OBJS)
 
 test: all
 	./$(TARGET)
+	./$(LIBKARM_ARENA_TARGET)
 
 .PHONY: clean
 
 clean:
-	rm -f $(TARGET) *.o
+	rm -f $(TARGET) $(LIBKARM_ARENA_TARGET) *.o
