@@ -4,17 +4,19 @@
 /*
  * Public ArmoniOS ABI revision.
  *
- * MAJOR changes are reserved for deliberately incompatible public ABI changes.
- * MINOR changes are append-only: new syscalls, flags, structures, or fields may
- * be added without changing existing numbers, layouts, or semantics.
+ * The project remains pre-release. Additive ABI work may land while this value
+ * stays at 1.0; the first official release will establish the compatibility
+ * baseline. After that point, MAJOR changes are incompatible and MINOR changes
+ * are append-only additions that preserve existing numbers, layouts, and
+ * semantics.
  *
  * This is a compile-time contract identifier, not a runtime capability query.
- * Applications must not infer that every future feature exists from the minor
- * value alone. A capability/query syscall can be added later without changing
- * this header's compatibility rules.
+ * Applications must not infer feature availability from the version alone. A
+ * capability/query syscall can be added later without changing this header's
+ * compatibility rules.
  */
 #define ARMONIOS_ABI_MAJOR 1U
-#define ARMONIOS_ABI_MINOR 1U
+#define ARMONIOS_ABI_MINOR 0U
 
 /* Keep this macro valid in both C expressions and preprocessor #if checks. */
 #define ARMONIOS_ABI_VERSION_ENCODE(major, minor) \
@@ -23,11 +25,11 @@
 #define ARMONIOS_ABI_VERSION \
     ARMONIOS_ABI_VERSION_ENCODE(ARMONIOS_ABI_MAJOR, ARMONIOS_ABI_MINOR)
 
-#if ARMONIOS_ABI_VERSION != 0x00010001U
+#if ARMONIOS_ABI_VERSION != 0x00010000U
 #error "ABI drift: update the public ABI version intentionally"
 #endif
 
-_Static_assert(ARMONIOS_ABI_VERSION == 0x00010001U,
+_Static_assert(ARMONIOS_ABI_VERSION == 0x00010000U,
                "ABI drift: update the public ABI version intentionally");
 
 #endif
