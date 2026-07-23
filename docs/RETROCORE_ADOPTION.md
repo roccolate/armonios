@@ -34,7 +34,8 @@ kernel
 
 ## Foundation adopted
 
-The first adoption slice adds no new shipping application behavior:
+The first adoption slice established the shared boundary without changing
+shipping application behavior:
 
 - `include/armonios/abi/gui.h` is the shared kernel/userland GUI ABI contract.
 - `programs/libarmdesk/gui.h` is the canonical desktop syscall wrapper.
@@ -45,6 +46,32 @@ The first adoption slice adds no new shipping application behavior:
   `retrocore-spec/contracts/theme-tokens.md`.
 - A standalone host test protects ABI size, token values, and rectangle
   behavior.
+
+## First application-consumed slice
+
+Control is the first shipping application migrated onto reusable `libarmdesk`
+models. The slice adds:
+
+- `layout.h` for bounded caller-owned row and column placement;
+- `event.h` for converting absolute desktop pointer coordinates into
+  content-local coordinates using explicit live window bounds;
+- `widget.h` for caller-owned label and button state;
+- `render.h` for translating labels and buttons to the existing text and
+  rectangle GUI syscalls.
+
+Control consumes semantic theme tokens, shared rectangles, action-button
+layout, rendering, hit testing, pointer conversion, and hand-cursor regions.
+Its registry entries, INI parsing, scrolling, editing, keyboard shortcuts, and
+`/fat/CONFIG.INI` persistence remain application-owned.
+
+The widget models contain no platform calls, require no heap, and use no global
+mutable state. The renderer is the only new layer that depends on the desktop
+syscall wrapper. Host tests cover model boundaries and the exact syscall
+arguments emitted by the renderer.
+
+This slice intentionally does not generalize Control's registry rows into a
+list view. That abstraction should wait until Files and Monitor provide a
+second real consumer.
 
 ## Deferred candidates
 
@@ -57,7 +84,10 @@ Adopt these only with a concrete ArmoniOS consumer and a measured size budget:
 | taskbar model | Panel | panel is moved onto libarmdesk models |
 | app manifest parser | launcher and external apps | apps are no longer only compiled-in blobs |
 | canvas/draw list | icons, offscreen widgets, images | generic bitmap/blit path exists |
-| logical event adapter | widgets and replay fixtures | `data1`/`data2` meanings are fully documented |
+
+The logical pointer-event adapter is no longer deferred; `event.h` implements
+the first bounded conversion needed by Control. Broader keyboard/focus routing
+remains future work.
 
 ## Promotion checklist
 
