@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "include/armonios/abi/base.h"
+#include "base.h"
 
 #define ARM_PROCESS_NAME_LEN 16U
 
