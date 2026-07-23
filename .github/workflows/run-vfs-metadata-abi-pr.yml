@@ -38,6 +38,27 @@ jobs:
           PY
             test -s /tmp/abi-migration.b64
             base64 -d /tmp/abi-migration.b64 | gzip -d > apply_vfs_metadata_abi.py
+            python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('apply_vfs_metadata_abi.py')
+          text = path.read_text()
+          old = '''replace_once("include/armonios/abi/version.h", "0x00010000U", "0x00010001U",
+                       "version preprocessor guard")
+          replace_once("include/armonios/abi/version.h", "0x00010000U", "0x00010001U",
+                       "version static assert")'''
+          new = '''version_path = Path("include/armonios/abi/version.h")
+          version_text = version_path.read_text()
+          if version_text.count("0x00010000U") != 2:
+              raise SystemExit(
+                  "version guards: expected exactly two 1.0 constants in "
+                  "include/armonios/abi/version.h"
+              )
+          version_path.write_text(version_text.replace("0x00010000U", "0x00010001U"))'''
+          if text.count(old) != 1:
+              raise SystemExit('version migration block not found exactly once')
+          path.write_text(text.replace(old, new, 1))
+          PY
             python3 apply_vfs_metadata_abi.py
           } > migration-output.log 2>&1
 
