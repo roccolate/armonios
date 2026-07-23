@@ -1,0 +1,84 @@
+# Structured VFS metadata ABI
+
+ArmoniOS ABI 1.1 adds structured file metadata without changing the frozen
+`SYS_STAT` and `SYS_READDIR` contracts.
+
+## Compatibility
+
+The original interfaces remain unchanged:
+
+- `SYS_STAT` (`45`) writes the 8-byte `arm_stat_t` size payload.
+- `SYS_READDIR` (`46`) writes the historical newline-delimited byte stream.
+
+New applications may use:
+
+- `SYS_STAT_V2` (`49`)
+- `SYS_READDIR_V2` (`50`)
+
+A standalone user image that only knows ABI 1.0 continues to use the old
+numbers and layouts.
+
+## `arm_stat_v2_t`
+
+```c
+typedef struct {
+    uint32_t version;      /* ARM_VFS_METADATA_VERSION */
+    uint32_t struct_size;  /* sizeof(arm_stat_v2_t) */
+    uint64_t size;
+    uint32_t type;
+    uint32_t attributes;
+    uint64_t reserved;
+} arm_stat_v2_t;
+```
+
+Before calling `kli_stat_v2`, the caller sets `version` and `struct_size`. The
+kernel rejects unknown versions or sizes instead of guessing the caller's
+layout. On success every field is initialized and `reserved` is zero.
+
+## `arm_dirent_v2_t`
+
+```c
+typedef struct {
+    uint32_t version;
+    uint32_t struct_size;
+    uint64_t size;
+    uint32_t type;
+    uint32_t attributes;
+    uint64_t reserved;
+    char name[64];
+} arm_dirent_v2_t;
+```
+
+`SYS_READDIR_V2(path, start_index, entries, max_entries)` returns the number of
+complete entries copied. Pagination uses a logical entry index, not a byte
+offset. Names are NUL-terminated, directory names do not include the legacy
+trailing slash, and entries are never partially returned.
+
+The first implementation accepts at most eight entries per syscall so the
+kernel can use bounded stack storage. Callers continue with
+`start_index += returned_count`.
+
+## Types
+
+- `ARM_FILE_TYPE_UNKNOWN = 0`
+- `ARM_FILE_TYPE_REGULAR = 1`
+- `ARM_FILE_TYPE_DIRECTORY = 2`
+
+## Attributes
+
+The ABI reserves generic bits for read-only, hidden, system, and archive. The
+initial VFS adapter returns zero when the underlying filesystem does not expose
+an attribute. This is deliberate: absence of metadata is not fabricated as a
+filesystem-specific value.
+
+## Current adapter
+
+The first kernel implementation adapts the existing VFS contracts:
+
+- `stat_v2` obtains size from `vfs_stat` and identifies directories through the
+  existing listing operation;
+- `readdir_v2` converts complete entries from the legacy listing stream and
+  obtains child sizes/types through `stat_v2`.
+
+This keeps the ABI independent from FAT32. A later filesystem may add native
+structured callbacks without changing syscall numbers or public layouts.
