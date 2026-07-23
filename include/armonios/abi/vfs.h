@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "include/armonios/abi/base.h"
+#include "base.h"
 
 /* Standard descriptors visible to EL0. */
 #define ARM_FD_STDIN     0
