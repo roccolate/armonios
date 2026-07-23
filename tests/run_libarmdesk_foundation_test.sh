@@ -15,6 +15,8 @@ compile_and_run() {
         -std=c11 \
         -Wall -Wextra -Werror -pedantic \
         -I"$ROOT_DIR" \
+        -I"$ROOT_DIR/programs" \
+        -I"$ROOT_DIR/programs/libkarm" \
         "$ROOT_DIR/tests/$source" \
         -o "$TMP_DIR/$output"
 
