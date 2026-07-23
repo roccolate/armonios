@@ -6,8 +6,7 @@
 /*
  * Saved general-purpose and exception-return state captured by the AArch64
  * exception vector. EL0 syscall, fault, and IRQ paths pass this frame through
- * syscall, process-dispatch, and user-fault handling. Fatal current-EL vectors
- * preserve the same layout so panic evidence contains the original registers.
+ * syscall, process-dispatch, and user-fault handling.
  */
 typedef struct {
     uint64_t x[31];
@@ -22,15 +21,13 @@ typedef struct {
 void exception_init(void);
 
 /**
- * exception_handler - Print fatal exception diagnostics and halt.
+ * exception_handler - Print exception diagnostics and halt.
  */
-void exception_handler(exception_frame_t *frame, uint64_t esr, uint64_t far,
-                       uint64_t kind);
+void exception_handler(uint64_t esr, uint64_t far, uint64_t elr, uint64_t kind);
 
 /**
  * exception_lower_sync_handler - Dispatch synchronous exceptions from EL0.
  */
-void exception_lower_sync_handler(exception_frame_t *frame, uint64_t esr,
-                                  uint64_t far);
+void exception_lower_sync_handler(exception_frame_t *frame, uint64_t esr, uint64_t far);
 
 #endif
