@@ -33,15 +33,47 @@ jobs:
           status=$?
           tail -n 120 native-metadata-gate.log
           exit "$status"
-      - name: Publish concise failure diagnostic
+      - name: Publish assertion-line diagnostic
         if: failure() && steps.nested.outcome == 'failure'
         run: |
-          tail -n 120 native-metadata-gate.log > native-metadata-diagnostic.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('tests/test_fat32_directories.c')
+          text = p.read_text()
+          text = text.replace('#include <stdint.h>\n', '#include <stdint.h>\n#include <stdio.h>\n', 1)
+          old = '''static void directory_check(int condition) {
+              if (!condition) {
+                  __builtin_trap();
+              }
+          }
+
+          #define DIR_CHECK(expr) directory_check((expr) != 0)
+          #define DIR_EQ(expected, actual) directory_check((expected) == (actual))
+          '''
+          new = '''static void directory_check(int condition, int line) {
+              if (!condition) {
+                  fprintf(stderr, "ASSERT_LINE=%d\\n", line);
+                  __builtin_trap();
+              }
+          }
+
+          #define DIR_CHECK(expr) directory_check((expr) != 0, __LINE__)
+          #define DIR_EQ(expected, actual) directory_check((expected) == (actual), __LINE__)
+          '''
+          if old not in text:
+              raise SystemExit('missing directory assertion block')
+          p.write_text(text.replace(old, new, 1))
+          PY
+          set +e
+          bash tests/run_fat32_directory_test.sh > /tmp/native-metadata-diagnostic.txt 2>&1
+          printf '\noriginal gate:\n' >> /tmp/native-metadata-diagnostic.txt
+          tail -n 20 native-metadata-gate.log >> /tmp/native-metadata-diagnostic.txt
           git reset --hard HEAD
+          cp /tmp/native-metadata-diagnostic.txt native-metadata-diagnostic.txt
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add native-metadata-diagnostic.txt
-          git commit -m "Record temporary native metadata diagnostic"
+          git commit -m "Refresh temporary native metadata diagnostic"
           git push origin HEAD:agent/v03-vfs-metadata-abi-v2
       - name: Build kernel and userland
         if: success()
@@ -54,6 +86,7 @@ jobs:
         run: |
           git rm tools/refine_vfs_metadata_native.py
           git rm .github/workflows/refine-vfs-metadata-native.yml
+          git rm -f native-metadata-diagnostic.txt
       - name: Commit native metadata refinement
         if: success()
         run: |
