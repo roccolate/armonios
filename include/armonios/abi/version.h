@@ -1,8 +1,6 @@
 #ifndef ARMONIOS_INCLUDE_ARMONIOS_ABI_VERSION_H
 #define ARMONIOS_INCLUDE_ARMONIOS_ABI_VERSION_H
 
-#include <stdint.h>
-
 /*
  * Public ArmoniOS ABI revision.
  *
@@ -18,11 +16,16 @@
 #define ARMONIOS_ABI_MAJOR 1U
 #define ARMONIOS_ABI_MINOR 0U
 
+/* Keep this macro valid in both C expressions and preprocessor #if checks. */
 #define ARMONIOS_ABI_VERSION_ENCODE(major, minor) \
-    ((((uint32_t)(major)) << 16U) | ((uint32_t)(minor) & 0xffffU))
+    (((major) & 0xffffU) << 16U | ((minor) & 0xffffU))
 
 #define ARMONIOS_ABI_VERSION \
     ARMONIOS_ABI_VERSION_ENCODE(ARMONIOS_ABI_MAJOR, ARMONIOS_ABI_MINOR)
+
+#if ARMONIOS_ABI_VERSION != 0x00010000U
+#error "ABI drift: update the public ABI version intentionally"
+#endif
 
 _Static_assert(ARMONIOS_ABI_VERSION == 0x00010000U,
                "ABI drift: update the public ABI version intentionally");
