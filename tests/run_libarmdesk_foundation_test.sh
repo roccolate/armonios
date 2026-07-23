@@ -7,12 +7,20 @@ CC_BIN="${CC:-gcc}"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-"$CC_BIN" \
-    -std=c11 \
-    -Wall -Wextra -Werror -pedantic \
-    -I"$ROOT_DIR" \
-    "$ROOT_DIR/tests/libarmdesk_foundation_test.c" \
-    -o "$TMP_DIR/libarmdesk_foundation_test"
+compile_and_run() {
+    local source="$1"
+    local output="$2"
 
-"$TMP_DIR/libarmdesk_foundation_test"
-printf 'PASS: libarmdesk foundation\n'
+    "$CC_BIN" \
+        -std=c11 \
+        -Wall -Wextra -Werror -pedantic \
+        -I"$ROOT_DIR" \
+        "$ROOT_DIR/tests/$source" \
+        -o "$TMP_DIR/$output"
+
+    "$TMP_DIR/$output"
+}
+
+compile_and_run libarmdesk_foundation_test.c libarmdesk_foundation_test
+compile_and_run libarmdesk_widgets_test.c libarmdesk_widgets_test
+printf 'PASS: libarmdesk foundation and widget models\n'
