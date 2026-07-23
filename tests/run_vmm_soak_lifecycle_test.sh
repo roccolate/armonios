@@ -34,7 +34,7 @@ monitor_path = monitor_arg.split(",", 1)[0].removeprefix("unix:")
 with open(serial_path, "w", encoding="utf-8") as stream:
     stream.write("storage: initialized\n")
     stream.write("FAT32 root: mounted\n")
-    stream.write("panel: lifecycle test\n")
+    stream.write("panel: starting\n")
 
 try:
     os.unlink(monitor_path)
