@@ -62,17 +62,8 @@ static const char *exception_name(uint64_t kind) {
     }
 }
 
-static void print_saved_reg(const char *name, uint64_t value) {
-    uart_puts(name);
-    print_hex64(value);
-    uart_puts("\n");
-}
-
-void exception_handler(exception_frame_t *frame, uint64_t esr, uint64_t far,
-                       uint64_t kind) {
+void exception_handler(uint64_t esr, uint64_t far, uint64_t elr, uint64_t kind) {
     uint64_t sp_val;
-    uint64_t elr = frame == 0 ? 0 : frame->elr;
-
     __asm__ volatile("mov %0, sp" : "=r"(sp_val));
 
     uart_puts("\n");
@@ -82,25 +73,18 @@ void exception_handler(exception_frame_t *frame, uint64_t esr, uint64_t far,
     uart_puts("kind:    ");
     uart_puts(exception_name(kind));
     uart_puts("\n");
-    print_saved_reg("ESR_EL1: ", esr);
-    print_saved_reg("ELR_EL1: ", elr);
-    print_saved_reg("FAR_EL1: ", far);
-    print_saved_reg("SP_EL1:  ", sp_val);
-
-    if (frame != 0) {
-        print_saved_reg("X0:      ", frame->x[0]);
-        print_saved_reg("X1:      ", frame->x[1]);
-        print_saved_reg("X2:      ", frame->x[2]);
-        print_saved_reg("X3:      ", frame->x[3]);
-        print_saved_reg("X19:     ", frame->x[19]);
-        print_saved_reg("X20:     ", frame->x[20]);
-        print_saved_reg("X21:     ", frame->x[21]);
-        print_saved_reg("X29:     ", frame->x[29]);
-        print_saved_reg("X30:     ", frame->x[30]);
-        print_saved_reg("SPSR:    ", frame->spsr);
-        print_saved_reg("SP_EL0:  ", frame->sp_el0);
-    }
-
+    uart_puts("ESR_EL1: ");
+    print_hex64(esr);
+    uart_puts("\n");
+    uart_puts("ELR_EL1: ");
+    print_hex64(elr);
+    uart_puts("\n");
+    uart_puts("FAR_EL1: ");
+    print_hex64(far);
+    uart_puts("\n");
+    uart_puts("SP_EL1:  ");
+    print_hex64(sp_val);
+    uart_puts("\n");
     uart_puts("================================================================\n");
     uart_puts("SYSTEM HALTED\n");
     uart_puts("================================================================\n");
@@ -120,7 +104,7 @@ static void handle_user_fault(exception_frame_t *frame, uint64_t esr,
     process_t *current = process_current();
 
     if (current == 0 || frame == 0) {
-        exception_handler(frame, esr, far, 8);
+        exception_handler(esr, far, frame == 0 ? 0 : frame->elr, 8);
         return;
     }
 
