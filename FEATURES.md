@@ -48,7 +48,7 @@ Before implementation:
 
 ## libkarm and libarmdesk separation
 
-**Status:** proposed userland architecture cleanup.
+**Status:** foundation implemented; application and widget migration remains.
 
 Formalize two libraries with a one-way dependency:
 
@@ -68,13 +68,22 @@ applications -> libarmdesk -> libkarm -> kernel syscalls
 - Move shared syscall numbers and ABI structures into public headers under
   `include/armonios/abi/` so userland does not include kernel-private headers.
 
-Initial target structure:
+Foundation now present:
 
 ```text
 programs/libkarm/       freestanding userland runtime
-programs/libarmdesk/    GUI wrappers and desktop toolkit
-include/armonios/abi/   shared kernel/userland ABI contracts
+programs/libarmdesk/    GUI wrappers, geometry, and semantic themes
+include/armonios/abi/   shared kernel/userland GUI ABI contract
 ```
 
-This split should happen before growing a shared widget toolkit, so modern UI
-features do not accumulate inside a single header-only GUI wrapper.
+The first slice deliberately adds no widget behavior to shipping applications.
+It establishes the boundary, keeps the old include path compatible, and adds a
+host test before application migration begins. See `docs/RETROCORE_ADOPTION.md`
+for the selective `retrocore-spec` and `rkc` adoption rules.
+
+Next steps:
+
+1. Move application includes to `libarmdesk/gui.h` one app at a time.
+2. Measure binary deltas before instantiating themes or shared models.
+3. Add a small widget state model before drawing higher-level controls.
+4. Remove the compatibility path only after every application has migrated.

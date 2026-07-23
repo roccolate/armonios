@@ -7,8 +7,8 @@
 // through the raw trampolines in syscall.S.
 //
 // The window/compositor syscalls (70..86) intentionally live in
-// programs/libkarmdesk, not here. That keeps desktop wrappers separate
-// from the stable process / memory / I/O / IPC surface.
+// programs/libarmdesk, not here. programs/libkarmdesk remains only as a
+// temporary compatibility include while applications migrate.
 //
 // Return value: the raw `long` returned by the kernel. >= 0 on
 // success; negative values are error codes from <errno.h>.

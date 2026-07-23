@@ -33,6 +33,12 @@ jobs:
             make \
             qemu-system-arm
 
+      - name: Test libarmdesk foundation
+        run: bash tests/run_libarmdesk_foundation_test.sh
+
+      - name: Test IRQ origin gate
+        run: bash tests/run_irq_origin_gate_test.sh
+
       - name: Build kernel and userland
         run: make
 
@@ -66,6 +72,9 @@ jobs:
         run: |
           set -o pipefail
           bash tests/run_runtime_service_test.sh 2>&1 | tee runtime-service-test.log
+
+      - name: Test VMM soak lifecycle
+        run: bash tests/run_vmm_soak_lifecycle_test.sh
 
       - name: Upload runtime-service log
         if: always()

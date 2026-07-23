@@ -5,9 +5,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KERNEL_BUILD_DIR="${VMM_SOAK_KERNEL_BUILD_DIR:-$ROOT_DIR/build}"
 OUTPUT_DIR="${VMM_SOAK_OUTPUT_DIR:-$ROOT_DIR/build-vmm-soak}"
-BOOT_COUNT="${VMM_SOAK_BOOT_COUNT:-10}"
+BOOT_COUNT="${VMM_SOAK_BOOT_COUNT:-30}"
 BOOT_SECONDS="${VMM_SOAK_BOOT_SECONDS:-10}"
 GDB_PORT_BASE="${VMM_SOAK_GDB_PORT_BASE:-24600}"
+GDB_TIMEOUT_SECONDS="${VMM_SOAK_GDB_TIMEOUT_SECONDS:-20}"
 QEMU="${QEMU_SYSTEM_AARCH64:-qemu-system-aarch64}"
 GDB="${GDB_MULTIARCH:-gdb-multiarch}"
 ADDR2LINE="${AARCH64_ADDR2LINE:-aarch64-linux-gnu-addr2line}"
@@ -22,11 +23,24 @@ current_serial=""
 current_qemu_log=""
 current_gdb_log=""
 
+force_stop_qemu() {
+    local pid="$1"
+
+    [[ -n "$pid" ]] || return 0
+    kill -TERM "$pid" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+        if ! kill -0 "$pid" >/dev/null 2>&1; then
+            wait "$pid" >/dev/null 2>&1 || true
+            return 0
+        fi
+        sleep 0.05
+    done
+    kill -KILL "$pid" >/dev/null 2>&1 || true
+    wait "$pid" >/dev/null 2>&1 || true
+}
+
 cleanup() {
-    if [[ -n "$current_pid" ]]; then
-        kill "$current_pid" >/dev/null 2>&1 || true
-        wait "$current_pid" >/dev/null 2>&1 || true
-    fi
+    force_stop_qemu "$current_pid"
     rm -f "$current_monitor"
 }
 trap cleanup EXIT
@@ -43,13 +57,15 @@ fail() {
     exit 1
 }
 
-for command in python3 "$QEMU" "$GDB" "$ADDR2LINE"; do
+for command in python3 timeout "$QEMU" "$GDB" "$ADDR2LINE"; do
     command -v "$command" >/dev/null 2>&1 || \
         fail "required command not found: $command"
 done
 
 [[ "$BOOT_COUNT" =~ ^[1-9][0-9]*$ ]] || fail "invalid boot count: $BOOT_COUNT"
 [[ "$BOOT_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail "invalid boot duration: $BOOT_SECONDS"
+[[ "$GDB_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || \
+    fail "invalid GDB timeout: $GDB_TIMEOUT_SECONDS"
 
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
@@ -78,6 +94,7 @@ fi
     printf 'block image sha256: %s\n' "$(sha256sum "$BLOCK_IMAGE" | awk '{print $1}')"
     printf 'qemu: %s\n' "$($QEMU --version | head -1)"
     printf 'boots: %s, seconds/boot: %s\n' "$BOOT_COUNT" "$BOOT_SECONDS"
+    printf 'gdb timeout seconds: %s\n' "$GDB_TIMEOUT_SECONDS"
 } >"$METADATA_LOG"
 
 capture_gdb() {
@@ -88,9 +105,8 @@ capture_gdb() {
     cat >"$commands" <<'GDB'
 set pagination off
 set confirm off
+set backtrace limit 32
 info registers
-info all-registers
-bt
 p/x g_current_process
 p/x &g_current_process
 x/gx &g_current_process
@@ -110,10 +126,23 @@ p/x $sctlr_el1
 p/x $esr_el1
 p/x $far_el1
 p/x $elr_el1
+set $addr_mask = 0x0000fffffffff000
+set $root = $ttbr0_el1 & $addr_mask
+p/x $root
+x/8gx $root
+set $l0e = *(unsigned long long *)$root
+p/x $l0e
+set $l1 = $l0e & $addr_mask
+p/x $l1
+x/16gx $l1
+x/gx ($l1 + 32)
+x/96gx $sp
 disassemble /r next_table
+bt 32
 GDB
 
-    "$GDB" -q -batch \
+    timeout --signal=TERM --kill-after=2s "${GDB_TIMEOUT_SECONDS}s" \
+        "$GDB" -q -batch \
         -ex "file $KERNEL_ELF" \
         -ex "target remote 127.0.0.1:$port" \
         -x "$commands" \
@@ -140,6 +169,40 @@ for _ in range(100):
 PY
 }
 
+# QEMU normally exits immediately after the monitor receives `quit`. Bound the
+# reap anyway: a stuck monitor/teardown must not consume the whole CI job. A
+# forced teardown is acceptable after the serial contract has been observed;
+# its marker remains in the artifact for diagnosis.
+reap_qemu() {
+    local pid="$1"
+    local marker="$2"
+    local status=0
+    local watchdog
+
+    rm -f "$marker"
+    (
+        sleep 2
+        if kill -0 "$pid" >/dev/null 2>&1; then
+            printf 'QEMU did not exit within two seconds after monitor quit\n' >"$marker"
+            kill -TERM "$pid" >/dev/null 2>&1 || true
+            sleep 1
+            kill -KILL "$pid" >/dev/null 2>&1 || true
+        fi
+    ) &
+    watchdog=$!
+
+    wait "$pid" || status=$?
+    kill "$watchdog" >/dev/null 2>&1 || true
+    wait "$watchdog" >/dev/null 2>&1 || true
+
+    if [[ -f "$marker" ]]; then
+        printf 'NOTE: forced bounded QEMU teardown for pid %s\n' "$pid" | \
+            tee -a "$METADATA_LOG"
+        return 0
+    fi
+    return "$status"
+}
+
 for ((iteration = 1; iteration <= BOOT_COUNT; iteration++)); do
     label=$(printf '%02d' "$iteration")
     serial_log="$OUTPUT_DIR/boot-$label.log"
@@ -147,9 +210,11 @@ for ((iteration = 1; iteration <= BOOT_COUNT; iteration++)); do
     monitor="$OUTPUT_DIR/monitor-$label.sock"
     gdb_log="$OUTPUT_DIR/gdb-$label.log"
     addr_log="$OUTPUT_DIR/addr2line-$label.log"
+    teardown_marker="$OUTPUT_DIR/teardown-$label.forced"
     port=$((GDB_PORT_BASE + iteration))
 
-    rm -f "$serial_log" "$qemu_log" "$monitor" "$gdb_log" "$addr_log"
+    rm -f "$serial_log" "$qemu_log" "$monitor" "$gdb_log" "$addr_log" \
+        "$teardown_marker"
     current_monitor="$monitor"
     current_serial="$serial_log"
     current_qemu_log="$qemu_log"
@@ -219,18 +284,18 @@ PY
             "$ADDR2LINE" -e "$KERNEL_ELF" -f -C "$elr" >"$addr_log" 2>&1 || true
         fi
         quit_monitor "$monitor"
-        wait "$current_pid" >/dev/null 2>&1 || true
+        reap_qemu "$current_pid" "$teardown_marker" || true
         current_pid=""
         fail "EL1 panic reproduced on FAT32 soak boot $iteration/$BOOT_COUNT"
     elif [[ "$monitor_status" -ne 0 ]]; then
         quit_monitor "$monitor"
-        wait "$current_pid" >/dev/null 2>&1 || true
+        reap_qemu "$current_pid" "$teardown_marker" || true
         current_pid=""
         fail "QEMU or monitor failed on boot $iteration/$BOOT_COUNT (status $monitor_status)"
     fi
 
     qemu_status=0
-    wait "$current_pid" || qemu_status=$?
+    reap_qemu "$current_pid" "$teardown_marker" || qemu_status=$?
     current_pid=""
     current_monitor=""
 
@@ -242,8 +307,8 @@ PY
         fail "boot $iteration did not initialize storage"
     grep -Fq "FAT32 root: mounted" "$serial_log" || \
         fail "boot $iteration did not mount the FAT32 root"
-    grep -Fq "panel:" "$serial_log" || \
-        fail "boot $iteration did not reach the panel path"
+    grep -Fq "panel: starting" "$serial_log" || \
+        fail "boot $iteration did not enter the panel application"
     if grep -Fq "__PANIC_HALT__" "$serial_log"; then
         fail "boot $iteration recorded a late panic"
     fi
