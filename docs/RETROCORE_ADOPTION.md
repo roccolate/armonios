@@ -56,8 +56,14 @@ Adopt these only with a concrete ArmoniOS consumer and a measured size budget:
 | list model | Files, menus, selectors | two apps need identical selection behavior |
 | taskbar model | Panel | panel is moved onto libarmdesk models |
 | app manifest parser | launcher and external apps | apps are no longer only compiled-in blobs |
+| ArmoniIcons mask format and renderer | Panel, buttons, menus, Files | visual gallery and size/performance measurements justify adoption |
 | canvas/draw list | icons, offscreen widgets, images | generic bitmap/blit path exists |
 | logical event adapter | widgets and replay fixtures | `data1`/`data2` meanings are fully documented |
+
+The tentative ArmoniIcons design is documented in
+[`docs/ARMONIICONS_PROPOSAL.md`](ARMONIICONS_PROPOSAL.md). It is a planning
+note only: it does not approve a source icon set, GUI ABI extension, or shipping
+application change.
 
 ## Promotion checklist
 
