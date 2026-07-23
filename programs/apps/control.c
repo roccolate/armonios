@@ -6,8 +6,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "libarmdesk/event.h"
+#include "libarmdesk/gui.h"
+#include "libarmdesk/layout.h"
+#include "libarmdesk/render.h"
+#include "libarmdesk/theme.h"
+#include "libarmdesk/widget.h"
 #include "libkarm/syscall.h"
-#include "libkarmdesk/gui.h"
 
 #define O_RDONLY        0
 #define O_RDWR          2
@@ -25,15 +30,7 @@
 #define FILE_CAP      768
 #define STATUS_CAP     48
 #define VISIBLE_ROWS    8
-
-#define COLOR_BG        0xff18242cU
-#define COLOR_BORDER    0xff789090U
-#define COLOR_TEXT      0xffdce8e8U
-#define COLOR_DIM       0xff9cb0b0U
-#define COLOR_SELECT    0xff385068U
-#define COLOR_EDIT      0xffe0c080U
-#define COLOR_OK        0xffb8e0c0U
-#define COLOR_WARN      0xffe0b8a0U
+#define ACTION_COUNT    3
 
 #define INPUT_KEY_UP    0x101
 #define INPUT_KEY_DOWN  0x102
@@ -42,7 +39,14 @@
 #define INPUT_KEY_HOME  0x107
 #define INPUT_KEY_END   0x108
 
+enum {
+    ACTION_SAVE = 0,
+    ACTION_RELOAD,
+    ACTION_DEFAULTS,
+};
+
 static const char REG_PATH[] = "/fat/CONFIG.INI";
+static const armdesk_theme_t CONTROL_THEME = ARMDESK_THEME_DARK_INIT;
 
 typedef struct {
     const char *section;
@@ -61,16 +65,18 @@ typedef struct {
     char edit_value[VALUE_CAP];
     int edit_len;
     char file_buf[FILE_CAP];
-    char line_section[VALUE_CAP];
     char line_key[VALUE_CAP];
     char line_value[VALUE_CAP];
     char status[STATUS_CAP];
     char row[LINE_CAP];
     gui_event_t events[EVENT_CAP];
+    uint32_t window_bounds[4];
+    armdesk_button_t actions[ACTION_COUNT];
 } control_state_t;
 
 static void copy_text(char *dst, size_t dst_size, const char *src) {
     size_t i = 0;
+
     if (dst_size == 0) {
         return;
     }
@@ -83,6 +89,7 @@ static void copy_text(char *dst, size_t dst_size, const char *src) {
 
 static int text_equal(const char *a, const char *b) {
     size_t i = 0;
+
     while (a[i] != '\0' || b[i] != '\0') {
         if (a[i] != b[i]) {
             return 0;
@@ -94,6 +101,7 @@ static int text_equal(const char *a, const char *b) {
 
 static size_t text_len(const char *s) {
     size_t n = 0;
+
     while (s[n] != '\0') {
         n++;
     }
@@ -149,6 +157,7 @@ static int is_space(char c) {
 
 static void trim_right(char *s) {
     size_t n = text_len(s);
+
     while (n > 0 && is_space(s[n - 1])) {
         n--;
         s[n] = '\0';
@@ -171,6 +180,7 @@ static void parse_ini_line(control_state_t *s, char *section,
     }
     if (*p == '[') {
         size_t i = 0;
+
         p++;
         while (i + 1 < VALUE_CAP && *p != '\0' && *p != ']') {
             section[i++] = *p++;
@@ -208,6 +218,7 @@ static void parse_ini(control_state_t *s, long bytes) {
     section[0] = '\0';
     for (long i = 0; i <= bytes && i < FILE_CAP; i++) {
         char c = i == bytes ? '\n' : s->file_buf[i];
+
         if (c == '\n') {
             s->line_value[line_len] = '\0';
             parse_ini_line(s, section, s->line_value);
@@ -222,18 +233,21 @@ static void parse_ini(control_state_t *s, long bytes) {
 
 static void load_registry(control_state_t *s) {
     reset_defaults(s);
+
     long fd = kli_open(REG_PATH, O_RDONLY);
     if (fd < 0) {
         s->dirty = 0;
         copy_text(s->status, sizeof(s->status), "DEFAULTS (NO CONFIG)");
         return;
     }
+
     long n = kli_read((int)fd, s->file_buf, sizeof(s->file_buf) - 1);
     (void)kli_close((int)fd);
     if (n < 0) {
         copy_text(s->status, sizeof(s->status), "LOAD FAILED");
         return;
     }
+
     s->file_buf[n] = '\0';
     parse_ini(s, n);
     s->dirty = 0;
@@ -248,6 +262,7 @@ static void serialize_registry(control_state_t *s, char *out,
     out[0] = '\0';
     for (int i = 0; i < ENTRY_CAP; i++) {
         registry_entry_t *entry = &s->entries[i];
+
         if (!text_equal(section, entry->section)) {
             if (cursor > 0) {
                 append_text(out, out_size, &cursor, "\n");
@@ -275,6 +290,7 @@ static void save_registry(control_state_t *s) {
         copy_text(s->status, sizeof(s->status), "SAVE FAILED");
         return;
     }
+
     (void)kli_seek((int)fd, 0, 0);
     long written = kli_write((int)fd, s->file_buf, len);
     if (written == (long)len) {
@@ -290,19 +306,15 @@ static void save_registry(control_state_t *s) {
     }
 }
 
-static void draw_text(long wid, long x, long y, uint32_t color,
-                      const char *text) {
-    (void)gui_window_draw_text(wid, x, y, color, text);
-}
-
 static void format_row(control_state_t *s, int index) {
-    size_t c = 0;
+    size_t cursor = 0;
     registry_entry_t *entry = &s->entries[index];
-    append_text(s->row, sizeof(s->row), &c, entry->section);
-    append_text(s->row, sizeof(s->row), &c, ".");
-    append_text(s->row, sizeof(s->row), &c, entry->key);
-    append_text(s->row, sizeof(s->row), &c, " = ");
-    append_text(s->row, sizeof(s->row), &c, entry->value);
+
+    append_text(s->row, sizeof(s->row), &cursor, entry->section);
+    append_text(s->row, sizeof(s->row), &cursor, ".");
+    append_text(s->row, sizeof(s->row), &cursor, entry->key);
+    append_text(s->row, sizeof(s->row), &cursor, " = ");
+    append_text(s->row, sizeof(s->row), &cursor, entry->value);
 }
 
 static void clamp_scroll(control_state_t *s) {
@@ -323,31 +335,84 @@ static void clamp_scroll(control_state_t *s) {
     }
 }
 
+static void layout_actions(control_state_t *s) {
+    armdesk_linear_layout_t layout =
+        armdesk_row_layout(armdesk_rect(12, 244, 276, 20), 8);
+    armdesk_rect_t bounds;
+
+    (void)armdesk_linear_layout_take(&layout, 72, &bounds);
+    s->actions[ACTION_SAVE] = armdesk_button(bounds, "SAVE");
+    (void)armdesk_linear_layout_take(&layout, 72, &bounds);
+    s->actions[ACTION_RELOAD] = armdesk_button(bounds, "RELOAD");
+    (void)armdesk_linear_layout_take(&layout, 116, &bounds);
+    s->actions[ACTION_DEFAULTS] = armdesk_button(bounds, "DEFAULTS");
+}
+
+static void register_action_cursors(control_state_t *s) {
+    for (int i = 0; i < ACTION_COUNT; i++) {
+        armdesk_rect_t bounds = s->actions[i].bounds;
+
+        (void)gui_cursor_register_region(s->wid, i, bounds.x, bounds.y,
+                                         bounds.w, bounds.h,
+                                         GUI_CURSOR_HAND);
+    }
+}
+
+static void render_label(long wid, int32_t x, int32_t y,
+                         armdesk_theme_token_t token, const char *text) {
+    armdesk_label_t label = armdesk_label(
+        armdesk_rect(x, y, WIN_W - x - 8, 12), text, token);
+
+    (void)armdesk_render_label(wid, &label, &CONTROL_THEME);
+}
+
 static void redraw(control_state_t *s) {
-    (void)gui_window_draw_rect(s->wid, 1, 0, WIN_W - 2,
-                               WIN_H - TITLE_BAR_H - 2, COLOR_BG);
-    draw_text(s->wid, 12, 8, COLOR_TEXT, "CONTROL PANEL REGISTRY");
-    draw_text(s->wid, 12, 24, COLOR_DIM,
-              "ENTER EDIT  CTRL-S SAVE  R REVERT  D DEFAULTS");
-    draw_text(s->wid, 12, 42, s->dirty ? COLOR_WARN : COLOR_OK, s->status);
+    armdesk_rect_t content =
+        armdesk_rect(1, 0, WIN_W - 2, WIN_H - TITLE_BAR_H - 2);
+
+    (void)armdesk_render_fill(
+        s->wid, content,
+        armdesk_theme_color(&CONTROL_THEME, ARMDESK_THEME_WINDOW_BG));
+    render_label(s->wid, 12, 8, ARMDESK_THEME_WINDOW_FG,
+                 "CONTROL PANEL REGISTRY");
+    render_label(s->wid, 12, 24, ARMDESK_THEME_DISABLED_FG,
+                 "ENTER EDIT  CTRL-S SAVE  R RELOAD  D DEFAULTS");
+    render_label(s->wid, 12, 42,
+                 s->dirty ? ARMDESK_THEME_WARNING_FG
+                          : ARMDESK_THEME_STATUS_FG,
+                 s->status);
 
     for (int row = 0; row < VISIBLE_ROWS; row++) {
         int index = s->scroll + row;
-        long y = 66 + row * 20;
+        int32_t y = 66 + row * 20;
+        int selected;
+
         if (index >= ENTRY_CAP) {
             break;
         }
-        if (index == s->selected) {
-            (void)gui_window_draw_rect(s->wid, 8, y - 3, WIN_W - 16, 15,
-                                       COLOR_SELECT);
+        selected = index == s->selected;
+        if (selected) {
+            (void)armdesk_render_fill(
+                s->wid, armdesk_rect(8, y - 3, WIN_W - 16, 15),
+                armdesk_theme_color(&CONTROL_THEME,
+                                    ARMDESK_THEME_SELECTION_BG));
         }
         format_row(s, index);
-        draw_text(s->wid, 16, y, COLOR_TEXT, s->row);
+        render_label(s->wid, 16, y,
+                     selected ? ARMDESK_THEME_SELECTION_FG
+                              : ARMDESK_THEME_WINDOW_FG,
+                     s->row);
     }
 
     if (s->editing) {
-        draw_text(s->wid, 12, 242, COLOR_EDIT, "VALUE:");
-        draw_text(s->wid, 76, 242, COLOR_TEXT, s->edit_value);
+        render_label(s->wid, 12, 222, ARMDESK_THEME_MENU_HOTKEY_FG,
+                     "VALUE:");
+        render_label(s->wid, 76, 222, ARMDESK_THEME_WINDOW_FG,
+                     s->edit_value);
+    }
+
+    for (int i = 0; i < ACTION_COUNT; i++) {
+        (void)armdesk_render_button(s->wid, &s->actions[i], &CONTROL_THEME);
     }
 
     (void)gui_window_flush(s->wid, 0, 0, WIN_W, WIN_H - TITLE_BAR_H);
@@ -355,6 +420,7 @@ static void redraw(control_state_t *s) {
 
 static void begin_edit(control_state_t *s) {
     registry_entry_t *entry = &s->entries[s->selected];
+
     copy_text(s->edit_value, sizeof(s->edit_value), entry->value);
     s->edit_len = (int)text_len(s->edit_value);
     s->editing = 1;
@@ -363,6 +429,7 @@ static void begin_edit(control_state_t *s) {
 
 static void commit_edit(control_state_t *s) {
     registry_entry_t *entry = &s->entries[s->selected];
+
     copy_text(entry->value, sizeof(entry->value), s->edit_value);
     s->editing = 0;
     s->dirty = 1;
@@ -394,6 +461,24 @@ static int handle_edit_key(control_state_t *s, int key) {
     return 0;
 }
 
+static int activate_action(control_state_t *s, int action) {
+    if (action == ACTION_SAVE) {
+        save_registry(s);
+        return 1;
+    }
+    if (action == ACTION_RELOAD) {
+        load_registry(s);
+        return 1;
+    }
+    if (action == ACTION_DEFAULTS) {
+        reset_defaults(s);
+        s->dirty = 1;
+        copy_text(s->status, sizeof(s->status), "DEFAULTS READY");
+        return 1;
+    }
+    return 0;
+}
+
 static int handle_key(control_state_t *s, int key) {
     if (key == 17) {
         (void)gui_window_destroy(s->wid);
@@ -403,8 +488,7 @@ static int handle_key(control_state_t *s, int key) {
         }
     }
     if (key == 19) {
-        save_registry(s);
-        return 1;
+        return activate_action(s, ACTION_SAVE);
     }
     if (s->editing) {
         return handle_edit_key(s, key);
@@ -444,14 +528,66 @@ static int handle_key(control_state_t *s, int key) {
         return 1;
     }
     if (key == 'r' || key == 'R') {
-        load_registry(s);
-        return 1;
+        return activate_action(s, ACTION_RELOAD);
     }
     if (key == 'd' || key == 'D') {
-        reset_defaults(s);
-        s->dirty = 1;
-        copy_text(s->status, sizeof(s->status), "DEFAULTS READY");
-        return 1;
+        return activate_action(s, ACTION_DEFAULTS);
+    }
+    return 0;
+}
+
+static int pointer_to_content(control_state_t *s, int32_t absolute_x,
+                              int32_t absolute_y, armdesk_point_t *point) {
+    armdesk_rect_t window;
+
+    if (gui_window_get_bounds(s->wid, s->window_bounds) < 0 ||
+        s->window_bounds[0] > INT32_MAX ||
+        s->window_bounds[1] > INT32_MAX ||
+        s->window_bounds[2] > INT32_MAX ||
+        s->window_bounds[3] > INT32_MAX) {
+        return -1;
+    }
+
+    window = armdesk_rect((int32_t)s->window_bounds[0],
+                          (int32_t)s->window_bounds[1],
+                          (int32_t)s->window_bounds[2],
+                          (int32_t)s->window_bounds[3]);
+    return armdesk_pointer_to_content(window, TITLE_BAR_H,
+                                      absolute_x, absolute_y, point);
+}
+
+static int update_hover(control_state_t *s, int32_t absolute_x,
+                        int32_t absolute_y) {
+    armdesk_point_t point;
+    int inside = pointer_to_content(s, absolute_x, absolute_y, &point) == 0;
+    int changed = 0;
+
+    for (int i = 0; i < ACTION_COUNT; i++) {
+        uint8_t hovered = inside &&
+                                  armdesk_button_hit_test(&s->actions[i],
+                                                          point.x, point.y)
+                              ? 1U
+                              : 0U;
+        if (s->actions[i].hovered != hovered) {
+            s->actions[i].hovered = hovered;
+            changed = 1;
+        }
+    }
+    return changed;
+}
+
+static int handle_click(control_state_t *s, int32_t absolute_x,
+                        int32_t absolute_y) {
+    armdesk_point_t point;
+
+    if (pointer_to_content(s, absolute_x, absolute_y, &point) != 0) {
+        return 0;
+    }
+
+    for (int i = 0; i < ACTION_COUNT; i++) {
+        if (armdesk_button_hit_test(&s->actions[i], point.x, point.y)) {
+            return activate_action(s, i);
+        }
     }
     return 0;
 }
@@ -465,6 +601,7 @@ int main(int argc, char **argv) {
         kli_write_cstr(1, "control: state mmap failed\n");
         return 1;
     }
+
     control_state_t *s = (control_state_t *)(uintptr_t)state_addr;
     s->wid = 0;
     s->selected = 0;
@@ -475,35 +612,48 @@ int main(int argc, char **argv) {
     s->edit_len = 0;
     copy_text(s->status, sizeof(s->status), "STARTING");
     reset_defaults(s);
+    layout_actions(s);
 
     kli_write_cstr(1, "control: starting\n");
-    s->wid = gui_window_create(WIN_X, WIN_Y, WIN_W, WIN_H,
-                               COLOR_BG, COLOR_BORDER, "control");
+    s->wid = gui_window_create(
+        WIN_X, WIN_Y, WIN_W, WIN_H,
+        armdesk_theme_color(&CONTROL_THEME, ARMDESK_THEME_WINDOW_BG),
+        armdesk_theme_color(&CONTROL_THEME, ARMDESK_THEME_WINDOW_BORDER),
+        "control");
     if (s->wid < 0) {
         kli_write_cstr(1, "control: window create failed\n");
         return 1;
     }
-    (void)gui_window_set_title(s->wid, "control", TITLE_BAR_H);
 
+    (void)gui_window_set_title(s->wid, "control", TITLE_BAR_H);
+    register_action_cursors(s);
     load_registry(s);
     redraw(s);
 
     for (;;) {
         long n = gui_window_event(s->wid, s->events, EVENT_CAP);
+
         if (n > 0) {
-            int dirty = 0;
+            int needs_redraw = 0;
+
             for (long i = 0; i < n; i++) {
-                if (s->events[i].type == GUI_EVENT_CLOSE) {
+                gui_event_t *event = &s->events[i];
+
+                if (event->type == GUI_EVENT_CLOSE) {
                     (void)gui_window_destroy(s->wid);
                     return 0;
                 }
-                if (s->events[i].type == GUI_EVENT_KEY_PRESS) {
-                    if (handle_key(s, s->events[i].data1)) {
-                        dirty = 1;
-                    }
+                if (event->type == GUI_EVENT_KEY_PRESS) {
+                    needs_redraw |= handle_key(s, event->data1);
+                } else if (event->type == GUI_EVENT_MOUSE_MOVE) {
+                    needs_redraw |= update_hover(s, event->data1,
+                                                 event->data2);
+                } else if (event->type == GUI_EVENT_MOUSE_CLICK) {
+                    needs_redraw |= handle_click(s, event->data1,
+                                                 event->data2);
                 }
             }
-            if (dirty) {
+            if (needs_redraw) {
                 redraw(s);
             }
         } else {
