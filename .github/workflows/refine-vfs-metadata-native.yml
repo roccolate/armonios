@@ -26,17 +26,21 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
           p = Path('kernel/fat32_directory.c')
           text = p.read_text()
-          old = '''                if (dir_fill_info(fs, entry, lba, entry_offset, &info) != 0 ||
-                      dir_copy_name(entry, entries[output].name) != 0) {
-          '''
-          new = '''                if (dir_copy_name(entry, entries[output].name) != 0 ||
-                      dir_fill_info(fs, entry, lba, entry_offset, &info) != 0) {
-          '''
-          if old not in text:
-              raise SystemExit('missing FAT directory copy ordering block')
-          p.write_text(text.replace(old, new, 1))
+          pattern = re.compile(
+              r"dir_fill_info\(fs, entry, lba, entry_offset, &info\) != 0 \|\|\s+"
+              r"dir_copy_name\(entry, entries\[output\]\.name\) != 0"
+          )
+          replacement = (
+              "dir_copy_name(entry, entries[output].name) != 0 ||\n"
+              "                    dir_fill_info(fs, entry, lba, entry_offset, &info) != 0"
+          )
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'unexpected FAT directory copy match count: {count}')
+          p.write_text(text)
           PY
       - name: Run focused metadata gate
         run: bash tests/run_vfs_metadata_abi_test.sh
