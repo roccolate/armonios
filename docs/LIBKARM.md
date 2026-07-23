@@ -43,6 +43,7 @@ io.o
 string.o
 arena.o
 arena_map.o
+buffer.o
 ```
 
 Applications link against the archive instead of selecting those objects by
@@ -90,6 +91,43 @@ error propagation.
 An arena is not a general-purpose heap. Individual objects cannot be freed and
 a caller must destroy an existing mapped arena before mapping another region
 into the same `kli_arena_t`.
+
+## Dynamic binary buffer
+
+`kli_buffer_t` stores arbitrary bytes inside a caller-owned arena:
+
+```c
+kli_buffer_t buffer;
+
+if (kli_buffer_init(&buffer, &arena) < 0) {
+    return 1;
+}
+
+(void)kli_buffer_append(&buffer, header, header_size);
+(void)kli_buffer_append_byte(&buffer, '\n');
+```
+
+The buffer starts empty and reserves at least 64 bytes on first growth. Later
+growth doubles capacity until it can satisfy the requested append. All length,
+capacity, pointer, and addition arithmetic is overflow checked.
+
+Growth allocates a new arena block and copies the existing bytes. The previous
+block remains owned by the arena. This keeps the implementation deterministic
+and avoids pretending that individual arena allocations can be freed, but it
+also means repeated small growth wastes arena capacity. Callers that know an
+expected size should use `kli_buffer_init_capacity` or `kli_buffer_reserve`.
+
+Additional rules:
+
+- the buffer never owns or destroys its arena;
+- failed reserve/append leaves buffer and arena offsets unchanged;
+- append uses overlap-safe copying, including self-append;
+- `clear` resets logical length without releasing capacity;
+- zero-byte append succeeds even when its source pointer is null;
+- this is a binary buffer, not a null-terminated string.
+
+String ownership and termination belong to a later `kli_string_t` layer built
+on this primitive.
 
 ## In-tree application link
 
@@ -142,6 +180,7 @@ the supported application linker script.
 ## Current limitations
 
 `libkarm` is not yet a complete libc. It currently provides syscall wrappers,
-minimal output, memory/string helpers, integer conversion, and monotonic arenas.
-A reusable free-list heap, dynamic strings, buffers, formatted output, and
-higher-level file helpers are future runtime cuts built on this foundation.
+minimal output, memory/string helpers, integer conversion, monotonic arenas, and
+growable binary buffers. A reusable free-list heap, dynamic strings, formatted
+output, and higher-level file helpers are future runtime cuts built on this
+foundation.
