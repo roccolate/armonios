@@ -6,61 +6,55 @@
 #include "kernel/mm/vmm.h"
 #include "kernel/runtime_service.h"
 #include "storage/virtio_blk.h"
+#include "storage/virtio_blk_block_device.h"
 #include "uart/pl011.h"
 
 static virtio_blk_device_t g_blk_dev;
+static block_device_t g_storage_device;
 static virtio_input_device_t g_input_dev;
 static uint64_t g_display_base;
 static uint8_t g_display_ready;
 
 int board_storage_read(uint32_t lba, uint32_t count, void *buffer) {
-    uint8_t *bytes = (uint8_t *)buffer;
+    if (count == 0U) {
+        return 0;
+    }
+    if (buffer == 0 || g_storage_device.read == 0 ||
+        lba > UINT32_MAX - (count - 1U)) {
+        return -1;
+    }
 
-    if (buffer == 0 && count != 0) {
-        return -1;
-    }
-    if (count != 0 && lba > UINT32_MAX - (count - 1U)) {
-        return -1;
-    }
-    for (uint32_t i = 0; i < count; i++) {
-        if (virtio_blk_read_sector(&g_blk_dev, lba + i,
-                                   bytes + i * 512U) != 0) {
-            return -1;
-        }
-    }
-    return 0;
+    return g_storage_device.read(g_storage_device.context, lba, count, buffer);
 }
 
 int board_storage_write(uint32_t lba, uint32_t count, const void *buffer) {
-    const uint8_t *bytes = (const uint8_t *)buffer;
+    if (count == 0U) {
+        return 0;
+    }
+    if (buffer == 0 || g_storage_device.write == 0 ||
+        lba > UINT32_MAX - (count - 1U)) {
+        return -1;
+    }
 
-    if (buffer == 0 && count != 0) {
-        return -1;
-    }
-    if (count != 0 && lba > UINT32_MAX - (count - 1U)) {
-        return -1;
-    }
-    for (uint32_t i = 0; i < count; i++) {
-        if (virtio_blk_write_sector(&g_blk_dev, lba + i,
-                                    bytes + i * 512U) != 0) {
-            return -1;
-        }
-    }
-    return 0;
+    return g_storage_device.write(g_storage_device.context, lba, count, buffer);
 }
 
 int board_storage_init(void) {
     virtio_blk_info_t info;
     uint64_t base;
 
+    g_storage_device = (block_device_t){0};
     if (virtio_blk_probe_range(board_virtio_mmio_base(),
                                board_virtio_mmio_size(),
                                board_virtio_mmio_stride(), &base,
-                               &info) != 0) {
+                               &info) != 0 ||
+        info.capacity_sectors == 0U ||
+        virtio_blk_init(&g_blk_dev, base) != 0) {
         return -1;
     }
 
-    return virtio_blk_init(&g_blk_dev, base);
+    return virtio_blk_block_device_init(&g_storage_device, &g_blk_dev,
+                                        info.capacity_sectors);
 }
 
 const char *board_name(void) {
