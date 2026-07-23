@@ -26,7 +26,7 @@ jobs:
 
           source = Path('.github/workflows/apply-vfs-metadata-abi.yml').read_text()
           start = source.find('H4sI')
-          end = source.find('\nPAYLOAD', start)
+          end = source.find('PAYLOAD', start)
           if start < 0 or end < 0:
               raise SystemExit('embedded ABI migration payload not found')
           payload = ''.join(line.strip() for line in source[start:end].splitlines())
