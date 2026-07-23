@@ -1,8 +1,8 @@
 // programs/libarmdesk/gui.h
 //
 // Typed wrappers for the ArmoniOS window/compositor syscalls (70..86).
-// GUI ABI layouts and constants come from the public shared header; syscall
-// dispatch remains implemented by libkarm.
+// GUI ABI layouts, constants, and syscall numbers come from public shared
+// headers; raw syscall dispatch remains implemented by libkarm.
 //
 // Return value: raw `long` from the kernel; >= 0 on success, negative error
 // code from <libkarm/errno.h> on failure.
@@ -14,9 +14,9 @@
 #include <stdint.h>
 
 #include "include/armonios/abi/gui.h"
+#include "include/armonios/abi/syscall_numbers.h"
 #include "libkarm/errno.h"
 #include "libkarm/syscall.h"
-#include "kernel/syscall_numbers.h"
 
 /*
  * Userland-created windows are presentation windows and should receive
