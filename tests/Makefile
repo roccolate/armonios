@@ -41,7 +41,8 @@ SRCS=unity/unity.c main.c \
      ../kernel/mm/pmm.c ../kernel/mm/kheap.c ../kernel/mm/vmm.c \
      ../kernel/boot_program.c ../kernel/bootfs.c \
      ../kernel/panel_boot_argv.c ../kernel/panel_boot_recovery.c \
-     ../kernel/fat32.c ../kernel/fat32_vfs.c ../kernel/net/dhcp_options.c \
+     ../kernel/fat32.c ../kernel/fat32_directory.c ../kernel/fat32_vfs.c \
+     ../kernel/net/dhcp_options.c \
      ../kernel/font.c ../kernel/gui_backing.c \
      ../kernel/gui_cursor.c ../kernel/gui_damage.c \
      ../kernel/gui_events.c ../kernel/gui_input.c ../kernel/gui_pool.c \
