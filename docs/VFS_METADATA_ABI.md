@@ -68,6 +68,15 @@ The first implementation accepts at most eight entries per syscall so the
 kernel can use bounded stack storage. Callers continue with
 `start_index += returned_count`.
 
+## Name and path limits
+
+`ARM_DIRENT_NAME_MAX` and the internal component-name buffer are 64 bytes,
+including the terminating NUL. The complete canonical VFS path is also currently
+limited to 64 bytes. This cut freezes neither long-name encoding nor a larger
+path budget: both must be reviewed deliberately before VFAT long names become a
+release claim. A filesystem entry whose name cannot be represented is rejected
+rather than silently truncated.
+
 ## Types
 
 - `ARM_FILE_TYPE_UNKNOWN = 0`
