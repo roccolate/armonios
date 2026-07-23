@@ -23,4 +23,5 @@ compile_and_run() {
 
 compile_and_run libarmdesk_foundation_test.c libarmdesk_foundation_test
 compile_and_run libarmdesk_widgets_test.c libarmdesk_widgets_test
-printf 'PASS: libarmdesk foundation and widget models\n'
+compile_and_run libarmdesk_render_test.c libarmdesk_render_test
+printf 'PASS: libarmdesk foundation, widget models, and renderer\n'
