@@ -16,16 +16,16 @@ static uint32_t vfs_public_attributes(uint32_t attributes) {
     uint32_t value = 0;
 
     if ((attributes & VFS_ATTRIBUTE_READ_ONLY) != 0U) {
-        value |= ARM_FILE_ATTRIBUTE_READ_ONLY;
+        value |= ARM_FILE_ATTR_READ_ONLY;
     }
     if ((attributes & VFS_ATTRIBUTE_HIDDEN) != 0U) {
-        value |= ARM_FILE_ATTRIBUTE_HIDDEN;
+        value |= ARM_FILE_ATTR_HIDDEN;
     }
     if ((attributes & VFS_ATTRIBUTE_SYSTEM) != 0U) {
-        value |= ARM_FILE_ATTRIBUTE_SYSTEM;
+        value |= ARM_FILE_ATTR_SYSTEM;
     }
     if ((attributes & VFS_ATTRIBUTE_ARCHIVE) != 0U) {
-        value |= ARM_FILE_ATTRIBUTE_ARCHIVE;
+        value |= ARM_FILE_ATTR_ARCHIVE;
     }
     return value;
 }
