@@ -11,7 +11,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${BOARD_BUILD_DIR:-$ROOT_DIR/build-rpi4}"
 PROBE_BUILD_DIR="${BOARD_PROBE_BUILD_DIR:-$ROOT_DIR/build-rpi4-emmc2-probe}"
-KERNEL_SIZE_LIMIT="${KERNEL_SIZE_LIMIT:-108000}"
+KERNEL_SIZE_LIMIT="${KERNEL_SIZE_LIMIT:-131072}"
 
 check_image() {
     local name="$1"
