@@ -1,0 +1,5 @@
+make: Entering directory '/home/runner/work/armonios/armonios/tests'
+make: *** No rule to make target '../build/programs/apps/shell.host_blob.o', needed by 'run_tests'.  Stop.
+make: Leaving directory '/home/runner/work/armonios/armonios/tests'
+
+status=2
