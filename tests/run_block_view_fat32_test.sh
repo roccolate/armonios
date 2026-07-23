@@ -17,3 +17,10 @@ mkdir -p "$OUT_DIR"
     -o "$OUT_DIR/block-device-view-fat32"
 
 "$OUT_DIR/block-device-view-fat32"
+
+"$CC_BIN" -std=c11 -Wall -Wextra -Werror \
+    -I"$ROOT_DIR" -I"$ROOT_DIR/drivers" \
+    "$ROOT_DIR/tests/test_storage_adapters_standalone.c" \
+    -o "$OUT_DIR/storage-adapters"
+
+"$OUT_DIR/storage-adapters"
