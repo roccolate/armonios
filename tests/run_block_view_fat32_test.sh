@@ -13,6 +13,7 @@ mkdir -p "$OUT_DIR"
     "$ROOT_DIR/tests/test_block_view_fat32_standalone.c" \
     "$ROOT_DIR/drivers/storage/block_device.c" \
     "$ROOT_DIR/kernel/fat32.c" \
+    "$ROOT_DIR/kernel/fat32_device.c" \
     "$ROOT_DIR/kernel/kstring.c" \
     -o "$OUT_DIR/block-device-view-fat32"
 
