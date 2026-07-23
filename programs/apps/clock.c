@@ -1,4 +1,4 @@
-// ArmoniOS app: clock (C version, on programs/libkarm + libkarmdesk)
+// ArmoniOS app: clock (C version, on libkarm + libarmdesk)
 //
 // Creates a window that displays the current uptime as HH:MM:SS, reads
 // timer ticks via SYS_TIMEINFO, and redraws once per second using a
@@ -6,21 +6,11 @@
 // close box fires GUI_EVENT_CLOSE and exits cleanly. Runtime buffers live in
 // anonymous user memory so the app does not park event arrays at the top edge
 // of the fixed 4 KB EL0 stack.
-//
-// Non-window syscalls (write, yield, timeinfo, exit) go through
-// libkarm's typed wrappers in <libkarm/syscall.h>. Window syscalls
-// (create, destroy, draw_text, draw_rect, set_title, event, flush)
-// go through libkarmdesk's typed gui_* wrappers in
-// <libkarmdesk/gui.h>.
 
 #include <stdint.h>
 
+#include "libarmdesk/gui.h"
 #include "libkarm/syscall.h"
-#include "libkarmdesk/gui.h"
-
-// programs/apps/image.ld now also picks up the default .text* and
-// .rodata* sections, so this file's C functions and string literals
-// land in the flat image without an explicit section attribute.
 
 #define WIN_W            200
 #define WIN_H             80
@@ -31,7 +21,7 @@
 typedef struct {
     long wid;
     int wait;
-    uint64_t info[3];
+    arm_timeinfo_t info;
     char text[9];
     gui_event_t events[EVENT_CAP];
 } clock_state_t;
@@ -62,10 +52,10 @@ static void format_hhmmss(uint64_t ticks, char *out) {
 }
 
 static void redraw(clock_state_t *state) {
-    if (kli_timeinfo(state->info) < 0) {
+    if (kli_timeinfo_v1(&state->info) < 0) {
         return;
     }
-    format_hhmmss(state->info[0], state->text);
+    format_hhmmss(state->info.timer_ticks, state->text);
 
     (void)gui_window_draw_rect(state->wid, 20, 30, WIN_W - 40, 28,
                                0xff202830ULL);
@@ -78,11 +68,11 @@ int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
 
-    kli_write_cstr(1, "clock: starting\n");
+    kli_write_cstr(ARM_FD_STDOUT, "clock: starting\n");
 
     long state_addr = kli_mmap(0, sizeof(clock_state_t), 0);
     if (state_addr < 0) {
-        kli_write_cstr(1, "clock: state mmap failed\n");
+        kli_write_cstr(ARM_FD_STDOUT, "clock: state mmap failed\n");
         return 1;
     }
     clock_state_t *state = (clock_state_t *)(uintptr_t)state_addr;
@@ -90,7 +80,7 @@ int main(int argc, char **argv) {
     state->wid = gui_window_create(440, 64, WIN_W, WIN_H,
                                    0xff202830LL, 0xff808080LL, "clock");
     if (state->wid < 0) {
-        kli_write_cstr(1, "clock: window create failed\n");
+        kli_write_cstr(ARM_FD_STDOUT, "clock: window create failed\n");
         return 1;
     }
     (void)gui_window_set_title(state->wid, "clock", TITLE_BAR_H);
