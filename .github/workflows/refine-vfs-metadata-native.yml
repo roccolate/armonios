@@ -66,6 +66,8 @@ jobs:
           PY
           set +e
           bash tests/run_fat32_directory_test.sh > /tmp/native-metadata-diagnostic.txt 2>&1
+          printf '\nsource context:\n' >> /tmp/native-metadata-diagnostic.txt
+          nl -ba tests/test_fat32_directories.c | sed -n '185,205p' >> /tmp/native-metadata-diagnostic.txt
           printf '\noriginal gate:\n' >> /tmp/native-metadata-diagnostic.txt
           tail -n 20 native-metadata-gate.log >> /tmp/native-metadata-diagnostic.txt
           git reset --hard HEAD
