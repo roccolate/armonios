@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "include/armonios/abi/vfs.h"
+
 #define VFS_MAX_NODES 24U
 #define VFS_MAX_MOUNTS 4U
 /*
@@ -13,12 +15,13 @@
 #define VFS_MAX_GLOBAL_OPEN_FILES (VFS_MAX_OPEN_FILES * 16U)
 #define VFS_MAX_PATH 64U
 
-#define VFS_O_RDONLY  0U
-#define VFS_O_WRONLY  1U
-#define VFS_O_RDWR    2U
-#define VFS_O_ACCMODE 3U
-#define VFS_O_CREAT   0x40U
-#define VFS_O_ALLOWED (VFS_O_ACCMODE | VFS_O_CREAT)
+/* Historical kernel spellings retained as aliases of the public ABI. */
+#define VFS_O_RDONLY  ARM_O_RDONLY
+#define VFS_O_WRONLY  ARM_O_WRONLY
+#define VFS_O_RDWR    ARM_O_RDWR
+#define VFS_O_ACCMODE ARM_O_ACCMODE
+#define VFS_O_CREAT   ARM_O_CREAT
+#define VFS_O_ALLOWED ARM_O_ALLOWED
 
 /*
  * Fixed-table kernel VFS facade.
@@ -27,9 +30,7 @@
  * by VFS_MAX_PATH. File descriptors are local to the current process; the VFS
  * translates them to kernel-private open-file handles and owns their offsets.
  */
-typedef struct {
-    uint64_t size;
-} vfs_stat_t;
+typedef arm_stat_t vfs_stat_t;
 
 typedef int (*vfs_read_fn_t)(void *context, uint64_t offset, uint8_t *buffer,
                              uint64_t capacity, uint64_t *bytes_read);
