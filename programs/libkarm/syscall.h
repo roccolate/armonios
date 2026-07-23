@@ -3,7 +3,7 @@
 // Typed C wrappers for every ArmoniOS syscall that is part of the
 // stable process / memory / I/O / IPC / system-info surface (numbers
 // 1..8, 20..21, 40..48, 60..61, 100..102). Each wrapper takes the
-// syscall number from <kernel/syscall_numbers.h> and dispatches
+// syscall number from the public ArmoniOS ABI header and dispatches
 // through the raw trampolines in syscall.S.
 //
 // The window/compositor syscalls (70..86) intentionally live in
@@ -24,7 +24,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "kernel/syscall_numbers.h"
+#include "include/armonios/abi/syscall_numbers.h"
 
 long __syscall0(long n);
 long __syscall1(long n, long a0);

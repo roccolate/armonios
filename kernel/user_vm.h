@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#include "include/armonios/abi/errors.h"
 #include "kernel/process.h"
 
 /*
@@ -20,8 +21,9 @@
 #define USER_VM_PROT_WRITE 0x02ULL
 #define USER_VM_PROT_EXEC  0x04ULL
 
-#define USER_VM_ERR_NOMEM (-2LL)
-#define USER_VM_ERR_INVAL (-7LL)
+/* Historical VM-local spellings retained as aliases of the public ABI. */
+#define USER_VM_ERR_NOMEM ARMONIOS_ERR_NOMEM
+#define USER_VM_ERR_INVAL ARMONIOS_ERR_INVAL
 
 int64_t user_vm_map_anonymous(process_t *process, uint64_t hint,
                               uint64_t size, uint64_t flags);

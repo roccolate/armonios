@@ -1,12 +1,9 @@
 /*
  * test_syscall_abi.c
  *
- * Lock down the ArmoniOS syscall ABI. The header
- * kernel/syscall_numbers.h carries one _Static_assert per implemented
- * syscall number; that catches ABI drift at compile time. This test
- * file re-asserts the contract at runtime so a regression on a
- * non-asserted branch (for example, accidentally deleting the assert)
- * is caught before it reaches QEMU.
+ * Lock down the public ArmoniOS syscall ABI. Public headers under
+ * include/armonios/abi/ are the source of truth shared by kernel and userland;
+ * compatibility names in kernel and libkarm must remain exact aliases.
  *
  * The test only exercises lightweight public headers on purpose: the full
  * syscall_dispatch path pulls in mmu, sched, timer and a working UART, none of
@@ -19,14 +16,22 @@
 
 #include <stdint.h>
 
+#include "include/armonios/abi/errors.h"
+#include "include/armonios/abi/syscall_numbers.h"
+#include "include/armonios/abi/version.h"
 #include "kernel/process.h"
 #include "kernel/syscall_helpers.h"
-#include "kernel/syscall_numbers.h"
 #include "kernel/user_exit.h"
 #include "kernel/user_vm.h"
 #include "kernel/vfs.h"
 
 void test_syscall_abi_implemented_numbers_match_dispatch(void) {
+    /* The public ABI revision is explicit even before runtime capability
+     * discovery exists. Incrementing it must be an intentional contract edit. */
+    TEST_ASSERT_EQUAL_UINT64(1U, ARMONIOS_ABI_MAJOR);
+    TEST_ASSERT_EQUAL_UINT64(0U, ARMONIOS_ABI_MINOR);
+    TEST_ASSERT_EQUAL_UINT64(0x00010000U, ARMONIOS_ABI_VERSION);
+
     /* Implemented numbers must match the rows in docs/SYSCALLS.md under
      * "Implemented Now". A drift here means a number was renumbered
      * without updating the docs and breaks every userland image. */
@@ -85,26 +90,39 @@ void test_syscall_abi_ranges_do_not_overlap(void) {
 }
 
 void test_syscall_abi_error_codes_match_documented_constants(void) {
-    /* docs/SYSCALLS.md lists these as the implemented negative error codes. If
-     * they drift, every app that checks errno by hand breaks silently. */
+    /* Public errors are the source of truth. Kernel and userland compatibility
+     * names must remain aliases so old source continues to compile unchanged. */
     TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)-2,
-                             (uint64_t)(int64_t)USER_VM_ERR_NOMEM);
+                             (uint64_t)(int64_t)ARMONIOS_ERR_NOMEM);
     TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)-3,
-                             (uint64_t)(int64_t)ERR_NOENT);
+                             (uint64_t)(int64_t)ARMONIOS_ERR_NOENT);
     TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)-5,
-                             (uint64_t)(int64_t)ERR_BADF);
+                             (uint64_t)(int64_t)ARMONIOS_ERR_BADF);
     TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)-7,
-                             (uint64_t)(int64_t)ERR_INVAL);
+                             (uint64_t)(int64_t)ARMONIOS_ERR_INVAL);
     TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)-11,
-                             (uint64_t)(int64_t)ERR_AGAIN);
+                             (uint64_t)(int64_t)ARMONIOS_ERR_AGAIN);
     TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)-13,
+                             (uint64_t)(int64_t)ARMONIOS_ERR_PERM);
+
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_NOMEM,
+                             (uint64_t)(int64_t)USER_VM_ERR_NOMEM);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_NOENT,
+                             (uint64_t)(int64_t)ERR_NOENT);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_BADF,
+                             (uint64_t)(int64_t)ERR_BADF);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_INVAL,
+                             (uint64_t)(int64_t)ERR_INVAL);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_AGAIN,
+                             (uint64_t)(int64_t)ERR_AGAIN);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_PERM,
                              (uint64_t)(int64_t)ERR_PERM);
 
-    TEST_ASSERT_TRUE(USER_VM_ERR_NOMEM != ERR_NOENT);
-    TEST_ASSERT_TRUE(ERR_NOENT != ERR_BADF);
-    TEST_ASSERT_TRUE(ERR_BADF != ERR_INVAL);
-    TEST_ASSERT_TRUE(ERR_INVAL != ERR_AGAIN);
-    TEST_ASSERT_TRUE(ERR_AGAIN != ERR_PERM);
+    TEST_ASSERT_TRUE(ARMONIOS_ERR_NOMEM != ARMONIOS_ERR_NOENT);
+    TEST_ASSERT_TRUE(ARMONIOS_ERR_NOENT != ARMONIOS_ERR_BADF);
+    TEST_ASSERT_TRUE(ARMONIOS_ERR_BADF != ARMONIOS_ERR_INVAL);
+    TEST_ASSERT_TRUE(ARMONIOS_ERR_INVAL != ARMONIOS_ERR_AGAIN);
+    TEST_ASSERT_TRUE(ARMONIOS_ERR_AGAIN != ARMONIOS_ERR_PERM);
 }
 
 void test_syscall_abi_vfs_open_flags_match_documentation(void) {
