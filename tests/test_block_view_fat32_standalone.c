@@ -111,10 +111,12 @@ int main(void) {
     block_device_t parent;
     block_device_t invalid;
     block_device_view_t fat_view;
+    block_device_view_t writable_fat_view;
     block_device_view_t writable_view;
     block_device_view_t nested_view;
     const block_device_t *fat_device;
     fat32_fs_t fs;
+    fat32_fs_t writable_fs;
     uint8_t list[16];
     uint8_t sector[FAT32_SECTOR_SIZE];
     uint64_t written = 99U;
@@ -122,6 +124,7 @@ int main(void) {
 
     memset(&disk, 0, sizeof(disk));
     memset(&fs, 0, sizeof(fs));
+    memset(&writable_fs, 0, sizeof(writable_fs));
     build_fat32_boot_sector(disk.sectors[8]);
     disk.sectors[10][0] = 0x00U;
 
@@ -143,8 +146,14 @@ int main(void) {
     ASSERT_EQ_U32(8U, fat_device->block_count);
     ASSERT_EQ_U32(FAT32_SECTOR_SIZE, fat_device->block_size);
 
+    put_le32(&disk.sectors[8][32], 9U);
+    ASSERT_TRUE(fat32_mount_device(&fs, fat_device) != 0);
+    ASSERT_TRUE(fs.mounted == 0U);
+    put_le32(&disk.sectors[8][32], 8U);
+
     ASSERT_EQ_U32(0U, fat32_mount_device(&fs, fat_device));
     ASSERT_TRUE(fs.mounted != 0U);
+    ASSERT_TRUE(fs.write_sector == 0);
     ASSERT_EQ_U32(8U, disk.last_lba);
 
     ASSERT_EQ_U32(0U, fat32_list_root(&fs, list, sizeof(list), &written));
@@ -157,6 +166,15 @@ int main(void) {
     ASSERT_TRUE(block_device_write(fat_device, 0U, 1U, sector) != 0);
     ASSERT_EQ_U32(0U, fat32_flush(&fs));
     ASSERT_EQ_U32(1U, disk.flush_count);
+
+    ASSERT_EQ_U32(0U, block_device_view_init(&writable_fat_view, &parent,
+                                             8U, 8U, 0U));
+    ASSERT_EQ_U32(0U, fat32_mount_device(
+                          &writable_fs,
+                          block_device_view_device(&writable_fat_view)));
+    ASSERT_TRUE(writable_fs.write_sector != 0);
+    ASSERT_EQ_U32(0U, fat32_flush(&writable_fs));
+    ASSERT_EQ_U32(2U, disk.flush_count);
 
     ASSERT_EQ_U32(0U, block_device_view_init(&writable_view, &parent,
                                              0U, 4U, 0U));
