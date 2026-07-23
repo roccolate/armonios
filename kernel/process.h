@@ -15,11 +15,12 @@
 
 #include <stdint.h>
 
+#include "include/armonios/abi/process.h"
 #include "kernel/exceptions.h"
 
 #define PROCESS_MAX_PROCESSES    16U
 #define PROCESS_MAX_USER_REGIONS 8U
-#define PROCESS_NAME_LEN         16U
+#define PROCESS_NAME_LEN         ARM_PROCESS_NAME_LEN
 #define PROCESS_USER_MMAP_BASE   0x0000000100000000ULL
 #define PROCESS_USER_MMAP_LIMIT  0x0000000200000000ULL
 #define PROCESS_USER_REGION_OWNED_PAGES (1ULL << 0)
@@ -31,6 +32,17 @@ typedef enum {
     PROCESS_BLOCKED,
     PROCESS_ZOMBIE,
 } process_state_t;
+
+_Static_assert(PROCESS_UNUSED == ARM_PROCESS_UNUSED,
+               "ABI drift: PROCESS_UNUSED");
+_Static_assert(PROCESS_READY == ARM_PROCESS_READY,
+               "ABI drift: PROCESS_READY");
+_Static_assert(PROCESS_RUNNING == ARM_PROCESS_RUNNING,
+               "ABI drift: PROCESS_RUNNING");
+_Static_assert(PROCESS_BLOCKED == ARM_PROCESS_BLOCKED,
+               "ABI drift: PROCESS_BLOCKED");
+_Static_assert(PROCESS_ZOMBIE == ARM_PROCESS_ZOMBIE,
+               "ABI drift: PROCESS_ZOMBIE");
 
 typedef enum {
     PROCESS_DISPATCH_EXIT = 0,
