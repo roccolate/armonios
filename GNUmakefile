@@ -14,8 +14,19 @@ STORAGE_FOUNDATION_OBJS := \
     $(BUILD_DIR)/drivers/storage/block_device.o \
     $(BUILD_DIR)/kernel/fat32_device.o
 
+# RPi4 diagnostic builds already add mbr.o through STORAGE_DEV. Every other
+# production build now needs it because kernel storage can open bounded MBR
+# partition views.
+ifeq ($(filter $(BUILD_DIR)/drivers/storage/mbr.o,$(OBJS)),)
+STORAGE_FOUNDATION_OBJS += $(BUILD_DIR)/drivers/storage/mbr.o
+endif
+
 OBJS += $(STORAGE_FOUNDATION_OBJS)
 DEPS += $(STORAGE_FOUNDATION_OBJS:.o=.d)
+
+# The original dependency include was parsed inside Makefile before the objects
+# above were appended.
+-include $(STORAGE_FOUNDATION_OBJS:.o=.d)
 
 # The original kernel target was parsed before the appended object list. Add the
 # prerequisites explicitly; its deferred link recipe sees the updated OBJS.
