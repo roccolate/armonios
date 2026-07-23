@@ -1,5 +1,7 @@
 # Roadmap
 
+> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, and #93. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
+
 This roadmap starts from the verified v0.1 QEMU desktop baseline and targets a
 small, usable v1.0 QEMU desktop operating system.
 
@@ -43,8 +45,8 @@ Chosen release defaults:
 |---|---|---|
 | v0.1 baseline | COMPLETE | None for the recorded QEMU baseline |
 | v0.2 cleanup/hardening | PROMOTION CANDIDATE | `RISK-017` residual disposition, `RISK-018`/issue #63, final visible pass, exact promotion runs, tag/release record |
-| v0.3 storage/VFS platform | NEXT AFTER v0.2 | Depends on formal v0.2 disposition |
-| v0.4 real FAT | PLANNED | Depends on v0.3 block/path/filesystem contracts |
+| v0.3 storage/VFS platform | IN PROGRESS | Core block/path/mount and nested traversal foundations landed; metadata and mutation contracts remain |
+| v0.4 real FAT | EARLY PARTIAL | Nested 8.3 read traversal exists; long names and mutation-safe directories depend on remaining v0.3 contracts |
 | v0.5 userland runtime/widgets | PLANNED | Depends on stable storage and ABI shapes |
 | v0.6 useful applications | PARTIAL DEMOS ONLY | Depends on v0.3-v0.5 |
 | v0.7 ext2 read-only | PLANNED | Depends on v0.3 filesystem interface |
@@ -177,7 +179,7 @@ That redesign is not required for the current cooperative v0.2 contract.
 Goal: replace fixed demo plumbing with coherent generic storage, path, mount, and
 metadata foundations before adding general FAT or rewriting applications.
 
-### Cut 1 — block-device descriptor
+### Cut 1 — block-device descriptor — LANDED
 
 Define a generic descriptor containing:
 
@@ -198,7 +200,7 @@ Required evidence:
 - virtio block, bounded block views, and RPi4 diagnostic adapters preserve current
   behavior.
 
-### Cut 2 — path normalizer
+### Cut 2 — path normalizer — LANDED
 
 Implement one pure, host-testable absolute-path normalizer with explicit policy
 for:
@@ -214,7 +216,7 @@ for:
 
 Do not tie this helper to FAT semantics.
 
-### Cut 3 — mount resolver
+### Cut 3 — mount resolver — LANDED
 
 Implement deterministic mount selection with:
 
@@ -226,7 +228,7 @@ Implement deterministic mount selection with:
 - tests for `/`, `/fat`, `/tmp`, `/armonios`, and future `/ext`;
 - no accidental `/fatx` match for `/fat`.
 
-### Cut 4 — structured kernel filesystem types
+### Cut 4 — structured kernel filesystem types — ACTIVE
 
 Add kernel-internal structures for:
 
@@ -259,7 +261,7 @@ Extend the generic filesystem interface deliberately:
 Each operation must specify read-only behavior, partial progress, rollback,
 capacity limits, and errors.
 
-### Cut 6 — append-only public ABI
+### Cut 6 — append-only public ABI — ACTIVE IN PR #95
 
 Only after kernel implementation and tests exist, add the required user ABI in
 small cuts. Candidate calls include:
@@ -281,7 +283,7 @@ Every call must land with:
 - at least one real userland consumer;
 - `SYSCALLS.md` update.
 
-### Cut 7 — compatibility migration
+### Cut 7 — compatibility migration — PARTLY LANDED
 
 Route the existing bootfs, tmpfs, and root-only FAT32 workflow through the new
 path and mount contracts without changing the v0.1 user workflow.

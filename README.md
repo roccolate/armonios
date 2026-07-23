@@ -1,5 +1,7 @@
 # ArmoniOS
 
+> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, and #93. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
+
 > A small freestanding AArch64 operating system with a graphical QEMU desktop,
 > inspired by the compact, direct design of KolibriOS and MenuetOS.
 
@@ -25,7 +27,7 @@ a hosted Linux application or distribution.
 - **current phase:** v0.2 promotion candidate after cleanup and runtime hardening;
 - **formal v0.2 blockers:** residual-risk disposition, issue #63, a final dated
   visible workflow, and the tag/release record;
-- **next architecture milestone:** v0.3 storage/VFS platform;
+- **current architecture work:** v0.3 storage/VFS foundations are partly landed; structured metadata is active in PR #95;
 - **v1 target:** a small usable QEMU desktop;
 - **physical hardware:** Raspberry Pi 4 build/host scaffolding only.
 
@@ -39,7 +41,8 @@ Read these first:
 2. [Technical Risks](docs/TECHNICAL_RISKS.md) — open correctness and release risks;
 3. [Roadmap](docs/ROADMAP.md) — milestone order and exit criteria;
 4. [Development Guide](docs/DEVELOPMENT_GUIDE.md) — codebase map and practical work workflow;
-5. [Architecture](docs/ARCHITECTURE.md) — implemented design.
+5. [Architecture](docs/ARCHITECTURE.md) — implemented design;
+6. [v0.3 Implementation Status](docs/V03_IMPLEMENTATION_STATUS.md) — current storage/VFS checkpoint.
 
 ## What works
 
@@ -175,7 +178,7 @@ evidence until it is finalized, merged, and promoted into the canonical state.
 | Physical memory | PMM manages at most 128 MiB. |
 | Processes | 16 slots and eight user regions/process. |
 | VFS | 24 nodes, four mounts, eight descriptors/process, 64-byte paths. |
-| FAT32 | Root directory, 8.3 names, no subdirectories or long names. |
+| FAT32 | Existing nested 8.3 trees are readable/listable; creation, deletion, and rename remain root-only; no long names. |
 | Editor | 512-byte buffer and caret-line viewport. |
 | Files | `/fat` only; at most eight displayed root entries. |
 | GUI | 16 windows, 32 events/window, 32 damage rectangles, eight partial rectangles/submission. |
@@ -256,9 +259,10 @@ promotion tree.
 
 ## Storage and applications
 
-The current FAT32 compatibility path supports 512-byte sectors, root 8.3 files,
-cluster growth, create/read/write/list/rename/delete, and dynamic `/fat/<name>` VFS
-nodes. It is not a general FAT implementation.
+The current FAT32 path supports 512-byte sectors, whole-device or primary-MBR
+mounting, bounded nested 8.3 traversal, and root-level create/write/rename/delete.
+Nested mutation, long names, and durable reboot semantics remain incomplete; it is
+still not a general FAT implementation.
 
 Current applications are real demonstrations, not complete daily tools:
 

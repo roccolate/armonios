@@ -1,5 +1,7 @@
 # Syscall Reference
 
+> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, and #93. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
+
 ArmoniOS defines a small non-POSIX syscall ABI for freestanding AArch64 applications.
 
 This document describes the current implementation, including known unsafe or incomplete contracts. Operational verification lives in `CURRENT_STATE.md`; risk history and remaining exit criteria live in `TECHNICAL_RISKS.md`.
@@ -123,19 +125,20 @@ Open flags:
 
 `O_CREAT` is currently accepted only for `/fat/<valid-8.3-name>`.
 
-FAT32 syscall scope:
+FAT32 syscall scope on current `main`:
 
-- root directory only;
-- short 8.3 names only;
-- create, read, write, seek, rename, delete, stat, and list;
-- no subdirectories, long-file-name ABI, partition discovery, ext2 mount, or structured directory entries.
+- existing nested short-8.3 directory trees can be normalized, traversed, listed, statted, opened, and read;
+- create, write, unlink, and rename remain limited to root entries;
+- long names, mkdir/rmdir, truncate, nested mutation, ext2, and durable reboot semantics remain absent;
+- PR #95 adds structured stat and readdir calls while preserving the global ABI 1.0 identifier.
 
 ## Planned filesystem ABI extensions
 
-These calls are part of the v1 storage roadmap and are **not implemented** in
-the current syscall table. Assign numbers only when the matching kernel,
-userland wrappers, tests, and documentation land together. Append new numbers;
-do not reuse existing syscall slots.
+These calls are part of the v1 storage roadmap. PR #95 currently implements the
+structured metadata candidates as `SYS_STAT_V2=49` and `SYS_READDIR_V2=50`; they
+are not part of `main` until that PR is promoted. Assign every remaining number
+only when kernel code, wrappers, tests, a real userland consumer, and documentation
+land together. Append numbers; never reuse an existing slot.
 
 | Planned name | Intended purpose |
 |---|---|
