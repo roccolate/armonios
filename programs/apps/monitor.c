@@ -1,20 +1,19 @@
-// ArmoniOS app: monitor (C version, on libkarm + libkarmdesk)
+// ArmoniOS app: monitor (C version, on libkarm + libarmdesk)
 //
 // Windowed process monitor. It owns a desktop window, redraws memory
 // and tick counters plus a short process list once every REDRAW_WAIT
 // yields, and exits on 'q', 'Q', or title-bar close.
 //
-// Non-window syscalls (write, yield, meminfo, timeinfo, proclist,
-// exit) go through libkarm's typed wrappers. Number formatting uses
-// kli_utoa from <libkarm/string.h>. Window syscalls go through
-// libkarmdesk's typed gui_* wrappers.
+// Non-window syscalls go through libkarm's typed wrappers and public ABI
+// layouts. Number formatting uses kli_utoa. Window syscalls go through
+// libarmdesk's typed gui_* wrappers.
 
 #include <stddef.h>
 #include <stdint.h>
 
-#include "libkarm/syscall.h"
+#include "libarmdesk/gui.h"
 #include "libkarm/string.h"
-#include "libkarmdesk/gui.h"
+#include "libkarm/syscall.h"
 
 #define WIN_X          56
 #define WIN_Y         120
@@ -23,7 +22,6 @@
 #define TITLE_BAR_H    16
 #define EVENT_CAP       8
 #define PROC_CAP        6
-#define PROC_NAME_CAP  16
 #define REDRAW_WAIT    20
 
 #define COLOR_BG       0xff182024U
@@ -34,35 +32,33 @@ static void draw_text(long wid, long x, long y, const char *s) {
     (void)gui_window_draw_text(wid, x, y, COLOR_TEXT, s);
 }
 
-// sys_proclist entry: pid(u32) state(u32) name[16] -> 24 bytes.
-typedef struct {
-    uint32_t pid;
-    uint32_t state;
-    char     name[PROC_NAME_CAP];
-} proc_entry_t;
+typedef union {
+    arm_meminfo_t memory;
+    arm_timeinfo_t time;
+} monitor_info_t;
 
-static void redraw(long wid, uint64_t *info, char *numbuf,
-                   proc_entry_t *procs) {
+static void redraw(long wid, monitor_info_t *info, char *numbuf,
+                   arm_process_entry_t *procs) {
     (void)gui_window_draw_rect(wid, 1, 0, WIN_W - 2,
                                WIN_H - TITLE_BAR_H - 2, COLOR_BG);
 
     draw_text(wid, 12, 8, "SYSTEM MONITOR");
 
-    if (kli_meminfo(info) >= 0) {
+    if (kli_meminfo_v1(&info->memory) >= 0) {
         draw_text(wid, 12, 28, "FREE PG");
-        kli_utoa(info[1], numbuf, 24);
+        kli_utoa(info->memory.free_pages, numbuf, 24);
         draw_text(wid, 96, 28, numbuf);
     }
 
-    if (kli_timeinfo(info) >= 0) {
+    if (kli_timeinfo_v1(&info->time) >= 0) {
         draw_text(wid, 12, 44, "TICKS");
-        kli_utoa(info[0], numbuf, 24);
+        kli_utoa(info->time.timer_ticks, numbuf, 24);
         draw_text(wid, 96, 44, numbuf);
     }
 
     draw_text(wid, 12, 68, "PID   ST    NAME");
 
-    long n = kli_proclist(procs, PROC_CAP);
+    long n = kli_proclist_v1(procs, PROC_CAP);
     if (n < 0) {
         n = 0;
     }
@@ -72,7 +68,6 @@ static void redraw(long wid, uint64_t *info, char *numbuf,
         draw_text(wid, 12, y, numbuf);
         kli_utoa((uint64_t)procs[i].state, numbuf, 24);
         draw_text(wid, 56, y, numbuf);
-        // SYS_PROCLIST zero-terminates and zero-fills this fixed field.
         draw_text(wid, 108, y, procs[i].name);
         y += 16;
     }
@@ -84,23 +79,23 @@ int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
 
-    kli_write_cstr(1, "monitor: starting\n");
+    kli_write_cstr(ARM_FD_STDOUT, "monitor: starting\n");
 
     long wid = gui_window_create(WIN_X, WIN_Y, WIN_W, WIN_H,
                                  COLOR_BG, COLOR_BORDER, "monitor");
     if (wid < 0) {
-        kli_write_cstr(1, "monitor: window create failed\n");
+        kli_write_cstr(ARM_FD_STDOUT, "monitor: window create failed\n");
         return 1;
     }
     (void)gui_window_set_title(wid, "monitor", TITLE_BAR_H);
 
-    uint64_t info[3];
-    char     numbuf[24];
-    proc_entry_t procs[PROC_CAP];
+    monitor_info_t info;
+    char numbuf[24];
+    arm_process_entry_t procs[PROC_CAP];
     gui_event_t events[EVENT_CAP];
 
     long wait = REDRAW_WAIT;
-    redraw(wid, info, numbuf, procs);
+    redraw(wid, &info, numbuf, procs);
 
     for (;;) {
         long n = gui_window_event(wid, events, EVENT_CAP);
@@ -120,7 +115,7 @@ int main(int argc, char **argv) {
 
         wait--;
         if (wait <= 0) {
-            redraw(wid, info, numbuf, procs);
+            redraw(wid, &info, numbuf, procs);
             wait = REDRAW_WAIT;
         }
 
