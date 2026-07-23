@@ -15,28 +15,26 @@ static virtio_input_device_t g_input_dev;
 static uint64_t g_display_base;
 static uint8_t g_display_ready;
 
+const block_device_t *board_storage_device(void) {
+    if (g_storage_device.read == 0 || g_storage_device.block_count == 0U ||
+        g_storage_device.block_size == 0U) {
+        return 0;
+    }
+    return &g_storage_device;
+}
+
 int board_storage_read(uint32_t lba, uint32_t count, void *buffer) {
     if (count == 0U) {
         return 0;
     }
-    if (buffer == 0 || g_storage_device.read == 0 ||
-        lba > UINT32_MAX - (count - 1U)) {
-        return -1;
-    }
-
-    return g_storage_device.read(g_storage_device.context, lba, count, buffer);
+    return block_device_read(board_storage_device(), lba, count, buffer);
 }
 
 int board_storage_write(uint32_t lba, uint32_t count, const void *buffer) {
     if (count == 0U) {
         return 0;
     }
-    if (buffer == 0 || g_storage_device.write == 0 ||
-        lba > UINT32_MAX - (count - 1U)) {
-        return -1;
-    }
-
-    return g_storage_device.write(g_storage_device.context, lba, count, buffer);
+    return block_device_write(board_storage_device(), lba, count, buffer);
 }
 
 int board_storage_init(void) {

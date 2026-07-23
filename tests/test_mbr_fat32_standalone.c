@@ -4,6 +4,8 @@
 
 #include "storage/mbr.h"
 
+#define TEST_BLOCKS 64U
+
 #define ASSERT_TRUE(expr) do { \
     if (!(expr)) { \
         fprintf(stderr, "assert failed: %s:%d: %s\n", \
@@ -22,6 +24,28 @@
         return 1; \
     } \
 } while (0)
+
+typedef struct {
+    uint8_t sectors[TEST_BLOCKS][MBR_SECTOR_SIZE];
+    uint64_t last_block;
+    uint32_t reads;
+} fake_disk_t;
+
+static int fake_read(void *context, uint64_t first_block,
+                     uint32_t block_count, void *buffer) {
+    fake_disk_t *disk = (fake_disk_t *)context;
+
+    if (disk == 0 || buffer == 0 || block_count == 0U ||
+        first_block >= TEST_BLOCKS || block_count > TEST_BLOCKS - first_block) {
+        return -1;
+    }
+
+    memcpy(buffer, disk->sectors[first_block],
+           (size_t)block_count * MBR_SECTOR_SIZE);
+    disk->last_block = first_block + block_count - 1U;
+    disk->reads += block_count;
+    return 0;
+}
 
 static void put_le32(uint8_t *p, uint32_t value) {
     p[0] = (uint8_t)value;
@@ -91,14 +115,45 @@ static int test_rejects_missing_signature_and_empty_layout(void) {
     return 0;
 }
 
+static int test_opens_bounded_partition_view(void) {
+    fake_disk_t disk;
+    block_device_t parent;
+    block_device_view_t view;
+    mbr_partition_t partition;
+    uint8_t sector[MBR_SECTOR_SIZE];
+    const block_device_t *child;
+
+    memset(&disk, 0, sizeof(disk));
+    disk.sectors[0][510] = 0x55U;
+    disk.sectors[0][511] = 0xaaU;
+    set_partition(disk.sectors[0], 0U, 0U, 0x0cU, 8U, 16U);
+    disk.sectors[8][0] = 0x5aU;
+
+    ASSERT_EQ_U32(0U, block_device_init(
+                          &parent, fake_read, 0, 0, &disk, TEST_BLOCKS,
+                          MBR_SECTOR_SIZE, BLOCK_DEVICE_FLAG_READ_ONLY));
+    ASSERT_EQ_U32(0U, mbr_open_fat32_partition(&parent, &view, &partition));
+    ASSERT_EQ_U32(8U, partition.start_lba);
+    ASSERT_EQ_U32(16U, partition.sector_count);
+
+    child = block_device_view_device(&view);
+    ASSERT_TRUE(child != 0 && block_device_is_read_only(child));
+    ASSERT_EQ_U32(16U, child->block_count);
+    ASSERT_EQ_U32(0U, block_device_read(child, 0U, 1U, sector));
+    ASSERT_EQ_U32(8U, disk.last_block);
+    ASSERT_EQ_U32(0x5aU, sector[0]);
+    ASSERT_TRUE(block_device_read(child, 16U, 1U, sector) != 0);
+
+    set_partition(disk.sectors[0], 0U, 0U, 0x0cU, 60U, 16U);
+    ASSERT_TRUE(mbr_open_fat32_partition(&parent, &view, &partition) != 0);
+    return 0;
+}
+
 int main(void) {
-    if (test_finds_first_valid_fat32_partition() != 0) {
-        return 1;
-    }
-    if (test_accepts_hidden_fat32_and_skips_invalid_entries() != 0) {
-        return 1;
-    }
-    if (test_rejects_missing_signature_and_empty_layout() != 0) {
+    if (test_finds_first_valid_fat32_partition() != 0 ||
+        test_accepts_hidden_fat32_and_skips_invalid_entries() != 0 ||
+        test_rejects_missing_signature_and_empty_layout() != 0 ||
+        test_opens_bounded_partition_view() != 0) {
         return 1;
     }
     puts("mbr-fat32-test: PASS");

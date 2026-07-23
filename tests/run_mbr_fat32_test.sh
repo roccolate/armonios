@@ -11,6 +11,7 @@ mkdir -p "$OUT_DIR"
 "$CC_BIN" -std=c11 -Wall -Wextra -Werror \
     -I"$ROOT_DIR" -I"$ROOT_DIR/drivers" \
     "$ROOT_DIR/tests/test_mbr_fat32_standalone.c" \
+    "$ROOT_DIR/drivers/storage/block_device.c" \
     "$ROOT_DIR/drivers/storage/mbr.c" \
     -o "$OUT_DIR/mbr-fat32"
 

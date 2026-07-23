@@ -33,6 +33,7 @@
 #include "kernel/panel_boot.h"
 #include "kernel/panel_boot_recovery.h"
 #include "kernel/vfs.h"
+#include "storage/mbr.h"
 #include "uart/pl011.h"
 #include "input/input.h"
 #include "kernel/net/dhcp.h"
@@ -64,6 +65,7 @@ void kernel_main(uint64_t dtb_addr) {
 }
 #else
 static fat32_fs_t g_fat32_fs;
+static block_device_view_t g_fat32_partition_view;
 
 static int board_supports(uint32_t capability) {
     return (board_capabilities() & capability) != 0;
@@ -239,26 +241,27 @@ static init_status_t start_panel_boot(const dtb_memory_t *memory) {
     return user_exit_code == 0 ? INIT_STATUS_OK : INIT_STATUS_WARN;
 }
 
-static int fat32_read_storage(void *context, uint32_t lba, uint8_t *buffer) {
-    (void)context;
-    return board_storage_read(lba, 1, buffer);
-}
-
-static int fat32_write_storage(void *context, uint32_t lba,
-                               const uint8_t *buffer) {
-    (void)context;
-    return board_storage_write(lba, 1, buffer);
-}
-
-static int probe_fat32(void) {
+static int probe_fat32(const block_device_t *storage) {
+    mbr_partition_t partition;
+    const block_device_t *fat_device = storage;
     vfs_stat_t stat;
 
     fat32_vfs_reset();
-    if (fat32_mount(&g_fat32_fs, fat32_read_storage, NULL) != 0) {
-        uart_puts("FAT32: absent\n");
-        return -1;
+    if (fat32_mount_device(&g_fat32_fs, fat_device) != 0) {
+        if (mbr_open_fat32_partition(storage, &g_fat32_partition_view,
+                                     &partition) != 0) {
+            uart_puts("FAT32: absent\n");
+            return -1;
+        }
+        fat_device = block_device_view_device(&g_fat32_partition_view);
+        if (fat32_mount_device(&g_fat32_fs, fat_device) != 0) {
+            uart_puts("FAT32: absent\n");
+            return -1;
+        }
+        uart_puts("FAT32 partition: ");
+        print_dec64(partition.start_lba);
+        uart_puts("\n");
     }
-    fat32_set_write_sector(&g_fat32_fs, fat32_write_storage);
 
     uart_puts("FAT32: mounted\n");
     if (fat32_mount_vfs_root(&g_fat32_fs, "/fat") == 0) {
@@ -293,17 +296,23 @@ static int probe_fat32(void) {
  * absent.
  */
 static init_status_t probe_storage(void) {
-    uint8_t sector[512] KERNEL_ALIGNED(8);
+    const block_device_t *storage;
+    uint8_t sector[FAT32_SECTOR_SIZE] KERNEL_ALIGNED(8);
     int read_status;
 
-    if (board_storage_init() != 0) {
+    if (board_storage_init() != 0 ||
+        (storage = board_storage_device()) == 0 ||
+        storage->block_size != FAT32_SECTOR_SIZE) {
         uart_puts("storage: init failed\n");
         return INIT_STATUS_WARN;
     }
 
     uart_puts("storage: initialized\n");
+    uart_puts("storage sectors: ");
+    print_dec64(storage->block_count);
+    uart_puts("\n");
 
-    read_status = board_storage_read(0, 1, sector);
+    read_status = block_device_read(storage, 0U, 1U, sector);
     if (read_status == 0) {
         uint32_t word = (uint32_t)sector[0] |
                         ((uint32_t)sector[1] << 8) |
@@ -313,13 +322,14 @@ static init_status_t probe_storage(void) {
         uart_puts("storage s0: ");
         print_hex64(word);
         uart_puts("\n");
-        return probe_fat32() == 0 ? INIT_STATUS_OK : INIT_STATUS_WARN;
-    } else {
-        uart_puts("storage err: ");
-        print_hex64((uint64_t)(uint32_t)read_status);
-        uart_puts("\n");
+        return probe_fat32(storage) == 0
+                   ? INIT_STATUS_OK
+                   : INIT_STATUS_WARN;
     }
 
+    uart_puts("storage err: ");
+    print_hex64((uint64_t)(uint32_t)read_status);
+    uart_puts("\n");
     return INIT_STATUS_WARN;
 }
 

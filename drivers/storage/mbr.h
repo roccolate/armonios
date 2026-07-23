@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "storage/block_device.h"
+
 #define MBR_SECTOR_SIZE 512U
 
 typedef struct {
@@ -19,6 +21,15 @@ typedef struct {
  * deliberately outside this small contract.
  */
 int mbr_find_fat32_partition(const uint8_t sector[MBR_SECTOR_SIZE],
-                             mbr_partition_t *partition);
+                              mbr_partition_t *partition);
+
+/*
+ * Read sector zero from a finite device and expose the first FAT32 partition as
+ * a bounded child descriptor. The view inherits read-only and flush policy from
+ * its parent and rejects partition geometry outside the physical device.
+ */
+int mbr_open_fat32_partition(const block_device_t *device,
+                              block_device_view_t *view,
+                              mbr_partition_t *partition);
 
 #endif
