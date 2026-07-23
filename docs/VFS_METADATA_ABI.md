@@ -83,12 +83,13 @@ filesystem-specific value.
 
 ## Current adapter
 
-The first kernel implementation adapts the existing VFS contracts:
+The VFS now owns filesystem-neutral `vfs_metadata_t` and `vfs_dirent_t` records.
+Mounts may provide native path-aware metadata and bounded readdir callbacks. FAT32
+maps short-name entries, file size, directory type, and FAT attributes directly
+into those records.
 
-- `stat_v2` obtains size from `vfs_stat` and identifies directories through the
-  existing listing operation;
-- `readdir_v2` converts complete entries from the legacy listing stream and
-  obtains child sizes/types through `stat_v2`.
-
-This keeps the ABI independent from FAT32. A later filesystem may add native
-structured callbacks without changing syscall numbers or public layouts.
+Bootfs, tmpfs, and older list-only mounts retain a compatibility fallback that
+converts their legacy stat/list operations into the same internal records. The
+public syscall layer only versions and copies the internal result; it does not
+parse FAT-specific directory text. Files is the first EL0 consumer of
+`SYS_READDIR_V2`, with a legacy fallback while the old call remains supported.

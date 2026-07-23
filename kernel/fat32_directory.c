@@ -4,7 +4,6 @@
 
 #include "kernel/kstring.h"
 
-#define FAT32_ATTR_VOLUME_ID 0x08U
 #define FAT32_ATTR_LONG_NAME 0x0fU
 #define FAT32_CLUSTER_MASK   0x0fffffffU
 #define FAT32_CLUSTER_EOC    0x0ffffff8U
@@ -352,6 +351,44 @@ static int dir_is_dot_entry(const uint8_t entry[11]) {
            (entry[1] == ' ' || (entry[1] == '.' && entry[2] == ' '));
 }
 
+
+static int dir_copy_name(const uint8_t entry[11],
+                         char name[FAT32_SHORT_NAME_MAX]) {
+    uint32_t base_end = 8U;
+    uint32_t ext_end = 3U;
+    uint32_t out = 0;
+
+    while (base_end > 0U && entry[base_end - 1U] == ' ') {
+        base_end--;
+    }
+    while (ext_end > 0U && entry[8U + ext_end - 1U] == ' ') {
+        ext_end--;
+    }
+    if (base_end == 0U) {
+        return -1;
+    }
+    for (uint32_t i = 0; i < base_end; i++) {
+        if (out + 1U >= FAT32_SHORT_NAME_MAX) {
+            return -1;
+        }
+        name[out++] = (char)entry[i];
+    }
+    if (ext_end > 0U) {
+        if (out + 1U >= FAT32_SHORT_NAME_MAX) {
+            return -1;
+        }
+        name[out++] = '.';
+        for (uint32_t i = 0; i < ext_end; i++) {
+            if (out + 1U >= FAT32_SHORT_NAME_MAX) {
+                return -1;
+            }
+            name[out++] = (char)entry[8U + i];
+        }
+    }
+    name[out] = '\0';
+    return 0;
+}
+
 static int dir_append_name(const uint8_t entry[11], uint8_t attr,
                            dir_list_output_t *out) {
     uint32_t base_end = 8U;
@@ -383,6 +420,77 @@ static int dir_append_name(const uint8_t entry[11], uint8_t attr,
         return -1;
     }
     return dir_append_byte(out, '\n');
+}
+
+
+int fat32_readdir_path(fat32_fs_t *fs, const char *path,
+                       uint64_t start_index, fat32_dirent_t *entries,
+                       uint64_t max_entries, uint64_t *entries_written) {
+    fat32_path_info_t directory;
+    uint32_t cluster;
+    uint32_t remaining;
+    uint64_t logical_index = 0;
+    uint64_t output = 0;
+
+    if (entries_written != 0) {
+        *entries_written = 0;
+    }
+    if (entries == 0 || entries_written == 0 || max_entries == 0 ||
+        fat32_lookup_path(fs, path, &directory) != 0 ||
+        (directory.attributes & FAT32_ATTR_DIRECTORY) == 0U) {
+        return -1;
+    }
+
+    cluster = directory.first_cluster;
+    remaining = fs->cluster_count;
+    while (dir_cluster_is_data(fs, cluster) && remaining-- != 0U) {
+        for (uint32_t sector = 0; sector < fs->sectors_per_cluster; sector++) {
+            uint32_t lba = dir_cluster_to_lba(fs, cluster) + sector;
+
+            if (dir_read_sector(fs, lba) != 0) {
+                return -1;
+            }
+            for (uint32_t entry_offset = 0;
+                 entry_offset < FAT32_SECTOR_SIZE; entry_offset += 32U) {
+                const uint8_t *entry = &fs->sector[entry_offset];
+                uint8_t attr = entry[11];
+                fat32_path_info_t info;
+
+                if (entry[0] == 0x00U) {
+                    *entries_written = output;
+                    return 0;
+                }
+                if (entry[0] == 0xe5U || attr == FAT32_ATTR_LONG_NAME ||
+                    (attr & FAT32_ATTR_VOLUME_ID) != 0U ||
+                    dir_is_dot_entry(entry)) {
+                    continue;
+                }
+                if (logical_index++ < start_index) {
+                    continue;
+                }
+                if (dir_copy_name(entry, entries[output].name) != 0 ||
+                    dir_fill_info(fs, entry, lba, entry_offset, &info) != 0) {
+                    return -1;
+                }
+                entries[output].size = info.size;
+                entries[output].attributes = info.attributes;
+                output++;
+                if (output == max_entries) {
+                    *entries_written = output;
+                    return 0;
+                }
+            }
+        }
+        if (dir_read_fat_entry(fs, cluster, &cluster) != 0) {
+            return -1;
+        }
+    }
+
+    if (!dir_cluster_is_eoc(cluster)) {
+        return -1;
+    }
+    *entries_written = output;
+    return 0;
 }
 
 int fat32_list_path_at(fat32_fs_t *fs, const char *path, uint64_t offset,

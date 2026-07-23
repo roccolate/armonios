@@ -52,6 +52,9 @@ typedef struct {
     int count;
     files_mode_t mode;
     char entries[ENTRY_CAP][NAME_CAP];
+    uint32_t entry_types[ENTRY_CAP];
+    uint64_t entry_sizes[ENTRY_CAP];
+    arm_dirent_v2_t dirents[ENTRY_CAP];
     char list_buf[LIST_BUF_CAP];
     char input[NAME_CAP];
     int input_len;
@@ -151,9 +154,28 @@ static void build_fat_path(char *out, size_t out_size, const char *name) {
 static void clear_entries(files_state_t *s) {
     for (int i = 0; i < ENTRY_CAP; i++) {
         s->entries[i][0] = '\0';
+        s->entry_types[i] = ARM_FILE_TYPE_UNKNOWN;
+        s->entry_sizes[i] = 0;
     }
     s->count = 0;
     s->selected = 0;
+}
+
+
+static int load_structured_entries(files_state_t *s) {
+    long count = kli_readdir_v2("/fat", 0, s->dirents, ENTRY_CAP);
+
+    if (count < 0 || count > ENTRY_CAP) {
+        return -1;
+    }
+    clear_entries(s);
+    for (long i = 0; i < count; i++) {
+        copy_cstr(s->entries[i], sizeof(s->entries[i]), s->dirents[i].name);
+        s->entry_types[i] = s->dirents[i].type;
+        s->entry_sizes[i] = s->dirents[i].size;
+    }
+    s->count = (int)count;
+    return 0;
 }
 
 static void parse_list(files_state_t *s, long bytes) {
@@ -164,6 +186,12 @@ static void parse_list(files_state_t *s, long bytes) {
     for (long i = 0; i < bytes && entry < ENTRY_CAP; i++) {
         char c = s->list_buf[i];
         if (c == '\n') {
+            if (col > 0 && s->entries[entry][col - 1] == '/') {
+                col--;
+                s->entry_types[entry] = ARM_FILE_TYPE_DIRECTORY;
+            } else {
+                s->entry_types[entry] = ARM_FILE_TYPE_REGULAR;
+            }
             s->entries[entry][col] = '\0';
             if (col > 0) {
                 entry++;
@@ -176,6 +204,12 @@ static void parse_list(files_state_t *s, long bytes) {
         }
     }
     if (col > 0 && entry < ENTRY_CAP) {
+        if (s->entries[entry][col - 1] == '/') {
+            col--;
+            s->entry_types[entry] = ARM_FILE_TYPE_DIRECTORY;
+        } else {
+            s->entry_types[entry] = ARM_FILE_TYPE_REGULAR;
+        }
         s->entries[entry][col] = '\0';
         entry++;
     }
@@ -204,6 +238,13 @@ static void refresh_list(files_state_t *s) {
         copy_cstr(previous, sizeof(previous), s->entries[s->selected]);
     }
 
+    if (load_structured_entries(s) == 0) {
+        restore_selection(s, previous);
+        copy_cstr(s->status, sizeof(s->status),
+                  s->count == 0 ? "NO FILES" : "FAT READY V2");
+        return;
+    }
+
     long n = kli_readdir("/fat", s->list_buf, sizeof(s->list_buf));
     if (n < 0) {
         clear_entries(s);
@@ -213,7 +254,7 @@ static void refresh_list(files_state_t *s) {
     parse_list(s, n);
     restore_selection(s, previous);
     copy_cstr(s->status, sizeof(s->status),
-              s->count == 0 ? "NO FILES" : "FAT READY");
+              s->count == 0 ? "NO FILES" : "FAT LEGACY");
 }
 
 static void draw_text(long wid, long x, long y, uint32_t color,
@@ -237,7 +278,11 @@ static void redraw(files_state_t *s) {
                                        COLOR_SELECT);
         }
         if (i < s->count) {
-            draw_text(s->wid, 16, y, COLOR_TEXT, s->entries[i]);
+            draw_text(s->wid, 16, y,
+                      s->entry_types[i] == ARM_FILE_TYPE_DIRECTORY
+                          ? COLOR_WARN
+                          : COLOR_TEXT,
+                      s->entries[i]);
         }
     }
 
@@ -261,10 +306,19 @@ static const char *selected_name(files_state_t *s) {
     return s->entries[s->selected];
 }
 
+static int selected_is_directory(files_state_t *s) {
+    return s->count > 0 && s->selected >= 0 && s->selected < s->count &&
+           s->entry_types[s->selected] == ARM_FILE_TYPE_DIRECTORY;
+}
+
 static void open_selected(files_state_t *s) {
     const char *name = selected_name(s);
     if (name == 0) {
         copy_cstr(s->status, sizeof(s->status), "NO SELECTION");
+        return;
+    }
+    if (selected_is_directory(s)) {
+        copy_cstr(s->status, sizeof(s->status), "DIRECTORY (READ ONLY)");
         return;
     }
 
@@ -319,6 +373,10 @@ static void rename_file(files_state_t *s) {
         copy_cstr(s->status, sizeof(s->status), "NO SELECTION");
         return;
     }
+    if (selected_is_directory(s)) {
+        copy_cstr(s->status, sizeof(s->status), "DIRECTORY RENAME LOCKED");
+        return;
+    }
     if (!valid_83_name(s->input)) {
         copy_cstr(s->status, sizeof(s->status), "BAD 8.3 NAME");
         return;
@@ -340,6 +398,10 @@ static void delete_file(files_state_t *s) {
 
     if (name == 0) {
         copy_cstr(s->status, sizeof(s->status), "NO SELECTION");
+        return;
+    }
+    if (selected_is_directory(s)) {
+        copy_cstr(s->status, sizeof(s->status), "DIRECTORY DELETE LOCKED");
         return;
     }
     build_fat_path(path, sizeof(path), name);
