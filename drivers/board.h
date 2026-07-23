@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "fb/fb.h"
+#include "storage/block_device.h"
 
 #define BOARD_CAP_STORAGE  (1U << 0)
 #define BOARD_CAP_DISPLAY  (1U << 1)
@@ -34,6 +35,12 @@ uint64_t board_virtio_mmio_stride(void);
 int board_emmc_read(uint32_t lba, uint32_t count, void *buffer);
 int board_emmc_write(uint32_t lba, uint32_t count, const void *buffer);
 
+/*
+ * Canonical storage contract. A board returns a descriptor only after
+ * board_storage_init() succeeds. The sector callbacks remain compatibility
+ * wrappers while older callers migrate to this descriptor.
+ */
+const block_device_t *board_storage_device(void);
 int board_storage_read(uint32_t lba, uint32_t count, void *buffer);
 int board_storage_write(uint32_t lba, uint32_t count, const void *buffer);
 int board_storage_init(void);
