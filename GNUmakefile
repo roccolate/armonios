@@ -4,6 +4,8 @@
 # cross-cutting foundation objects are appended here so every board links the
 # same storage and ABI contracts without duplicating board conditionals.
 
+# 128 KiB gives the kernel, embedded applications, and desktop foundations
+# enough development headroom while retaining a hard, measurable size gate.
 KERNEL_SIZE_LIMIT ?= 131072
 
 include Makefile
@@ -15,6 +17,9 @@ FOUNDATION_OBJS := \
     $(BUILD_DIR)/kernel/vfs_metadata.o \
     $(BUILD_DIR)/kernel/syscall_vfs_metadata.o
 
+# RPi4 diagnostic builds already add mbr.o through STORAGE_DEV. Every other
+# production build needs it because kernel storage can open bounded MBR
+# partition views.
 ifeq ($(filter $(BUILD_DIR)/drivers/storage/mbr.o,$(OBJS)),)
 FOUNDATION_OBJS += $(BUILD_DIR)/drivers/storage/mbr.o
 endif
@@ -22,6 +27,10 @@ endif
 OBJS += $(FOUNDATION_OBJS)
 DEPS += $(FOUNDATION_OBJS:.o=.d)
 
+# The original dependency include was parsed inside Makefile before the objects
+# above were appended.
 -include $(FOUNDATION_OBJS:.o=.d)
 
+# The original kernel target was parsed before the appended object list. Add the
+# prerequisites explicitly; its deferred link recipe sees the updated OBJS.
 $(KERNEL_ELF): $(FOUNDATION_OBJS)
