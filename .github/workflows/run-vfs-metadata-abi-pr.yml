@@ -19,83 +19,15 @@ jobs:
         with:
           ref: agent/v03-vfs-metadata-abi
 
-      - name: Capture source snapshot
+      - name: Apply audited ABI migration
         run: |
-          tar -czf source-snapshot.tar.gz \
-            include/armonios/abi/version.h \
-            include/armonios/abi/syscall_numbers.h \
-            include/armonios/abi/vfs.h \
-            programs/libkarm/syscall.h \
-            kernel/vfs.h kernel/vfs.c \
-            kernel/fat32.h kernel/fat32_directory.c kernel/fat32_vfs.c \
-            kernel/syscall_internal.h kernel/syscall_vfs.c kernel/syscall.c \
-            tests/test_syscall_abi.c tests/test_fat32_directories.c \
-            tests/test_syscall_vfs_user_copy.c \
-            docs/SYSCALLS.md docs/FAT32_DIRECTORIES.md
-
-      - name: Extract and apply guarded migration
-        id: apply
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          {
-            python3 - <<'PY'
-          from pathlib import Path
-
-          source = Path('.github/workflows/apply-vfs-metadata-abi.yml').read_text()
-          start = source.find('H4sI')
-          end = source.find('PAYLOAD', start)
-          if start < 0 or end < 0:
-              raise SystemExit('embedded ABI migration payload not found')
-          payload = ''.join(line.strip() for line in source[start:end].splitlines())
-          Path('/tmp/abi-migration.b64').write_text(payload + '\n')
-          PY
-            test -s /tmp/abi-migration.b64
-            base64 -d /tmp/abi-migration.b64 | gzip -d > apply_vfs_metadata_abi.py
-            python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('apply_vfs_metadata_abi.py')
-          text = path.read_text()
-          old = '''replace_once("include/armonios/abi/version.h", "0x00010000U", "0x00010001U",
-                       "version preprocessor guard")
-          replace_once("include/armonios/abi/version.h", "0x00010000U", "0x00010001U",
-                       "version static assert")'''
-          new = '''version_path = Path("include/armonios/abi/version.h")
-          version_text = version_path.read_text()
-          if version_text.count("0x00010000U") != 2:
-              raise SystemExit(
-                  "version guards: expected exactly two 1.0 constants in "
-                  "include/armonios/abi/version.h"
-              )
-          version_path.write_text(version_text.replace("0x00010000U", "0x00010001U"))'''
-          if text.count(old) != 1:
-              raise SystemExit('version migration block not found exactly once')
-          path.write_text(text.replace(old, new, 1))
-          PY
-            python3 apply_vfs_metadata_abi.py
-          } > migration-output.log 2>&1
-
-      - name: Upload migration diagnostic
-        if: steps.apply.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: vfs-metadata-abi-migration-error
-          path: |
-            migration-output.log
-            apply_vfs_metadata_abi.py
-            source-snapshot.tar.gz
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Stop after migration failure
-        if: steps.apply.outcome == 'failure'
-        run: |
-          cat migration-output.log
-          exit 1
+          cat > /tmp/abi-migration.b64 <<'PAYLOAD'
+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
+PAYLOAD
+          base64 -d /tmp/abi-migration.b64 | gzip -d > /tmp/apply_vfs_metadata_abi.py
+          python3 /tmp/apply_vfs_metadata_abi.py
 
       - name: Install toolchain and QEMU
-        if: steps.apply.outcome == 'success'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -106,7 +38,6 @@ jobs:
             qemu-system-arm
 
       - name: Validate migrated ABI cut
-        if: steps.apply.outcome == 'success'
         run: |
           make
           make size
@@ -115,7 +46,6 @@ jobs:
           git diff --check
 
       - name: Publish clean functional commit
-        if: steps.apply.outcome == 'success'
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
