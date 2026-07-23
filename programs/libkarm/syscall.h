@@ -24,7 +24,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "include/armonios/abi/memory.h"
+#include "include/armonios/abi/process.h"
 #include "include/armonios/abi/syscall_numbers.h"
+#include "include/armonios/abi/system.h"
+#include "include/armonios/abi/vfs.h"
 
 long __syscall0(long n);
 long __syscall1(long n, long a0);
@@ -102,6 +106,12 @@ static inline long kli_seek(int fd, long offset, long whence) {
     return __syscall3(SYS_SEEK, (long)fd, offset, whence);
 }
 
+static inline long kli_stat_v1(const char *path, arm_stat_t *stat_ptr) {
+    return __syscall2(SYS_STAT, (long)(uintptr_t)path,
+                      (long)(uintptr_t)stat_ptr);
+}
+
+/* Historical untyped form retained for source compatibility. */
 static inline long kli_stat(const char *path, void *stat_ptr) {
     return __syscall2(SYS_STAT, (long)(uintptr_t)path,
                       (long)(uintptr_t)stat_ptr);
@@ -134,14 +144,31 @@ static inline long kli_ipc_recv(void *buf, size_t capacity) {
 
 // System info ------------------------------------------------------------
 
+static inline long kli_timeinfo_v1(arm_timeinfo_t *info_ptr) {
+    return __syscall1(SYS_TIMEINFO, (long)(uintptr_t)info_ptr);
+}
+
+/* Historical array form retained for source compatibility. */
 static inline long kli_timeinfo(uint64_t *info_ptr) {
     return __syscall1(SYS_TIMEINFO, (long)(uintptr_t)info_ptr);
 }
 
+static inline long kli_meminfo_v1(arm_meminfo_t *info_ptr) {
+    return __syscall1(SYS_MEMINFO, (long)(uintptr_t)info_ptr);
+}
+
+/* Historical array form retained for source compatibility. */
 static inline long kli_meminfo(uint64_t *info_ptr) {
     return __syscall1(SYS_MEMINFO, (long)(uintptr_t)info_ptr);
 }
 
+static inline long kli_proclist_v1(arm_process_entry_t *entries,
+                                   size_t max_entries) {
+    return __syscall2(SYS_PROCLIST, (long)(uintptr_t)entries,
+                      (long)max_entries);
+}
+
+/* Historical untyped form retained for source compatibility. */
 static inline long kli_proclist(void *entries, size_t max_entries) {
     return __syscall2(SYS_PROCLIST, (long)(uintptr_t)entries, (long)max_entries);
 }
