@@ -6,9 +6,10 @@
 #include "storage/block_device.h"
 
 #define FAT32_SECTOR_SIZE 512U
+#define FAT32_ATTR_DIRECTORY 0x10U
 
 /*
- * FAT32 root-directory facade.
+ * FAT32 storage facade.
  *
  * The canonical mount path receives a finite block_device_t. The legacy
  * single-sector callback path remains temporarily for host tests and staged
@@ -47,6 +48,15 @@ typedef struct {
     uint32_t size;
 } fat32_file_t;
 
+typedef struct {
+    uint32_t first_cluster;
+    uint32_t dir_lba;
+    uint32_t dir_offset;
+    uint32_t capacity;
+    uint32_t size;
+    uint8_t attributes;
+} fat32_path_info_t;
+
 int fat32_mount_device(fat32_fs_t *fs, const block_device_t *device);
 int fat32_flush(fat32_fs_t *fs);
 
@@ -55,20 +65,38 @@ int fat32_mount(fat32_fs_t *fs, fat32_read_sector_fn_t read_sector,
                  void *context);
 void fat32_set_write_sector(fat32_fs_t *fs,
                              fat32_write_sector_fn_t write_sector);
+
+/* Existing root-only mutation compatibility API. */
 int fat32_open_root(fat32_fs_t *fs, const char *name, fat32_file_t *file);
 int fat32_list_root_at(fat32_fs_t *fs, uint64_t offset, uint8_t *buffer,
                         uint64_t capacity, uint64_t *bytes_written);
 int fat32_list_root(fat32_fs_t *fs, uint8_t *buffer, uint64_t capacity,
                      uint64_t *bytes_written);
+int fat32_create(fat32_fs_t *fs, const char *name, fat32_file_t *file);
+int fat32_delete(fat32_fs_t *fs, const char *name);
+int fat32_rename(fat32_fs_t *fs, const char *old_name,
+                  const char *new_name);
+
+/*
+ * Read-only component traversal. Paths are relative to the FAT volume root and
+ * use 8.3 components. A leading slash is accepted. Directories can be looked
+ * up and listed; fat32_open_path() rejects a directory final component.
+ */
+int fat32_lookup_path(fat32_fs_t *fs, const char *path,
+                      fat32_path_info_t *info);
+int fat32_open_path(fat32_fs_t *fs, const char *path, fat32_file_t *file);
+int fat32_list_path_at(fat32_fs_t *fs, const char *path, uint64_t offset,
+                       uint8_t *buffer, uint64_t capacity,
+                       uint64_t *bytes_written);
+int fat32_list_path(fat32_fs_t *fs, const char *path, uint8_t *buffer,
+                    uint64_t capacity, uint64_t *bytes_written);
+
 int fat32_read(fat32_fs_t *fs, const fat32_file_t *file, uint64_t offset,
                 uint8_t *buffer, uint64_t capacity, uint64_t *bytes_read);
 int fat32_write(fat32_fs_t *fs, fat32_file_t *file, uint64_t offset,
                  const uint8_t *buffer, uint64_t size,
                  uint64_t *bytes_written);
-int fat32_create(fat32_fs_t *fs, const char *name, fat32_file_t *file);
-int fat32_delete(fat32_fs_t *fs, const char *name);
-int fat32_rename(fat32_fs_t *fs, const char *old_name,
-                  const char *new_name);
+
 void fat32_vfs_reset(void);
 int fat32_mount_vfs_root(fat32_fs_t *fs, const char *path);
 int fat32_mount_vfs_file(fat32_fs_t *fs, const char *path,
