@@ -14,7 +14,7 @@
  * this header's compatibility rules.
  */
 #define ARMONIOS_ABI_MAJOR 1U
-#define ARMONIOS_ABI_MINOR 0U
+#define ARMONIOS_ABI_MINOR 1U
 
 /* Keep this macro valid in both C expressions and preprocessor #if checks. */
 #define ARMONIOS_ABI_VERSION_ENCODE(major, minor) \
@@ -23,11 +23,11 @@
 #define ARMONIOS_ABI_VERSION \
     ARMONIOS_ABI_VERSION_ENCODE(ARMONIOS_ABI_MAJOR, ARMONIOS_ABI_MINOR)
 
-#if ARMONIOS_ABI_VERSION != 0x00010000U
+#if ARMONIOS_ABI_VERSION != 0x00010001U
 #error "ABI drift: update the public ABI version intentionally"
 #endif
 
-_Static_assert(ARMONIOS_ABI_VERSION == 0x00010000U,
+_Static_assert(ARMONIOS_ABI_VERSION == 0x00010001U,
                "ABI drift: update the public ABI version intentionally");
 
 #endif
