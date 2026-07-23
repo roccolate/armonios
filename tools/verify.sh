@@ -20,6 +20,7 @@ printf 'date: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # build-rpi4/ directory so its artefact never clobbers the qemu one.
 run_gate build make BOARD=qemu_virt
 run_gate libarmdesk-foundation bash tests/run_libarmdesk_foundation_test.sh
+run_gate irq-origin-gate bash tests/run_irq_origin_gate_test.sh
 run_gate size make BOARD=qemu_virt size
 run_gate board-rpi4 bash tests/run_board_build_test.sh
 run_gate rpi4-probe-package bash tools/package_rpi4_emmc2_probe.sh
