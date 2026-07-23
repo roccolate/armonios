@@ -15,6 +15,9 @@ printf 'ArmoniOS verification\n'
 printf 'commit: %s\n' "$(git rev-parse --verify HEAD 2>/dev/null || printf unknown)"
 printf 'date: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+# Establish the QEMU virt tree first so size, stack-check, and every QEMU
+# gate operate on a consistent kernel. The board-rpi4 gate runs in its own
+# build-rpi4/ directory so its artefact never clobbers the qemu one.
 run_gate build make BOARD=qemu_virt
 run_gate libarmdesk-foundation bash tests/run_libarmdesk_foundation_test.sh
 run_gate irq-origin-gate bash tests/run_irq_origin_gate_test.sh
