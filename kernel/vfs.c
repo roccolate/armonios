@@ -111,6 +111,8 @@ static void vfs_clear_mount(vfs_mount_t *mount) {
     }
     mount->ops.open = 0;
     mount->ops.list = 0;
+    mount->ops.stat_path = 0;
+    mount->ops.list_path = 0;
     mount->ops.unlink = 0;
     mount->ops.rename = 0;
     mount->context = 0;
@@ -505,8 +507,8 @@ int vfs_mount(const char *path, const vfs_mount_ops_t *ops, void *context) {
     char canonical[VFS_MAX_PATH];
 
     if (vfs_normalize_path(path, canonical) != 0 || ops == 0 ||
-        (ops->open == 0 && ops->list == 0 && ops->unlink == 0 &&
-         ops->rename == 0) ||
+        (ops->open == 0 && ops->list == 0 && ops->stat_path == 0 &&
+         ops->list_path == 0 && ops->unlink == 0 && ops->rename == 0) ||
         vfs_find_mount_exact(canonical) != 0) {
         return -1;
     }
@@ -614,13 +616,27 @@ int vfs_write(const char *path, uint64_t offset, const uint8_t *buffer,
 }
 
 int vfs_stat(const char *path, vfs_stat_t *stat) {
-    const vfs_node_t *node = vfs_find(path);
+    char canonical[VFS_MAX_PATH];
+    const vfs_node_t *node;
+    vfs_mount_t *mount;
 
-    if (node == 0 || stat == 0) {
+    if (stat == 0 || vfs_normalize_path(path, canonical) != 0) {
         return -1;
     }
 
-    return vfs_node_size(node, &stat->size);
+    node = vfs_find_canonical(canonical);
+    if (node != 0) {
+        return vfs_node_size(node, &stat->size);
+    }
+
+    mount = vfs_find_mount_exact(canonical);
+    if (mount == 0) {
+        mount = vfs_find_mount_for_path(canonical);
+    }
+    if (mount == 0 || mount->ops.stat_path == 0) {
+        return -1;
+    }
+    return mount->ops.stat_path(mount->context, canonical, stat);
 }
 
 static int vfs_list_emit_byte(uint64_t offset, uint8_t *buffer,
@@ -655,6 +671,15 @@ int vfs_list_at(const char *path, uint64_t offset, uint8_t *buffer,
     }
 
     mount = vfs_find_mount_exact(canonical);
+    if (mount != 0 && mount->ops.list_path != 0) {
+        status = mount->ops.list_path(mount->context, canonical, offset,
+                                      buffer, capacity, bytes_written);
+        if (status != 0 || *bytes_written > capacity) {
+            *bytes_written = 0;
+            return status != 0 ? status : -1;
+        }
+        return 0;
+    }
     if (mount != 0 && mount->ops.list != 0) {
         status = mount->ops.list(mount->context, offset, buffer, capacity,
                                  bytes_written);
@@ -663,6 +688,19 @@ int vfs_list_at(const char *path, uint64_t offset, uint8_t *buffer,
             return status != 0 ? status : -1;
         }
         return 0;
+    }
+
+    if (mount == 0) {
+        mount = vfs_find_mount_for_path(canonical);
+        if (mount != 0 && mount->ops.list_path != 0) {
+            status = mount->ops.list_path(mount->context, canonical, offset,
+                                          buffer, capacity, bytes_written);
+            if (status != 0 || *bytes_written > capacity) {
+                *bytes_written = 0;
+                return status != 0 ? status : -1;
+            }
+            return 0;
+        }
     }
 
     if (!kstreq(canonical, "/")) {
