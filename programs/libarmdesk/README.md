@@ -13,5 +13,9 @@ Current foundation:
 `programs/libkarmdesk/gui.h` is a compatibility include for existing apps and
 should be removed only after all applications use the new path.
 
-Future widgets, layouts, dialogs, notifications, and ArmoniIcons belong here.
-Kernel policy, compositor internals, and drivers do not.
+Future widgets, layouts, dialogs, notifications, and icon support belong here.
+The tentative ArmoniIcons direction is recorded in
+[`docs/ARMONIICONS_PROPOSAL.md`](../../docs/ARMONIICONS_PROPOSAL.md); it is not
+an approved ABI or implementation plan.
+
+Kernel policy, compositor internals, and drivers do not belong in `libarmdesk`.
