@@ -28,9 +28,9 @@
 void test_syscall_abi_implemented_numbers_match_dispatch(void) {
     /* The public ABI revision is explicit even before runtime capability
      * discovery exists. Incrementing it must be an intentional contract edit. */
-    TEST_ASSERT_EQUAL_UINT32(1U, ARMONIOS_ABI_MAJOR);
-    TEST_ASSERT_EQUAL_UINT32(0U, ARMONIOS_ABI_MINOR);
-    TEST_ASSERT_EQUAL_UINT32(0x00010000U, ARMONIOS_ABI_VERSION);
+    TEST_ASSERT_EQUAL_UINT64(1U, ARMONIOS_ABI_MAJOR);
+    TEST_ASSERT_EQUAL_UINT64(0U, ARMONIOS_ABI_MINOR);
+    TEST_ASSERT_EQUAL_UINT64(0x00010000U, ARMONIOS_ABI_VERSION);
 
     /* Implemented numbers must match the rows in docs/SYSCALLS.md under
      * "Implemented Now". A drift here means a number was renumbered
@@ -105,12 +105,18 @@ void test_syscall_abi_error_codes_match_documented_constants(void) {
     TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)-13,
                              (uint64_t)(int64_t)ARMONIOS_ERR_PERM);
 
-    TEST_ASSERT_EQUAL_INT64(ARMONIOS_ERR_NOMEM, USER_VM_ERR_NOMEM);
-    TEST_ASSERT_EQUAL_INT64(ARMONIOS_ERR_NOENT, ERR_NOENT);
-    TEST_ASSERT_EQUAL_INT64(ARMONIOS_ERR_BADF, ERR_BADF);
-    TEST_ASSERT_EQUAL_INT64(ARMONIOS_ERR_INVAL, ERR_INVAL);
-    TEST_ASSERT_EQUAL_INT64(ARMONIOS_ERR_AGAIN, ERR_AGAIN);
-    TEST_ASSERT_EQUAL_INT64(ARMONIOS_ERR_PERM, ERR_PERM);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_NOMEM,
+                             (uint64_t)(int64_t)USER_VM_ERR_NOMEM);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_NOENT,
+                             (uint64_t)(int64_t)ERR_NOENT);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_BADF,
+                             (uint64_t)(int64_t)ERR_BADF);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_INVAL,
+                             (uint64_t)(int64_t)ERR_INVAL);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_AGAIN,
+                             (uint64_t)(int64_t)ERR_AGAIN);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_PERM,
+                             (uint64_t)(int64_t)ERR_PERM);
 
     TEST_ASSERT_TRUE(ARMONIOS_ERR_NOMEM != ARMONIOS_ERR_NOENT);
     TEST_ASSERT_TRUE(ARMONIOS_ERR_NOENT != ARMONIOS_ERR_BADF);
