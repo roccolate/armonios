@@ -10,6 +10,7 @@ mkdir -p "$OUT_DIR"
 
 "$CC_BIN" -std=c11 -Wall -Wextra -Werror \
     -I"$ROOT_DIR" \
+    -I"$ROOT_DIR/drivers" \
     "$ROOT_DIR/tests/test_vfs_process_fd_standalone.c" \
     "$ROOT_DIR/kernel/vfs.c" \
     "$ROOT_DIR/kernel/kstring.c" \
