@@ -142,7 +142,7 @@ irq_entry:
     str x1, [sp, #264]
 
     mov x0, sp
-    bl irq_handler_frame
+    bl irq_handler_frame_from_vector
 
     ldr x0, [sp, #248]
     msr elr_el1, x0
