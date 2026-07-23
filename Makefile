@@ -3,6 +3,7 @@ HOST_CC ?= gcc
 
 CC      := $(CROSS_COMPILE)gcc
 LD      := $(CROSS_COMPILE)ld
+AR      := $(CROSS_COMPILE)ar
 OBJCOPY := $(CROSS_COMPILE)objcopy
 READELF := $(CROSS_COMPILE)readelf
 SIZE    := $(CROSS_COMPILE)size
@@ -14,6 +15,7 @@ LOG_AS :=
 LOG_CC :=
 LOG_HOSTCC :=
 LOG_LD :=
+LOG_AR :=
 LOG_OBJCOPY :=
 LOG_MKFAT32 :=
 LOG_CHECK :=
@@ -25,6 +27,7 @@ LOG_AS = @printf "  AS      %s\n" "$@";
 LOG_CC = @printf "  CC      %s\n" "$@";
 LOG_HOSTCC = @printf "  HOSTCC  %s\n" "$@";
 LOG_LD = @printf "  LD      %s\n" "$@";
+LOG_AR = @printf "  AR      %s\n" "$@";
 LOG_OBJCOPY = @printf "  OBJCOPY %s\n" "$@";
 LOG_MKFAT32 = @printf "  MKFAT32 %s\n" "$@";
 LOG_CHECK = @printf "  CHECK   %s\n" "$@";
@@ -59,30 +62,21 @@ MKFAT32_IMAGE := $(BUILD_DIR)/tools/mkfat32_image
 QEMU_FS_TEST_LOG := $(BUILD_DIR)/qemu-fs-test.log
 QEMU_FS_TEST_TIMEOUT ?= 25s
 
-# programs/libkarm is the freestanding userland support library:
-# syscall trampolines, crt0, small syscall-backed I/O helpers, and
-# string/number helpers. The libkarmdesk window wrappers are header-only
-# and compile into each app.
+# programs/libkarm is the freestanding userland support library. crt0 remains
+# a startup object because it defines the image entry point. Reusable syscall,
+# I/O, and string helpers live in libkarm.a so external apps can use a normal
+# static-library link while the linker extracts only referenced members.
 LIBKARM_DIR := programs/libkarm
-LIBKARM_SYSCALL_OBJ := $(BUILD_DIR)/$(LIBKARM_DIR)/syscall.o
 LIBKARM_CRT0_OBJ := $(BUILD_DIR)/$(LIBKARM_DIR)/crt0.o
-LIBKARM_STRING_OBJ := $(BUILD_DIR)/$(LIBKARM_DIR)/string.o
+LIBKARM_SYSCALL_OBJ := $(BUILD_DIR)/$(LIBKARM_DIR)/syscall.o
 LIBKARM_IO_OBJ := $(BUILD_DIR)/$(LIBKARM_DIR)/io.o
-LIBKARM_OBJS := \
+LIBKARM_STRING_OBJ := $(BUILD_DIR)/$(LIBKARM_DIR)/string.o
+LIBKARM_ARCHIVE_OBJS := \
     $(LIBKARM_SYSCALL_OBJ) \
-    $(LIBKARM_CRT0_OBJ) \
     $(LIBKARM_IO_OBJ) \
     $(LIBKARM_STRING_OBJ)
-
-# Per-app libkarm dependencies. Keep string.o out of apps that do not
-# use it; those bytes are copied into the embedded bootfs image.
-APP_LIBS_clock :=
-APP_LIBS_editor :=
-APP_LIBS_files :=
-APP_LIBS_monitor := $(LIBKARM_STRING_OBJ)
-APP_LIBS_panel :=
-APP_LIBS_shell := $(LIBKARM_STRING_OBJ)
-APP_LIBS_control :=
+LIBKARM_OBJS := $(LIBKARM_CRT0_OBJ) $(LIBKARM_ARCHIVE_OBJS)
+LIBKARM_A := $(BUILD_DIR)/$(LIBKARM_DIR)/libkarm.a
 
 LOAD_ADDR := 0x40080000
 LOAD_ADDR_HEX := 40080000
@@ -220,7 +214,7 @@ help:
 	@printf "  %-18s %s\n" "qemu-usb" "run QEMU with xHCI USB keyboard and mouse"
 	@printf "  %-18s %s\n" "rpi4-emmc2-probe" "build opt-in read-only RPi4 sector probe"
 	@printf "  %-18s %s\n" "size" "print kernel ELF and binary size"
-	@printf "  %-18s %s\n" "libkarm" "build freestanding userland support objects"
+	@printf "  %-18s %s\n" "libkarm" "build crt0.o and the libkarm.a static library"
 	@printf "  %-18s %s\n" "apps" "build userland app ELF and binary images"
 	@printf "  %-18s %s\n" "stack-check" "measure userland C stack usage"
 	@printf "  %-18s %s\n" "toolchain-check" "check required cross-toolchain programs"
@@ -234,9 +228,9 @@ help:
 
 apps: $(APP_ELFS) $(APP_BINS)
 
-# Build the standalone userland objects. Apps link the subset they use
-# explicitly below so small apps do not pull in string helpers.
-libkarm: $(LIBKARM_OBJS)
+# crt0 is a startup object, while reusable runtime code is archived. The app
+# linker extracts only referenced members from libkarm.a.
+libkarm: $(LIBKARM_CRT0_OBJ) $(LIBKARM_A)
 
 stack-check:
 	@$(MAKE) -B --no-print-directory BUILD_DIR=$(APP_STACK_CHECK_BUILD_DIR) \
@@ -264,6 +258,7 @@ stack-check:
 toolchain-check:
 	@command -v $(CC) >/dev/null 2>&1 || { echo "error: missing $(CC)"; exit 1; }
 	@command -v $(LD) >/dev/null 2>&1 || { echo "error: missing $(LD)"; exit 1; }
+	@command -v $(AR) >/dev/null 2>&1 || { echo "error: missing $(AR)"; exit 1; }
 	@command -v $(OBJCOPY) >/dev/null 2>&1 || { echo "error: missing $(OBJCOPY)"; exit 1; }
 	@command -v $(READELF) >/dev/null 2>&1 || { echo "error: missing $(READELF)"; exit 1; }
 	@command -v $(SIZE) >/dev/null 2>&1 || { echo "error: missing $(SIZE)"; exit 1; }
@@ -304,23 +299,25 @@ $(BUILD_DIR)/$(LIBKARM_DIR)/%.o: $(LIBKARM_DIR)/%.c | $(BUILD_DIR)
 	$(Q)mkdir -p $(dir $@)
 	$(LOG_CC)$(CC) $(DEPFLAGS) $(USERLAND_CFLAGS) -c $< -o $@
 
-# App images share one link shape. The per-app APP_LIBS_* variables add
-# optional libkarm objects through secondary expansion.
-.SECONDEXPANSION:
+$(LIBKARM_A): $(LIBKARM_ARCHIVE_OBJS)
+	$(Q)mkdir -p $(dir $@)
+	$(Q)rm -f $@
+	$(LOG_AR)$(AR) rcs $@ $^
+
+# App images share one link shape. crt0 remains explicit so _start is always
+# present; normal runtime helpers are resolved from libkarm.a.
 $(BUILD_DIR)/$(APPS_DIR)/%.elf: $(BUILD_DIR)/$(APPS_DIR)/%.o \
     $(BUILD_DIR)/$(APPS_DIR)/%_header.o \
-    $(LIBKARM_SYSCALL_OBJ) \
     $(LIBKARM_CRT0_OBJ) \
-    $(LIBKARM_IO_OBJ) \
-    $$(APP_LIBS_$$*) $(BUILD_DIR)/$(APPS_DIR)/%_end.o \
+    $(LIBKARM_A) \
+    $(BUILD_DIR)/$(APPS_DIR)/%_end.o \
     $(APPS_DIR)/image.ld
 	$(LOG_LD)$(LD) $(APP_LDFLAGS) -T $(APPS_DIR)/image.ld -nostdlib \
 	    $(BUILD_DIR)/$(APPS_DIR)/$*.o \
 	    $(BUILD_DIR)/$(APPS_DIR)/$*_header.o \
-	    $(LIBKARM_SYSCALL_OBJ) \
 	    $(LIBKARM_CRT0_OBJ) \
-	    $(LIBKARM_IO_OBJ) \
-	    $(APP_LIBS_$*) $(BUILD_DIR)/$(APPS_DIR)/$*_end.o \
+	    $(LIBKARM_A) \
+	    $(BUILD_DIR)/$(APPS_DIR)/$*_end.o \
 	    -o $@
 
 $(BUILD_DIR)/$(APPS_DIR)/%.bin: $(BUILD_DIR)/$(APPS_DIR)/%.elf
