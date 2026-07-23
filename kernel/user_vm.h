@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "include/armonios/abi/errors.h"
+#include "include/armonios/abi/memory.h"
 #include "kernel/process.h"
 
 /*
@@ -17,11 +18,14 @@
  * ownership.
  */
 
-#define USER_VM_PROT_READ  0x01ULL
-#define USER_VM_PROT_WRITE 0x02ULL
-#define USER_VM_PROT_EXEC  0x04ULL
+/* Historical kernel spellings retained as aliases of the public ABI. */
+#define USER_VM_PROT_READ  ARM_VM_PROT_READ
+#define USER_VM_PROT_WRITE ARM_VM_PROT_WRITE
+#define USER_VM_PROT_EXEC  ARM_VM_PROT_EXEC
 
-/* Historical VM-local spellings retained as aliases of the public ABI. */
+#define USER_VM_MAP_SHARED ARM_MAP_SHARED
+#define USER_VM_MAP_FIXED  ARM_MAP_FIXED
+
 #define USER_VM_ERR_NOMEM ARMONIOS_ERR_NOMEM
 #define USER_VM_ERR_INVAL ARMONIOS_ERR_INVAL
 
