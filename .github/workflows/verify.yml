@@ -36,6 +36,9 @@ jobs:
       - name: Test libarmdesk foundation
         run: bash tests/run_libarmdesk_foundation_test.sh
 
+      - name: Test IRQ origin gate
+        run: bash tests/run_irq_origin_gate_test.sh
+
       - name: Build kernel and userland
         run: make
 
