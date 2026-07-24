@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
 # One-shot exact replacement script. The branch-local workflow removes this
-# file after the source migration is committed.
+# file after the source migration is committed. The draft PR keeps the branch
+# registered with Actions while this migration runs.
 
 from pathlib import Path
 
