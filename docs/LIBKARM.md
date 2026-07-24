@@ -1,41 +1,35 @@
 # libkarm
 
-## Purpose
-
-`libkarm` is the freestanding base runtime for ArmoniOS user applications. It
-sits directly above the public syscall ABI and remains independent from the
-desktop toolkit:
+`libkarm` is the freestanding base runtime for ArmoniOS applications. It sits
+above the public syscall ABI and below the optional desktop layer.
 
 ```text
 application -> libarmdesk -> libkarm -> public ABI -> kernel
 console app -------------> libkarm -> public ABI -> kernel
 ```
 
-`libarmdesk` may depend on `libkarm`. `libkarm` must not depend on GUI or
-desktop code.
+`libkarm` must remain independent from GUI and desktop policy. `libarmdesk` may
+depend on it.
 
-## Build artifacts
+## Build products
 
-The build produces two different artifacts:
+The userland build produces:
 
 ```text
 build/programs/libkarm/crt0.o
 build/programs/libkarm/libkarm.a
 ```
 
-They intentionally have different roles.
-
 ### `crt0.o`
 
-`crt0.o` owns the user-image entry point. It prepares `argc` and `argv`, calls
-`main`, and terminates the process through `SYS_EXIT`.
+`crt0.o` owns `_start`. It receives the loader-provided argument state, calls
+`main(argc, argv)`, and exits through `SYS_EXIT`.
 
-It remains an explicit startup object rather than an archive member so `_start`
-is always present and the image link order stays obvious.
+It stays outside the archive so startup is always linked explicitly.
 
 ### `libkarm.a`
 
-The static archive contains reusable runtime members:
+The static archive contains reusable runtime members such as:
 
 ```text
 syscall.o
@@ -47,17 +41,40 @@ buffer.o
 file.o
 ```
 
-Applications link against the archive instead of selecting those objects by
-hand. GNU `ld` extracts only archive members needed by the application, and the
-existing `-ffunction-sections`, `-fdata-sections`, and `--gc-sections` settings
-remove unused sections from extracted members.
+GNU `ld` extracts only referenced members. Function/data sections and
+`--gc-sections` remove unused functions from extracted members, so adding a module
+to the archive does not automatically add all of it to every KLI1 application.
 
-This replaces the old per-application `APP_LIBS_*` lists without forcing every
-application to carry all runtime helpers.
+The effective application link shape is:
 
-## Arena allocator
+```text
+application.o
+application_header.o
+crt0.o
+libkarm.a
+application_end.o
+```
 
-The first dynamic-memory primitive is an explicit monotonic arena:
+The KLI1 header, end marker, and linker script remain executable-format concerns;
+they are not owned by `libkarm.a`.
+
+## Syscall and basic-runtime layer
+
+The base archive provides:
+
+- syscall trampolines using public numbers and records;
+- minimal UART/stdout helpers;
+- byte and C-string utilities suitable for freestanding code;
+- integer conversion;
+- typed wrappers for process, memory, VFS, GUI-independent system information,
+  and structured filesystem calls.
+
+Public layouts come from `include/armonios/abi/`. Runtime modules must not copy
+kernel-private structures or syscall values.
+
+## Monotonic arena
+
+`kli_arena_t` is an explicit caller-owned allocator.
 
 ```c
 kli_arena_t arena;
@@ -73,63 +90,54 @@ kli_arena_reset(&arena);
 (void)kli_arena_destroy(&arena);
 ```
 
-The design is intentionally small:
+An arena may use caller-provided storage through `kli_arena_init`, or one
+`SYS_MMAP` region through `kli_arena_map`.
 
-- no global allocator state;
-- one `SYS_MMAP` region can serve many small allocations;
-- allocations are overflow checked;
+Contracts:
+
+- no hidden global allocator state;
+- overflow-checked offset and alignment arithmetic;
 - custom alignment must be a power of two;
-- failed allocations do not consume capacity;
-- `reset` releases all allocations logically in constant time;
-- `destroy` uses the same requested mapping size with `SYS_MUNMAP`;
-- failed unmap preserves the arena state so callers can retry or diagnose it.
+- failed allocation does not consume capacity;
+- reset invalidates all allocations in constant time;
+- destroy uses the exact mapped range with `SYS_MUNMAP`;
+- failed unmap preserves state for retry or diagnosis.
 
-`kli_arena_init` can also place an arena over caller-provided storage. The pure
-allocation core therefore has focused host tests independent from the syscall
-layer. `arena_map.c` is tested with syscall stubs for mmap/unmap lifecycle and
-error propagation.
+This is not `malloc`/`free`. Individual allocations cannot be released, and
+objects backed by an arena become invalid after reset or destroy.
 
-An arena is not a general-purpose heap. Individual objects cannot be freed and
-a caller must destroy an existing mapped arena before mapping another region
-into the same `kli_arena_t`.
+## Binary buffers
 
-## Dynamic binary buffer
-
-`kli_buffer_t` stores arbitrary bytes inside a caller-owned arena:
+`kli_buffer_t` stores arbitrary bytes in a caller-owned arena.
 
 ```c
 kli_buffer_t buffer;
 
-if (kli_buffer_init(&buffer, &arena) < 0) {
+if (kli_buffer_init_capacity(&buffer, &arena, expected_size) < 0) {
     return 1;
 }
 
-(void)kli_buffer_append(&buffer, header, header_size);
+(void)kli_buffer_append(&buffer, data, size);
 (void)kli_buffer_append_byte(&buffer, '\n');
 ```
 
-The buffer starts empty and reserves at least 64 bytes on first growth. Later
-growth doubles capacity until it can satisfy the requested append. All length,
-capacity, pointer, and addition arithmetic is overflow checked.
+Contracts:
 
-Growth allocates a new arena block and copies the existing bytes. The previous
-block remains owned by the arena. This keeps the implementation deterministic
-and avoids pretending that individual arena allocations can be freed, but it
-also means repeated small growth wastes arena capacity. Callers that know an
-expected size should use `kli_buffer_init_capacity` or `kli_buffer_reserve`.
+- binary data is not automatically NUL-terminated;
+- capacity grows geometrically from a small minimum;
+- every size and pointer transition is overflow checked;
+- append is overlap-safe, including self-append;
+- failed growth preserves both buffer state and arena offset;
+- clear resets logical length while retaining capacity;
+- the buffer does not own or destroy its arena.
 
-Additional rules:
+Growth allocates a new arena block and copies existing bytes. The old block remains
+owned by the monotonic arena. Callers should reserve expected capacity when known
+to avoid unnecessary arena consumption.
 
-- the buffer never owns or destroys its arena;
-- failed reserve/append leaves buffer and arena offsets unchanged;
-- append uses overlap-safe copying, including self-append;
-- `clear` resets logical length without releasing capacity;
-- zero-byte append succeeds even when its source pointer is null;
-- this is a binary buffer, not a null-terminated string.
+## Dynamic strings
 
-## Dynamic text string
-
-`kli_string_t` layers null-terminated text semantics over `kli_buffer_t`:
+`kli_string_t` adds text semantics over the binary buffer.
 
 ```c
 kli_string_t text;
@@ -139,44 +147,31 @@ if (kli_string_init(&text, &arena) < 0) {
 }
 
 (void)kli_string_assign(&text, "ArmoniOS");
-(void)kli_string_append(&text, " BASIC");
-(void)kli_string_append_char(&text, '!');
-
+(void)kli_string_append(&text, " userland");
 kli_write_cstr(ARM_FD_STDOUT, kli_string_cstr(&text));
 ```
 
-A valid string always satisfies:
+A valid string maintains:
 
 ```text
 buffer.length < buffer.capacity
 buffer.data[buffer.length] == '\0'
 ```
 
-`kli_string_length` reports text bytes and excludes the terminator.
-`kli_string_capacity` reports usable text capacity and also excludes the
-terminator. Empty strings still own valid storage and return a usable `""`
-through `kli_string_cstr`.
+Contracts:
 
-Text rules:
-
-- C-string forms use `strlen` and never include the source terminator;
-- `_n` forms accept explicit byte lengths but reject embedded NUL bytes;
-- UTF-8 can be stored as bytes, but libkarm does not validate, normalize, or
-  count Unicode code points;
-- `append_char` rejects `\0` so logical length and C-string length cannot drift;
-- assign and append use overlap-safe copying, including self-append that grows
-  into a new arena block;
-- failed growth preserves the old text, terminator, capacity, and arena offset;
-- `clear` restores the empty string while retaining allocated capacity;
-- resetting or destroying the backing arena invalidates every string using it.
-
-The dynamic string implementation shares `buffer.o` with the binary-buffer
-layer. Function sections and `--gc-sections` keep unused string operations out
-of applications that only need raw buffers.
+- length and capacity report text bytes, excluding the terminator;
+- explicit-length operations reject embedded NUL bytes;
+- UTF-8 is stored as bytes without validation, normalization, or code-point
+  counting;
+- assign and append are overlap-safe;
+- failed growth preserves text, terminator, capacity, and arena offset;
+- clear returns to a valid empty string while retaining capacity;
+- resetting or destroying the arena invalidates the string.
 
 ## Complete file transfers
 
-`file.o` adds higher-level transfer helpers over the existing VFS syscalls:
+`file.o` builds higher-level operations from the existing structured VFS calls.
 
 ```c
 kli_buffer_t bytes;
@@ -193,88 +188,61 @@ if (kli_file_read_text("/fat/config.ini", &arena, &text) < 0) {
 (void)kli_fd_write_all(ARM_FD_STDOUT, bytes.data, bytes.length);
 ```
 
-`kli_fd_write_all` loops until every requested byte is written. Partial writes
-are normal. A negative syscall status is propagated, zero progress returns
-`KLI_AGAIN`, and a kernel result larger than the remaining request is rejected
-as `KLI_INVAL`.
+`kli_fd_write_all` handles partial writes until the requested byte count is
+complete. Zero progress is rejected, negative statuses are propagated, and an
+overreported count is treated as a protocol error.
 
-The path helpers first query `SYS_STAT_V2`, require a regular file, and reserve
-from the reported size. They still read until EOF, so a file that grows after
-`stat` is handled through normal buffer/string growth.
+The path readers:
 
-Read ownership and failure rules:
+- query `SYS_STAT_V2` and require a regular file;
+- reserve from the observed size but continue until EOF if the file grows;
+- close descriptors after successful and failed transfers;
+- use a fixed 256-byte stack transfer block;
+- clear the destination and restore the exact entry arena offset on any failure;
+- preserve arbitrary bytes for binary reads;
+- reject embedded NUL bytes and guarantee termination for text reads.
 
-- the caller supplies the arena and destination object;
-- the destination is replaced and valid only when the helper returns success;
-- on any stat, allocation, open, read, append, close, or protocol error, the
-  destination is cleared and the arena offset is restored exactly;
-- descriptors are closed after both successful and failed reads;
-- binary reads preserve arbitrary bytes;
-- text reads reject embedded NUL through `kli_string_append_n` and always return
-  a terminated string;
-- the helpers use a fixed 256-byte stack transfer block;
-- no hidden heap or mutable global state is introduced.
+There is intentionally no path-level replace/write helper yet. Without truncate or
+an atomic replacement contract, writing a shorter payload over an existing longer
+file could retain stale trailing bytes.
 
-There is deliberately no `kli_file_write(path, ...)` or replace-file helper yet.
-The current open flags do not provide truncate semantics, so overwriting a
-shorter payload could leave an old tail on disk. Callers may use
-`kli_fd_write_all` with a descriptor whose lifecycle and file-size semantics are
-already known; a safe path-level replace API waits for explicit truncate or an
-atomic replacement workflow.
+## Ownership and failure rules
 
-## In-tree application link
+All higher-level objects are caller-owned. A successful function returns a valid
+object tied to the supplied arena. A failing function must leave documented state:
+usually the previous object unchanged, or a cleared destination with the arena
+offset restored.
 
-The effective link order is:
+Runtime modules must not:
 
-```text
-application.o
-application_header.o
-crt0.o
-libkarm.a
-application_end.o
-```
+- introduce hidden mutable globals;
+- depend on libc or POSIX;
+- assume allocation failure cannot occur;
+- expose partially committed destination state;
+- bypass typed public ABI records;
+- silently consume unbounded userland stack.
 
-The KLI header and end markers remain explicit build boundaries. `libkarm.a`
-does not contain either marker and does not own the executable format.
+## External SDK shape
 
-## External SDK link
+A future SDK can distribute matching public headers, `crt0.o`, `libkarm.a`, the
+KLI1 linker script, and image-boundary objects. The intended link model is a
+normal static-library dependency rather than per-application knowledge of
+internal runtime object files.
 
-A future standalone SDK can expose the same shape:
+## Current boundary
 
-```sh
-aarch64-linux-gnu-ld \
-    --gc-sections \
-    -T image.ld \
-    app.o app_header.o crt0.o \
-    -L "$ARMONIOS_SDK/lib" -lkarm \
-    app_end.o \
-    -o app.elf
-```
+`libkarm` is not a complete libc. It currently provides a practical freestanding
+foundation: syscall access, minimal I/O, basic memory/string utilities, monotonic
+arenas, growable byte buffers, dynamic strings, complete descriptor writes, and
+rollback-safe file reads.
 
-The SDK must distribute matching public ABI headers, `crt0.o`, `libkarm.a`, and
-the supported application linker script.
+Remaining runtime work includes:
 
-## Compatibility rules
-
-- `crt0.o` is startup code, not a general runtime library member.
-- `libkarm.a` remains GUI-independent.
-- Public syscall values and layouts come from `include/armonios/abi/`.
-- Adding a runtime module requires adding its object to
-  `LIBKARM_ARCHIVE_OBJS`; applications must not regain private per-app object
-  lists.
-- Runtime modules should use function/data sections so unused code remains
-  removable.
-- Runtime objects must not introduce hidden mutable globals while KLI1 forbids
-  mutable `.data` and `.bss` in shipping applications.
-- A change to startup calling convention, argument construction, or process
-  exit behavior is an ABI-sensitive change and requires dedicated tests and
-  documentation.
-
-## Current limitations
-
-`libkarm` is not yet a complete libc. It currently provides syscall wrappers,
-minimal output, memory/string helpers, integer conversion, monotonic arenas,
-growable binary buffers, arena-backed dynamic strings, complete descriptor
-writes, and rollback-safe file reads. A reusable free-list heap, formatted
-output, line-oriented input, and safe truncate/replace helpers are future
-runtime cuts built on this foundation.
+- formatting and parsing helpers with explicit bounds;
+- line-oriented input;
+- reusable path and argument helpers;
+- safe truncate/replace helpers after the VFS contract exists;
+- a deliberately chosen general heap only if real consumers require individual
+  deallocation;
+- adoption by more applications so shared code replaces duplication instead of
+  merely adding library surface.
