@@ -1,71 +1,115 @@
 # Retrocore and rkc adoption
 
-ArmoniOS uses `retrocore-spec` as shared vocabulary and may reuse proven ideas
-from `rkc`, but it remains a self-contained bare-metal product.
+ArmoniOS may reuse proven concepts from `retrocore-spec` and `rkc`, but it remains
+an independent bare-metal operating system.
+
+Neither external project is a runtime, submodule, package, or build dependency of
+ArmoniOS.
 
 ```text
-retrocore-spec  contracts and fixtures
+retrocore-spec        vocabulary, contracts, and fixtures
+rkc                   portable reference implementations
         |
+        | selective review and local reimplementation
         v
-rkc             portable reference implementations
-        |
-        v
-libarmdesk      ArmoniOS-local desktop API and adapters
-        |
-        v
-libkarm         userland runtime and syscall access
-        |
-        v
-kernel
+libarmdesk             ArmoniOS desktop-facing userland layer
+libkarm                ArmoniOS freestanding base runtime
+public ABI             ArmoniOS kernel/userland contract
+kernel and drivers     ArmoniOS-native implementation
 ```
 
-## Rules
+## Adoption rules
 
-- Do not add `retrocore-spec` or `rkc` as runtime, submodule, or build
-  dependencies.
-- Keep the syscall ABI, compositor, drivers, scheduler, loader, and filesystem
-  implementation ArmoniOS-native.
-- Reimplement or selectively import only small modules that remove duplicated
-  product code.
-- Keep each adopted module freestanding, caller-owned, bounded, and testable on
-  the host.
-- Measure application and kernel image deltas before enabling new code in
-  shipping apps.
+1. ArmoniOS owns its syscall ABI, executable format, scheduler, process model,
+   compositor, drivers, VFS, and filesystems.
+2. Do not add `retrocore-spec` or `rkc` as a required runtime, submodule, or build
+   dependency.
+3. Adopt only a small concept or module with a concrete ArmoniOS consumer.
+4. Prefer local implementation over copying a dependency graph into the OS.
+5. Keep neutral models separate from platform calls and syscalls.
+6. Keep memory caller-owned, capacities explicit, and failure behavior bounded.
+7. Add focused host tests before enabling the result in a shipping application.
+8. Measure application and kernel image impact.
+9. Preserve public ABI, KLI1, stack, `.data`, ownership, and fail-closed contracts.
+10. Document the resulting ArmoniOS behavior rather than describing the external
+    project as part of the runtime.
 
-## Foundation adopted
+## Current adopted foundation
 
-The first adoption slice adds no new shipping application behavior:
+The current merged desktop foundation contains:
 
-- `include/armonios/abi/gui.h` is the shared kernel/userland GUI ABI contract.
-- `programs/libarmdesk/gui.h` is the canonical desktop syscall wrapper.
-- `programs/libkarmdesk/gui.h` remains as a temporary compatibility include.
-- `programs/libarmdesk/rect.h` provides ArmoniOS-local geometry helpers based on
-  the small rectangle model proven in `rkc`.
-- `programs/libarmdesk/theme.h` exposes semantic color tokens aligned with
-  `retrocore-spec/contracts/theme-tokens.md`.
-- A standalone host test protects ABI size, token values, and rectangle
-  behavior.
+- `include/armonios/abi/gui.h` as the shared GUI ABI contract;
+- `programs/libarmdesk/gui.h` as the canonical typed desktop wrapper;
+- `programs/libarmdesk/rect.h` as a small backend-neutral rectangle model;
+- `programs/libarmdesk/theme.h` as semantic framebuffer color tokens;
+- focused host tests for public layout, geometry, and theme values;
+- `programs/libkarmdesk/gui.h` as a temporary compatibility include.
 
-## Deferred candidates
+The geometry and semantic-theme direction was informed by small portable models,
+but the source, naming, ABI, ownership, build, and tests are ArmoniOS-local.
 
-Adopt these only with a concrete ArmoniOS consumer and a measured size budget:
+`libkarm` is also an ArmoniOS-owned runtime. Its syscall wrappers, arena, buffer,
+string, and file helpers are documented by `LIBKARM.md`; they should not be
+represented as an imported external runtime.
 
-| Candidate | Intended consumer | Trigger |
+## Current non-adoption
+
+Current `main` does not contain a promoted generic widget toolkit.
+
+A closed unmerged draft explored reusable controls for Control Panel. That code is
+not part of the repository state and must not be documented as implemented.
+
+Applications still draw much of their interface directly with text and rectangle
+calls. The compatibility include remains in use by several applications while the
+canonical `libarmdesk` path is adopted incrementally.
+
+## Candidate modules
+
+A candidate enters ArmoniOS only when the trigger is real.
+
+| Candidate | Likely consumers | Adoption trigger |
 |---|---|---|
-| fixed text buffer model | Editor, textbox, launcher search | shared text-input widget work |
-| list model | Files, menus, selectors | two apps need identical selection behavior |
-| taskbar model | Panel | panel is moved onto libarmdesk models |
-| app manifest parser | launcher and external apps | apps are no longer only compiled-in blobs |
-| canvas/draw list | icons, offscreen widgets, images | generic bitmap/blit path exists |
-| logical event adapter | widgets and replay fixtures | `data1`/`data2` meanings are fully documented |
+| fixed-capacity text-edit model | Editor, textbox, launcher search | at least two consumers need shared insertion, deletion, caret, and selection semantics |
+| list/selection model | Files, menus, selectors, Control | duplicated navigation and paging behavior exists |
+| taskbar/application model | Panel | panel state can be separated from GUI syscalls without weakening process/window ownership |
+| simple control state model | Control and future dialogs | real shared button/text-field behavior is needed by more than one application |
+| app manifest parser | launcher and external applications | applications are no longer only embedded catalog entries |
+| logical event adapter | widgets and replay fixtures | GUI event payload semantics are fully versioned and tested |
+| canvas or draw-list model | icons, images, offscreen controls | a generic bitmap/blit ABI exists |
+
+Long file names, general filesystem mutation, network sockets, scheduling,
+compositing, and hardware drivers are not portable-library adoption tasks. They
+remain ArmoniOS platform work.
 
 ## Promotion checklist
 
-Before another `rkc`-inspired module enters ArmoniOS:
+Before landing another externally inspired module:
 
-1. Identify the duplicated local implementation it replaces.
-2. Keep platform calls outside the neutral model.
-3. Add host tests for edge cases and fixed-capacity behavior.
-4. Build QEMU and RPi4 targets.
-5. Run the kernel size and per-app stack gates.
-6. Update this document and the matching `retrocore-spec` ArmoniOS adapter.
+1. Name the duplicated ArmoniOS behavior or concrete consumer.
+2. Define ownership, capacity, lifetime, and failure contracts.
+3. Keep syscall and device operations outside the neutral model.
+4. Implement focused host tests, including invalid and full-capacity cases.
+5. Integrate one real consumer without creating hidden global state.
+6. Build QEMU and Raspberry Pi targets.
+7. Run KLI1, stack, size, ABI, and relevant QEMU gates.
+8. Measure binary changes.
+9. Update `LIBARMDESK.md`, `LIBKARM.md`, `APPLICATIONS.md`, or another focused
+   reference as appropriate.
+10. Record the external source only as design provenance, not as a runtime
+    dependency.
+
+## Dependency direction
+
+The intended dependency direction remains one-way:
+
+```text
+application
+  -> libarmdesk
+  -> libkarm
+  -> public ABI
+  -> kernel
+```
+
+Console applications may depend directly on `libkarm`. `libkarm` must remain
+independent from GUI and desktop code. Public headers must remain independent from
+kernel-private implementation headers.
