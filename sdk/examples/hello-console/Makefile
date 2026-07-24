@@ -1,5 +1,6 @@
 SDK ?= ../..
 CROSS_COMPILE ?= aarch64-linux-gnu-
+EXTRA_CFLAGS ?=
 
 CC      := $(CROSS_COMPILE)gcc
 LD      := $(CROSS_COMPILE)ld
@@ -16,7 +17,7 @@ CFLAGS := -Wall -Wextra -Werror \
           -fno-pic -fno-pie \
           -ffunction-sections -fdata-sections \
           -mcpu=cortex-a72 -std=c11 -Os -g \
-          -I$(SDK)/include
+          -I$(SDK)/include $(EXTRA_CFLAGS)
 
 .PHONY: all clean
 
