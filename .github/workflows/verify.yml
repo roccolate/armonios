@@ -45,6 +45,9 @@ jobs:
       - name: Test installable libkarm SDK headers
         run: bash tests/run_libkarm_sdk_headers_test.sh
 
+      - name: Test generated SDK bundle
+        run: bash tests/run_sdk_bundle_test.sh
+
       - name: Test KLI1 relocation gate
         run: bash tests/run_kli1_relocation_gate_test.sh
 
