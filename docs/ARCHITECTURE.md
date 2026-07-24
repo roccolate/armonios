@@ -1,6 +1,6 @@
 # Architecture
 
-> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, and #93. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
+> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, #93, and #95. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
 
 ArmoniOS is a compact monolithic AArch64 operating system. Its verified runtime
 platform is QEMU `virt`. Raspberry Pi 4 remains a separate build/host-verified,
@@ -394,9 +394,11 @@ Landed v0.3 foundations:
 - whole-device and primary-MBR FAT32 mounting;
 - read-only traversal of existing nested FAT32 8.3 directory trees.
 
-Remaining foundations include native structured metadata promotion, filesystem
-information, generic mkdir/rmdir and truncate, nested mutation rollback, and an
-explicit durable-flush contract.
+Native filesystem-neutral metadata/dirent records, FAT32 direct mapping, public
+`STAT_V2`/`READDIR_V2`, and Files as the first EL0 consumer are landed. Remaining
+foundations include filesystem-specific errors, filesystem information, generic
+mkdir/rmdir and truncate, nested mutation rollback, and an explicit durable-flush
+contract.
 
 ## Storage and filesystems
 

@@ -1,6 +1,6 @@
 # Roadmap
 
-> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, and #93. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
+> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, #93, and #95. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
 
 This roadmap starts from the verified v0.1 QEMU desktop baseline and targets a
 small, usable v1.0 QEMU desktop operating system.
@@ -44,8 +44,8 @@ Chosen release defaults:
 | Phase | State | Promotion blocker |
 |---|---|---|
 | v0.1 baseline | COMPLETE | None for the recorded QEMU baseline |
-| v0.2 cleanup/hardening | PROMOTION CANDIDATE | `RISK-017` residual disposition, `RISK-018`/issue #63, final visible pass, exact promotion runs, tag/release record |
-| v0.3 storage/VFS platform | IN PROGRESS | Core block/path/mount and nested traversal foundations landed; metadata and mutation contracts remain |
+| v0.2 cleanup/hardening | MANUAL PROMOTION PENDING | Issue #76: final dated visible pass, documentation record, tag, and release notes |
+| v0.3 storage/VFS platform | IN PROGRESS | Block/path/mount, nested traversal, native structured metadata, and the first Files consumer landed; errors, fsinfo, mutation, and durability remain |
 | v0.4 real FAT | EARLY PARTIAL | Nested 8.3 read traversal exists; long names and mutation-safe directories depend on remaining v0.3 contracts |
 | v0.5 userland runtime/widgets | PLANNED | Depends on stable storage and ABI shapes |
 | v0.6 useful applications | PARTIAL DEMOS ONLY | Depends on v0.3-v0.5 |
@@ -157,24 +157,17 @@ The current audited main tree and current-tree workflows are recorded in
 
 ### Promotion checklist
 
-1. Complete or explicitly disposition issue #63 / `RISK-018`.
-2. Accept the absence of device-level virtio-net drop telemetry for v0.2 or land a
-   trustworthy counter contract.
-3. Accept the one-operation full-redraw boundary or add finer checkpoints and
-   evidence.
-4. Retain all existing automated subsystem and stress gates.
-5. Run `bash tools/verify.sh` on the exact final promotion tree.
-6. Run a dated visible QEMU workflow on that same tree.
-7. Close or explicitly accept `RISK-017` and `RISK-018` with rationale.
-8. Create the v0.2 tag and release record naming the tree, runs, manual tester,
-   workflow, limitations, and accepted residuals.
+1. Complete issue #76 on the exact validated `main` tree.
+2. Run the dated visible QEMU workflow recorded by that issue.
+3. Record the exact automated runs, tester, setup, steps, result, and limitations.
+4. Create the v0.2 tag and release record with exact artifact identities.
 
 A later scheduler may move the bounded bottom half into a wakeable EL1 service.
 That redesign is not required for the current cooperative v0.2 contract.
 
 ## v0.3 — storage and VFS platform
 
-**State: NEXT AFTER v0.2**
+**State: IN PROGRESS**
 
 Goal: replace fixed demo plumbing with coherent generic storage, path, mount, and
 metadata foundations before adding general FAT or rewriting applications.
@@ -228,7 +221,7 @@ Implement deterministic mount selection with:
 - tests for `/`, `/fat`, `/tmp`, `/armonios`, and future `/ext`;
 - no accidental `/fatx` match for `/fat`.
 
-### Cut 4 — structured kernel filesystem types — ACTIVE
+### Cut 4 — structured kernel filesystem types — LANDED
 
 Add kernel-internal structures for:
 
@@ -239,8 +232,8 @@ Add kernel-internal structures for:
 - iterator or bounded readdir state;
 - explicit ownership and lifetime rules.
 
-Keep these internal until the implementation shape is stable enough for a public
-ABI.
+PR #95 landed filesystem-neutral internal metadata/dirent records, native FAT32
+callbacks, compatibility fallback for older mounts, and the public 49/50 adapters.
 
 ### Cut 5 — filesystem operations
 
@@ -261,16 +254,23 @@ Extend the generic filesystem interface deliberately:
 Each operation must specify read-only behavior, partial progress, rollback,
 capacity limits, and errors.
 
-### Cut 6 — append-only public ABI — ACTIVE IN PR #95
+### Cut 6 — append-only public ABI — PARTLY LANDED
 
 Only after kernel implementation and tests exist, add the required user ABI in
 small cuts. Candidate calls include:
 
+Landed in PR #95 while the global ABI remains 1.0:
+
+- `SYS_STAT_V2 = 49`;
+- `SYS_READDIR_V2 = 50`.
+
+Remaining candidates include:
+
 - `SYS_MKDIR`;
+- `SYS_RMDIR`;
 - `SYS_TRUNCATE`;
-- `SYS_STATX`;
-- `SYS_READDIRX`;
-- `SYS_FSINFO`.
+- `SYS_FSINFO`;
+- an explicit flush/fsync call when durable behavior exists.
 
 Every call must land with:
 

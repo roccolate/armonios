@@ -9,7 +9,7 @@
 ## Identity
 
 - checkpoint date: 2026-07-23;
-- audited `main`: `c2b0943f6edee414e65419267575156942fa7996`;
+- audited `main`: `a078c995f485bab84135233c149e28ba081b11b0`;
 - v0.2 kernel/runtime defect issue #63: closed after the EL1/EL0 IRQ-origin fix;
 - remaining v0.2 task: issue #76, the dated visible QEMU validation and release record;
 - global public ABI remains `1.0` until the first official ArmoniOS release.
@@ -50,27 +50,18 @@ The following v0.3 foundations are already merged:
    - path-aware VFS callbacks;
    - explicit rejection of nested create/unlink/rename until mutation transactions exist.
 
-## Active cut
-
-PR #95 adds structured filesystem metadata while preserving ABI 1.0:
-
-- `SYS_STAT_V2 = 49`;
-- `SYS_READDIR_V2 = 50`;
-- fixed, versioned stat and directory-entry records;
-- file/directory type and basic attributes;
-- typed `libkarm` wrappers;
-- legacy calls 45 and 46 remain unchanged.
-
-Before promotion, PR #95 should also:
-
-- expose filesystem-neutral structured metadata inside the VFS;
-- let FAT32 provide structured entries directly instead of reparsing its textual listing;
-- include at least one real EL0 consumer, initially Files;
-- retain the ABI 1.0 identifier and all legacy layouts.
+6. **Structured metadata ABI and first consumer** — PR #95
+   - filesystem-neutral `vfs_metadata_t` and `vfs_dirent_t`;
+   - native FAT32 type, size, and attribute mapping;
+   - `SYS_STAT_V2 = 49` and `SYS_READDIR_V2 = 50`;
+   - fixed versioned public records with the global ABI still at 1.0;
+   - typed `libkarm` wrappers;
+   - Files as the first EL0 consumer with a legacy fallback;
+   - legacy calls 45 and 46 remain unchanged.
 
 ## Remaining v0.3 work
 
-After structured metadata lands, the correct order is:
+After structured metadata, the correct order is:
 
 1. filesystem-specific error codes;
 2. filesystem information/capability reporting;

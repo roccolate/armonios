@@ -1,6 +1,6 @@
 # Current State
 
-> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, and #93. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
+> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, #93, and #95. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
 
 > Canonical operational source of truth for ArmoniOS.
 >
@@ -53,7 +53,7 @@ complete daily-use desktop, or verified Raspberry Pi operating system.
   - `CI - Tests` `29896952435` (#435): success
 - **Production QEMU kernel:** 107918 / 108000 bytes; margin 82 bytes
 - **Runtime tracking:** issue #43 / `RISK-017`
-- **VMM investigation:** issue #63 / `RISK-018`
+- **VMM investigation:** issue #63 / `RISK-018` — CLOSED by the EL1/EL0 IRQ-origin fix
 - **Documentation synchronization:** draft PR #65, branch
   `agent/documentation-working-base`
 
@@ -77,7 +77,7 @@ and stack gates.
 |---|---|---|
 | v0.1 QEMU baseline | COMPLETE | Boot, desktop, narrow FAT workflow, deterministic gates, CI, and dated visible evidence exist. |
 | v0.2 cleanup/hardening | MANUAL PROMOTION PENDING | Automated implementation/evidence and issue #63 are complete; issue #76 visible validation and release record remain. |
-| v0.3 storage/VFS platform | IN PROGRESS | Block descriptors, board adapters, bounded partition views, canonical paths, mount resolution, and nested FAT32 traversal are landed; structured metadata is active in PR #95. |
+| v0.3 storage/VFS platform | IN PROGRESS | Block descriptors, board adapters, bounded partition views, canonical paths, mount resolution, nested FAT32 traversal, native structured metadata, and the first Files consumer are landed; errors, fsinfo, mutation, and durability remain. |
 | v0.4 real FAT | EARLY PARTIAL | Existing nested 8.3 trees can be traversed, but long names and directory mutation transactions remain. |
 | v0.5 userland runtime/widgets | PLANNED | No shared heap-backed containers or widget toolkit. |
 | v0.6 useful applications | PARTIAL DEMOS ONLY | Seven apps run; issue #2's daily workflow is incomplete. |
@@ -259,7 +259,6 @@ workflow, tag, or release note exists.
 
 ## Incomplete product work
 
-- structured directory/metadata ABI promotion from PR #95;
 - filesystem-specific errors and filesystem information;
 - mkdir, rmdir, truncate, nested mutation, and explicit durability;
 - FAT long names and mutation-safe directory support;
@@ -293,7 +292,6 @@ and limitations.
 
 1. Complete issue #76 on the exact validated `main` tree.
 2. Create the v0.2 tag and release record with exact identities and limitations.
-3. Finish structured VFS metadata in PR #95 without advancing the global ABI above 1.0.
-4. Add filesystem errors and filesystem information.
-5. Implement truncate, mkdir/rmdir, nested mutation, and durability in small tested cuts.
-6. Add VFAT long names only after the generic mutation contracts are stable.
+3. Add filesystem errors and filesystem information while keeping the global ABI at 1.0.
+4. Implement truncate, mkdir/rmdir, nested mutation, and durability in small tested cuts.
+5. Add VFAT long names only after the generic mutation contracts are stable.

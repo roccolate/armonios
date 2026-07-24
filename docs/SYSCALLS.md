@@ -1,6 +1,6 @@
 # Syscall Reference
 
-> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, and #93. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
+> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, #93, and #95. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
 
 ArmoniOS defines a small non-POSIX syscall ABI for freestanding AArch64 applications.
 
@@ -104,6 +104,8 @@ Current limitations:
 | 46 | `sys_readdir` | `x0=path, x1=buf, x2=len` | bytes/error | Write newline-separated entries for supported list mounts. |
 | 47 | `sys_unlink` | `x0=path` | 0/error | Delete a FAT32 root file. |
 | 48 | `sys_rename` | `x0=old_path, x1=new_path` | 0/error | Rename a FAT32 root file when the destination does not exist. |
+| 49 | `sys_stat_v2` | `x0=path, x1=stat_ptr` | 0/error | Validate a versioned 32-byte output record and return type, size, and generic attributes. |
+| 50 | `sys_readdir_v2` | `x0=path, x1=start_index, x2=entries, x3=max_entries` | entry count/error | Return up to eight complete 96-byte versioned directory records, paged by logical index. |
 
 Descriptor numbers:
 
@@ -130,23 +132,21 @@ FAT32 syscall scope on current `main`:
 - existing nested short-8.3 directory trees can be normalized, traversed, listed, statted, opened, and read;
 - create, write, unlink, and rename remain limited to root entries;
 - long names, mkdir/rmdir, truncate, nested mutation, ext2, and durable reboot semantics remain absent;
-- PR #95 adds structured stat and readdir calls while preserving the global ABI 1.0 identifier.
+- structured stat and readdir calls 49/50 are implemented while the global ABI identifier remains 1.0; see `VFS_METADATA_ABI.md`.
 
 ## Planned filesystem ABI extensions
 
-These calls are part of the v1 storage roadmap. PR #95 currently implements the
-structured metadata candidates as `SYS_STAT_V2=49` and `SYS_READDIR_V2=50`; they
-are not part of `main` until that PR is promoted. Assign every remaining number
+Structured metadata calls 49/50 are implemented. Assign every remaining number
 only when kernel code, wrappers, tests, a real userland consumer, and documentation
 land together. Append numbers; never reuse an existing slot.
 
 | Planned name | Intended purpose |
 |---|---|
 | `SYS_MKDIR` | Create a directory on filesystems that support directories. |
+| `SYS_RMDIR` | Remove an empty directory with filesystem-specific safety checks. |
 | `SYS_TRUNCATE` | Resize a file without rewriting it through root-only FAT behavior. |
-| `SYS_STATX` | Return structured metadata such as type, size, flags, and mount state. |
-| `SYS_READDIRX` | Return structured directory entries instead of newline-separated names. |
-| `SYS_FSINFO` | Report filesystem type, read-only state, and capacity when available. |
+| `SYS_FSINFO` | Report filesystem type, read-only state, limits, and capacity when available. |
+| `SYS_FSYNC` | Request durable flush only after transport/filesystem semantics are defined. |
 
 ## IPC syscalls
 

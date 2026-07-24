@@ -1,6 +1,6 @@
 # Technical Risk Register
 
-> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, and #93. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
+> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, #93, and #95. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
 
 This register tracks correctness defects, architectural limits, missing evidence,
 and release blockers.
@@ -252,10 +252,10 @@ primary-MBR FAT32 discovery, bounded block views, and a writable root-only FAT32
 8.3 bridge.
 
 Landed foundations include the block-device contract, bounded partition views,
-canonical path/mount resolution, and traversal of existing nested FAT32 8.3
-directories. Remaining gaps:
+canonical path/mount resolution, traversal of existing nested FAT32 8.3
+directories, native structured metadata callbacks, public `STAT_V2`/`READDIR_V2`,
+and Files as the first EL0 consumer. Remaining gaps:
 
-- structured metadata ABI promotion and native filesystem callbacks;
 - filesystem-specific errors and filesystem information;
 - generic mkdir/rmdir, truncate, nested mutation, and rollback contracts;
 - FAT long names and mutation-safe directory creation/removal;

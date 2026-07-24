@@ -1,6 +1,6 @@
 # ArmoniOS
 
-> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, and #93. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
+> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, #93, and #95. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
 
 > A small freestanding AArch64 operating system with a graphical QEMU desktop,
 > inspired by the compact, direct design of KolibriOS and MenuetOS.
@@ -25,9 +25,8 @@ a hosted Linux application or distribution.
 
 - **verified public baseline:** v0.1 QEMU desktop;
 - **current phase:** v0.2 promotion candidate after cleanup and runtime hardening;
-- **formal v0.2 blockers:** residual-risk disposition, issue #63, a final dated
-  visible workflow, and the tag/release record;
-- **current architecture work:** v0.3 storage/VFS foundations are partly landed; structured metadata is active in PR #95;
+- **remaining v0.2 promotion task:** issue #76 — final dated visible workflow, documentation record, tag, and release notes;
+- **current architecture work:** v0.3 block, path, mount, nested traversal, and structured metadata foundations are landed; filesystem errors, fsinfo, mutation, and durability remain;
 - **v1 target:** a small usable QEMU desktop;
 - **physical hardware:** Raspberry Pi 4 build/host scaffolding only.
 
