@@ -1,10 +1,10 @@
 /* KLI1 flat-image layout; see include/armonios/abi/kli.h.
- * Only the public header, text, rodata, and the end marker are emitted into the
- * image. Mutable static state must be obtained through SYS_MMAP at runtime, not
- * embedded in the image. KLI1 contains no relocation table, so SDK validation
- * must also reject load-time relocations or absolute pointers that need fixups.
- * The empty .data / .bss capture sections below let us ASSERT that no
- * application accidentally emits either mutable section. */
+ * Only the KLI1 header bytes, text, rodata, and the end marker are emitted into
+ * the image. Mutable static state must be obtained through SYS_MMAP at runtime,
+ * not embedded in the image. KLI1 contains no relocation table, so SDK
+ * validation must also reject load-time relocations or absolute pointers that
+ * need fixups. The empty .data / .bss capture sections below let us ASSERT that
+ * no application accidentally emits either mutable section. */
 SECTIONS {
     . = 0;
 
