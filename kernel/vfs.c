@@ -111,6 +111,7 @@ static void vfs_clear_mount(vfs_mount_t *mount) {
         mount->path[i] = '\0';
     }
     mount->ops.open = 0;
+    mount->ops.read_path = 0;
     mount->ops.list = 0;
     mount->ops.stat_path = 0;
     mount->ops.list_path = 0;
@@ -511,8 +512,9 @@ int vfs_mount(const char *path, const vfs_mount_ops_t *ops, void *context) {
     char canonical[VFS_MAX_PATH];
 
     if (vfs_normalize_path(path, canonical) != 0 || ops == 0 ||
-        (ops->open == 0 && ops->list == 0 && ops->stat_path == 0 &&
-         ops->list_path == 0 && ops->metadata_path == 0 &&
+        (ops->open == 0 && ops->read_path == 0 && ops->list == 0 &&
+         ops->stat_path == 0 && ops->list_path == 0 &&
+         ops->metadata_path == 0 &&
          ops->readdir_path == 0 && ops->fsinfo == 0 &&
          ops->unlink == 0 && ops->rename == 0) ||
         vfs_find_mount_exact(canonical) != 0) {
@@ -572,7 +574,10 @@ const char *vfs_strip_prefix(const char *path, const char *prefix) {
 
 int vfs_read(const char *path, uint64_t offset, uint8_t *buffer,
              uint64_t capacity, uint64_t *bytes_read) {
-    const vfs_node_t *node = vfs_find(path);
+    char canonical[VFS_MAX_PATH];
+    const vfs_node_t *node;
+    vfs_mount_t *mount;
+    vfs_metadata_t metadata;
     uint64_t size;
     int status;
 
@@ -580,12 +585,36 @@ int vfs_read(const char *path, uint64_t offset, uint8_t *buffer,
         *bytes_read = 0;
     }
 
-    if (node == 0 || node->read == 0 || buffer == 0 || bytes_read == 0 ||
-        vfs_node_size(node, &size) != 0 || offset > size) {
+    if (buffer == 0 || bytes_read == 0 ||
+        vfs_normalize_path(path, canonical) != 0) {
         return -1;
     }
 
-    status = node->read(node->context, offset, buffer, capacity, bytes_read);
+    node = vfs_find_canonical(canonical);
+    if (node != 0) {
+        if (node->read == 0 || vfs_node_size(node, &size) != 0 ||
+            offset > size) {
+            return -1;
+        }
+        status = node->read(node->context, offset, buffer, capacity,
+                            bytes_read);
+    } else {
+        mount = vfs_find_mount_exact(canonical);
+        if (mount == 0) {
+            mount = vfs_find_mount_for_path(canonical);
+        }
+        if (mount == 0 || mount->ops.read_path == 0 ||
+            vfs_metadata(canonical, &metadata) != 0 ||
+            metadata.type != VFS_FILE_TYPE_REGULAR ||
+            offset > metadata.size) {
+            return -1;
+        }
+
+        size = metadata.size;
+        status = mount->ops.read_path(mount->context, canonical, offset,
+                                      buffer, capacity, bytes_read);
+    }
+
     if (status != 0 ||
         !vfs_read_result_valid(offset, size, capacity, *bytes_read)) {
         *bytes_read = 0;

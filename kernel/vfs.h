@@ -98,6 +98,10 @@ typedef struct {
  */
 typedef int (*vfs_mount_open_fn_t)(void *context, const char *path,
                                    uint32_t flags);
+typedef int (*vfs_mount_read_path_fn_t)(void *context, const char *path,
+                                        uint64_t offset, uint8_t *buffer,
+                                        uint64_t capacity,
+                                        uint64_t *bytes_read);
 typedef int (*vfs_mount_stat_path_fn_t)(void *context, const char *path,
                                         vfs_stat_t *stat);
 typedef int (*vfs_mount_list_path_fn_t)(void *context, const char *path,
@@ -119,6 +123,7 @@ typedef int (*vfs_mount_rename_fn_t)(void *context, const char *old_path,
 
 typedef struct {
     vfs_mount_open_fn_t open;
+    vfs_mount_read_path_fn_t read_path;
     vfs_list_fn_t list;
     vfs_mount_stat_path_fn_t stat_path;
     vfs_mount_list_path_fn_t list_path;
