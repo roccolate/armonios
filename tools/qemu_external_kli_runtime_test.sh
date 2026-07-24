@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 
 # Build a dedicated test kernel whose first EL0 image is loaded from
-# /fat/HELLO.KLI, then require the SDK application's real serial output.
-# The production kernel and normal panel boot path are not modified by this run.
+# /fat/HELLO.KLI. That external parent then invokes SYS_SPAWN on the same VFS
+# path, waits for the child, and exits. Production builds compile neither test
+# mode.
 
 set -euo pipefail
 
@@ -16,7 +17,9 @@ TIMEOUT="${QEMU_EXTERNAL_KLI_TIMEOUT:-25s}"
 rm -rf "$OUT_DIR" "$TEST_BUILD"
 mkdir -p "$OUT_DIR"
 
-make -C "$ROOT_DIR" external-kli-image EXTERNAL_KLI_IMG="$FAT_IMAGE"
+make -C "$ROOT_DIR" external-kli-image \
+    EXTERNAL_KLI_IMG="$FAT_IMAGE" \
+    SDK_HELLO_EXTRA_CFLAGS=-DARMONIOS_EXTERNAL_KLI_SPAWN_TEST=1
 make -C "$ROOT_DIR" BOARD=qemu_virt BUILD_DIR="$TEST_BUILD" \
     BOARD_CFLAGS=-DARMONIOS_EXTERNAL_KLI_BOOT_TEST=1
 
@@ -46,26 +49,36 @@ grep -q 'FAT32: mounted' "$SERIAL_LOG" || {
     echo 'FAIL: FAT32 did not mount in external KLI runtime test' >&2
     exit 1
 }
+grep -q 'External spawn parent started' "$SERIAL_LOG" || {
+    cat "$SERIAL_LOG" >&2
+    echo 'FAIL: external parent KLI did not start in EL0' >&2
+    exit 1
+}
 grep -q 'Hello from an external ArmoniOS SDK app' "$SERIAL_LOG" || {
     cat "$SERIAL_LOG" >&2
-    echo 'FAIL: SDK-built external KLI did not execute in EL0' >&2
+    echo 'FAIL: SYS_SPAWN child KLI did not execute from the VFS path' >&2
+    exit 1
+}
+grep -q 'External spawn child exited cleanly' "$SERIAL_LOG" || {
+    cat "$SERIAL_LOG" >&2
+    echo 'FAIL: external parent did not reap a clean child exit' >&2
     exit 1
 }
 grep -q 'USER exit: 0x0000000000000000' "$SERIAL_LOG" || {
     cat "$SERIAL_LOG" >&2
-    echo 'FAIL: external KLI did not exit cleanly' >&2
+    echo 'FAIL: external KLI process did not exit cleanly' >&2
     exit 1
 }
 grep -q 'panel:exit' "$SERIAL_LOG" || {
     cat "$SERIAL_LOG" >&2
-    echo 'FAIL: recovery wrapper did not observe the EL0 return' >&2
+    echo 'FAIL: recovery wrapper did not observe the parent EL0 return' >&2
     exit 1
 }
 grep -q 'USER exit code: 0x0000000000000000' "$SERIAL_LOG" || {
     cat "$SERIAL_LOG" >&2
-    echo 'FAIL: kernel did not regain control after external KLI exit' >&2
+    echo 'FAIL: kernel did not regain control after external parent exit' >&2
     exit 1
 }
 
-printf 'PASS: SDK-built HELLO.KLI executed from FAT32 in EL0 and returned cleanly\n'
+printf 'PASS: external KLI spawned and reaped a VFS-loaded EL0 child\n'
 printf 'QEMU log: %s\n' "$SERIAL_LOG"
