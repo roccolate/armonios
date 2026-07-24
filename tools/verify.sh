@@ -43,6 +43,7 @@ run_gate vfs-direct-read bash tests/run_vfs_direct_read_test.sh
 run_gate user-image-vfs-loader bash tests/run_user_image_vfs_loader_test.sh
 run_gate app-image-source bash tests/run_app_image_source_test.sh
 run_gate external-kli-fat bash tests/run_external_kli_fat_image_test.sh
+run_gate external-kli-runtime bash tools/qemu_external_kli_runtime_test.sh
 run_gate usercopy-host bash tests/run_user_copy_permissions_test.sh
 run_gate libkarm-sdk-headers bash tests/run_libkarm_sdk_headers_test.sh
 run_gate sdk-bundle bash tests/run_sdk_bundle_test.sh
