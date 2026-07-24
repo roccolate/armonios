@@ -24,11 +24,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "include/armonios/abi/memory.h"
-#include "include/armonios/abi/process.h"
-#include "include/armonios/abi/syscall_numbers.h"
-#include "include/armonios/abi/system.h"
-#include "include/armonios/abi/vfs.h"
+#include <armonios/abi/memory.h>
+#include <armonios/abi/process.h>
+#include <armonios/abi/syscall_numbers.h>
+#include <armonios/abi/system.h>
+#include <armonios/abi/vfs.h>
 
 long __syscall0(long n);
 long __syscall1(long n, long a0);
