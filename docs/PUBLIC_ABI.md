@@ -1,113 +1,177 @@
-# Public ABI Boundary
+# Public ABI boundary
 
-## Purpose
-
-ArmoniOS applications must be able to compile independently from kernel-private
-headers. The public boundary lives under:
+ArmoniOS applications must be able to compile without kernel-private headers.
+Every value or layout that crosses the syscall boundary belongs under:
 
 ```text
 include/armonios/abi/
 ```
 
-Kernel and userland consume the same public definitions for every value or
-layout that crosses the syscall boundary. Kernel implementation structures,
-driver state, scheduler internals, compositor storage, and VFS internals remain
-private.
-
-## Current public headers
-
-- `base.h` — fixed-width public scalar types such as `arm_status_t`, `arm_pid_t`,
-  and `arm_fd_t`;
-- `version.h` — compile-time ABI major/minor revision;
-- `syscall_numbers.h` — frozen syscall numbers and range guards;
-- `errors.h` — frozen negative syscall status values;
-- `memory.h` — `SYS_MMAP` protection bits and reserved mapping flags;
-- `vfs.h` — standard descriptors, open/seek flags, and the current `SYS_STAT`
-  payload;
-- `process.h` — observable process states, kernel-generated exit codes, and the
-  `SYS_PROCLIST` entry layout;
-- `system.h` — current `SYS_MEMINFO` and `SYS_TIMEINFO` payload layouts;
-- `gui.h` — GUI event layout and public GUI constants.
+The kernel, `libkarm`, `libarmdesk`, and applications consume the same public
+definitions. Driver state, scheduler internals, VFS implementation structures,
+compositor storage, and kernel ownership metadata remain private.
 
 ## Dependency direction
 
 ```text
-applications -> libarmdesk -> libkarm -> public ABI -> kernel
+application -> libarmdesk -> libkarm -> public ABI -> kernel
+console app -------------> libkarm -> public ABI -> kernel
 ```
 
 Rules:
 
-1. Applications, `libkarm`, and `libarmdesk` must not include kernel-private
-   headers to obtain syscall numbers, error values, flags, or ABI structures.
-2. `libkarm` must remain GUI-independent.
+1. Applications and userland libraries do not include kernel-private headers for
+   syscall numbers, statuses, flags, or records.
+2. `libkarm` remains GUI-independent.
 3. `libarmdesk` may depend on `libkarm` and public ABI headers.
-4. The kernel may consume public ABI headers, but public ABI headers must not
-   include kernel implementation headers.
-5. Compatibility headers and aliases may temporarily preserve old include paths
-   and names, but the public header remains the source of truth.
+4. Public headers do not include kernel implementation headers.
+5. Compatibility aliases may preserve old names temporarily, but they are never
+   a second source of truth.
 
-## Compatibility rules
+## Current public headers
 
-The current public ABI revision is `1.0`.
+| Header | Public responsibility |
+|---|---|
+| `base.h` | fixed-width public scalar types |
+| `version.h` | compile-time ABI revision |
+| `syscall_numbers.h` | frozen syscall numbers and range guards |
+| `errors.h` | frozen negative status values |
+| `memory.h` | mapping protection and reserved mapping flags |
+| `vfs.h` | descriptors, open/seek flags, metadata, directory entries, and filesystem information |
+| `process.h` | process states, exit codes, and process-list entries |
+| `system.h` | memory and time information records |
+| `gui.h` | GUI events, state flags, cursor values, and input button bits |
 
-- Existing syscall numbers are never renumbered or reused.
-- Existing error values are never changed or reused.
-- Existing public structure sizes, field order, event IDs, and flag values are
-  frozen unless an explicitly versioned replacement is introduced.
-- Minor revisions are append-only.
-- A major revision is reserved for an intentional incompatible boundary and
-  requires an explicit compatibility or migration plan.
-- Compile-time ABI versioning does not imply runtime feature availability. A
-  future query/capability syscall must report optional facilities explicitly.
+The exact syscall surface is documented in `SYSCALLS.md`.
 
-The current information calls keep their existing byte layouts:
+## ABI revision
+
+The current public ABI revision is `1.0` during pre-release development.
+
+This revision is a compatibility label, not a runtime capability query. A kernel
+or filesystem may omit an optional operation even when an application was built
+against the same ABI revision. Capability-bearing interfaces such as
+`SYS_FSINFO` must be used instead of inferring support from the version number.
+
+Compatibility rules:
+
+- syscall numbers are never renumbered or reused;
+- status values are never changed or reused;
+- existing structure sizes, field order, event values, and flag values remain
+  fixed;
+- richer incompatible semantics use a new syscall or explicitly versioned
+  record;
+- append-only additions may remain under the pre-release 1.0 identifier until the
+  first release establishes the external compatibility baseline;
+- a future major revision requires an explicit migration and compatibility plan.
+
+## Published record layouts
+
+Legacy records remain frozen:
 
 ```text
-SYS_STAT      arm_stat_t          8 bytes
-SYS_MEMINFO   arm_meminfo_t      16 bytes
-SYS_TIMEINFO  arm_timeinfo_t     24 bytes
-SYS_PROCLIST  arm_process_entry_t 24 bytes per entry
+arm_stat_t           8 bytes
+arm_meminfo_t       16 bytes
+arm_timeinfo_t      24 bytes
+arm_process_entry_t 24 bytes per entry
 ```
 
-These names formalize the existing ABI; they do not change runtime behavior.
-Future richer metadata must use new, versioned calls or structures rather than
-silently growing these payloads.
+Versioned VFS records provide expandable contracts without changing the legacy
+payloads:
 
-## libkarm compatibility
+```text
+arm_stat_v2_t   32 bytes
+arm_dirent_v2_t 96 bytes
+arm_fsinfo_t    64 bytes
+```
 
-`libkarm` now offers typed wrappers for the public payloads:
+The caller initializes the version and structure-size fields. The kernel validates
+the complete destination, builds a kernel-owned result, and copies it only after
+provider validation succeeds.
+
+Current versioned calls:
+
+- `SYS_STAT_V2 = 49`;
+- `SYS_READDIR_V2 = 50`;
+- `SYS_FSINFO = 51`.
+
+`SYS_FSINFO` reports runtime filesystem capabilities such as read-only state,
+directory support, long-name support, truncate support, flush support, and whether
+free-byte accounting is valid. Providers must not advertise a capability merely
+because the generic VFS has a placeholder for it.
+
+## Public statuses
+
+The public error values are ArmoniOS-native statuses, not POSIX/Linux errno
+compatibility. Kernel `ERR_*` names and userland `KLI_*` names are compatibility
+aliases to the public values.
+
+Current filesystem-specific additions include:
+
+- `EXIST`;
+- `NOTDIR`;
+- `ISDIR`;
+- `NOTEMPTY`;
+- `NOSPC`;
+- `ROFS`;
+- `NOTSUP`;
+- `RANGE`.
+
+Existing legacy operations may preserve broader historical failure results. New
+interfaces should return the most specific status the implementation can prove.
+
+## Userland wrapper policy
+
+`libkarm` exposes typed wrappers for public records and keeps compatibility
+wrappers only where existing in-tree source still needs them.
+
+Examples include:
 
 ```c
 kli_stat_v1(path, arm_stat_t *);
+kli_stat_v2(path, arm_stat_v2_t *);
+kli_readdir_v2(path, start, arm_dirent_v2_t *, count);
+kli_fsinfo(path, arm_fsinfo_t *);
 kli_meminfo_v1(arm_meminfo_t *);
 kli_timeinfo_v1(arm_timeinfo_t *);
 kli_proclist_v1(arm_process_entry_t *, count);
 ```
 
-The historical untyped or array-based wrappers remain available so existing
-source continues to compile. New applications should prefer the typed forms.
+New application code should prefer typed public records rather than private arrays
+or duplicated layouts.
+
+## Authority is separate from layout
+
+A stable record layout does not make every operation safe for untrusted external
+applications.
+
+The current desktop includes cross-process operations used by the trusted panel,
+including window discovery, focus, restore, and state inspection. Process kill is
+also broadly available to the compiled-in environment. Before untrusted external
+applications are supported, ArmoniOS needs an explicit authority or capability
+model for desktop and process-control operations.
 
 ## Required change discipline
 
-Any public ABI change must update in one change set:
+A public ABI change must update in one coherent cut:
 
 - public headers;
-- kernel implementation or dispatch;
-- `libkarm` / `libarmdesk` wrappers;
-- host ABI tests;
-- QEMU coverage where behavior changes;
-- `docs/SYSCALLS.md` and current-state documentation.
+- kernel dispatch and implementation;
+- userland wrappers;
+- compile-time layout assertions;
+- focused ABI and compatibility tests;
+- QEMU coverage when runtime behavior changes;
+- `SYSCALLS.md`;
+- affected architecture, current-state, risk, and roadmap text.
 
-A change is not complete merely because the current applications rebuild. ABI
-compatibility means previously built fixtures continue to execute or fail with a
-documented compatibility error instead of silently changing behavior.
+Rebuilding current applications is not sufficient proof of compatibility.
+Previously built fixtures must continue to execute, or fail through an explicit,
+documented compatibility boundary.
 
-## Next cuts
+## Remaining ABI work
 
-1. Introduce size/version-prefixed structures only for new expandable syscalls.
-2. Add an ABI/capability query syscall without inferring features from version.
-3. Move remaining user-visible limits into capability reporting instead of
-   freezing kernel implementation limits as compile-time constants.
-4. Add an old-SDK binary fixture gate once external KLI loading exists.
-5. Introduce explicit authority for cross-process desktop and process-control
-   operations before untrusted third-party applications are supported.
+- add a runtime ABI/capability query for kernel-wide optional facilities;
+- move remaining user-visible limits into queried capabilities where appropriate;
+- add an old-SDK binary fixture gate after external KLI1 loading exists;
+- define authority for cross-process desktop and process-control operations;
+- version any future diagnostic ABI instead of exposing kernel-internal snapshots.
