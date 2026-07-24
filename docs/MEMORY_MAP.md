@@ -1,203 +1,208 @@
-# Memory Map
+# Memory map
 
-This document records the current fixed-address and translation model. It
-describes implementation, not the desired hardened architecture.
+This document records the implemented fixed-address and translation model. It is
+not a proposal for the desired hardened architecture.
 
-- Operational evidence: `CURRENT_STATE.md`
-- Memory risks: `RISK-008`, `RISK-015`, and `RISK-018` in
-  `TECHNICAL_RISKS.md`
-- Practical change workflow: `DEVELOPMENT_GUIDE.md`
+Related documents:
 
-## QEMU `virt` physical layout
+- current capability: `CURRENT_STATE.md`;
+- implemented ownership: `ARCHITECTURE.md`;
+- active memory risks: `TECHNICAL_RISKS.md`;
+- syscall mappings: `SYSCALLS.md`.
 
-The default QEMU target uses 128 MiB of RAM. The PMM also manages at most 128 MiB,
-so memory beyond that limit is ignored even if a future board reports more.
+## QEMU physical memory
+
+The default QEMU `virt` target provides 128 MiB of RAM. The physical memory
+manager currently manages at most 128 MiB, so memory beyond that cap is ignored
+even if a future target reports more.
 
 | Region | Current use |
 |---|---|
-| QEMU-provided DTB area | Firmware/DTB data passed to the kernel and reserved at boot |
-| `0x40080000` | Kernel load and link base for `qemu_virt` |
-| Kernel image | `.text`, embedded app blobs, `.rodata`, empty loadable `.data`, `.bss`, and bootstrap stack reservation |
-| Remaining PMM pages | Page tables, process image/stack pages, anonymous mappings, heap arenas, and GUI backing buffers |
+| firmware-provided DTB area | parsed at boot and reserved from allocation |
+| `0x40080000` | QEMU kernel link/load base |
+| kernel image | text, embedded KLI1 images, rodata, empty loadable data, BSS, and bootstrap reservations |
+| remaining managed pages | page tables, process images/stacks, anonymous mappings, kernel heap, and GUI backing buffers |
 
-The exact RAM range comes from the DTB. Board physical addresses belong in the
-board layer.
+The exact RAM range is discovered from the DTB. Board physical addresses belong
+inside the selected board implementation.
 
-## Raspberry Pi 4 physical assumptions
+## Raspberry Pi assumption
 
-The experimental RPi4 linker script uses `0x80000` as its kernel link address.
-That address is build-verified, but no physical firmware/boot configuration is
-promoted. The RPi4 memory layout remains a hardware-track assumption until the
-criteria in `PORTING.md` and `DOCUMENTATION_POLICY.md` are satisfied.
+The experimental Raspberry Pi 4 linker script uses `0x80000` as the kernel link
+address. That is a build contract only. No physical firmware, memory, or runtime
+layout is promoted as supported.
 
 ## QEMU MMIO
 
-| Address/range | Device |
+| Address or range | Device |
 |---|---|
 | `0x08000000` | GIC distributor |
 | `0x08010000` | GIC CPU interface |
 | `0x09000000` | PL011 UART0 |
-| `0x0a000000` and board-defined strides | virtio-mmio transports |
-| Board-owned ECAM/MMIO ranges | PCI discovery and xHCI BAR assignment |
+| `0x0a000000` plus board-defined stride | virtio-mmio transports |
+| board-owned ECAM and BAR ranges | PCI discovery and xHCI |
 
-Exact constants live under `drivers/boards/qemu_virt/`.
+Exact constants are board-private under `drivers/boards/qemu_virt/`.
 
-## Current EL1 virtual layout
+## EL1 translation model
 
-The kernel uses an identity-mapped lower-half design.
+The kernel currently uses an identity-mapped lower-half design.
 
-For the bootstrap table and every process table:
+For the bootstrap table and each process table:
 
-- detected RAM is identity-mapped with kernel W^X permissions;
-- board MMIO is identity-mapped as device memory and execute-never;
+- managed RAM is identity-mapped with kernel W^X permissions;
+- MMIO is identity-mapped as device memory and execute-never;
 - TTBR1 is disabled;
-- TTBR0 contains user mappings plus the kernel/RAM identity map;
-- process activation changes TTBR0 and performs broad EL1 TLB invalidation.
+- TTBR0 contains user mappings plus kernel/RAM identity mappings;
+- process activation replaces TTBR0 and performs broad EL1 TLB invalidation.
 
-EL0 cannot access kernel mappings merely because they exist in TTBR0: kernel
-entries are not user-accessible.
+Kernel entries in TTBR0 are not EL0-accessible; their leaf permissions remain
+privileged.
 
-Current kernel mapping policy:
+Current permission policy:
 
 | Region | Permission |
 |---|---|
-| Kernel text | EL1 read/execute |
-| Kernel rodata | EL1 read-only, non-executable |
-| Kernel data, BSS, heap, and stack | EL1 read/write, non-executable |
-| Remaining RAM | EL1 read/write, non-executable |
-| MMIO | Device read/write, non-executable |
+| kernel text | EL1 read/execute |
+| kernel rodata | EL1 read-only, non-executable |
+| kernel data, BSS, heap, and stack | EL1 read/write, non-executable |
+| remaining RAM identity map | EL1 read/write, non-executable |
+| MMIO | device read/write, non-executable |
+| user image | EL0 read/execute |
+| user stack and ordinary anonymous mapping | EL0 read/write unless a supported protection requests otherwise |
 
-Target hardening under `RISK-008`:
-
-- shared kernel mappings through TTBR1;
-- user-only TTBR0 roots;
-- ASIDs;
-- scoped TLB invalidation;
-- explicit global/non-global mapping policy;
-- stale-translation and lifecycle tests.
+Future hardening under `RISK-008` includes TTBR1 kernel mappings, user-only TTBR0
+roots, ASIDs, scoped invalidation, explicit global/non-global policy, and stale
+translation tests.
 
 ## EL0 fixed layout
 
-Values come from `kernel/layout.h` and `kernel/process.h`.
+Values are defined by kernel layout headers.
 
 | Virtual range | Purpose |
 |---|---|
-| `0x0000000000400000 + slot * 0x10000` | Per-process KLI1 image slot |
-| 8 KiB image slot | PMM-owned image pages, user read/execute |
-| `0x0000000000800000 + slot * 0x10000` | Per-process stack slot |
-| 4 KiB stack slot | PMM-owned user stack, user read/write |
-| spacing beside stack slot | At least one unmapped page asserted by layout constants |
-| `0x0000000100000000` | Anonymous mapping arena base |
-| `0x0000000200000000` | Anonymous mapping arena limit |
+| `0x0000000000400000 + slot * 0x10000` | per-process KLI1 image slot |
+| first 8 KiB of image slot | user read/execute image pages |
+| `0x0000000000800000 + slot * 0x10000` | per-process stack slot |
+| first 4 KiB of stack slot | user read/write stack page |
+| spacing beside stack slot | unmapped separation asserted by layout constants |
+| `0x0000000100000000` | anonymous mapping arena base |
+| `0x0000000200000000` | anonymous mapping arena limit |
 
 Static assertions keep image and stack slots disjoint and below the anonymous
 mapping arena.
 
 ## Page-table structure
 
-AArch64 4 KiB granule, four levels, 48-bit virtual address configuration:
+ArmoniOS uses AArch64 stage-1 translation with a 4 KiB granule and four levels:
 
 ```text
 L0[VA 47:39] -> L1 table
 L1[VA 38:30] -> L2 table
 L2[VA 29:21] -> L3 table
-L3[VA 20:12] -> 4 KiB page descriptor
+L3[VA 20:12] -> 4 KiB page
 VA[11:0]     -> page offset
 ```
 
-Child tables are allocated lazily. Table descriptors contain aligned physical
-addresses plus valid/table bits. Leaf descriptors contain mapped physical pages
-and permission/attribute bits.
+Child tables are allocated lazily. Table descriptors contain aligned child-table
+addresses. Leaf descriptors contain mapped physical pages and permission/memory
+attribute bits.
 
 ## Ownership model
 
-Page-table and leaf-page ownership are intentionally separate:
+Page-table pages and mapped leaf pages have different owners:
 
-- `vmm_new_table()` and child-table creation allocate page-table pages;
-- `vmm_free_table()` recursively frees table pages only;
-- the subsystem that maps a leaf page retains ownership of that leaf page;
-- process metadata records image, stack, and anonymous leaf ownership;
-- GUI, heap, and driver allocations retain their own ownership contracts.
+- the VMM allocates and frees page-table hierarchy pages;
+- the subsystem that maps a leaf retains ownership of the mapped physical page;
+- process metadata owns image, stack, and anonymous leaf pages;
+- GUI, heap, and drivers retain their own allocation contracts;
+- `vmm_free_table()` releases table pages, not arbitrary mapped leaf pages.
 
-Process teardown currently releases:
+Process teardown releases:
 
-- owned image pages;
-- owned stack pages;
+- process-owned image pages;
+- the process stack page;
 - owned anonymous mapping pages;
 - the process page-table hierarchy;
-- process-owned GUI windows through centralized exit;
-- every VFS descriptor owned by the process.
+- process-owned windows;
+- process-owned VFS descriptors;
+- other lifecycle resources through their central exit hooks.
 
-This exactly-once distinction is central to issue #63 / `RISK-018`. One
-intermittent FAT32 smoke panic resolved to the `table[index]` load in
-`next_table()`. No ownership rule is changed by documentation; the open
-investigation must identify stale/corrupt/freed table state or bound an external
-cause before the risk is closed.
+The exactly-once distinction is a core invariant.
 
-## Process user-region metadata
+## IRQ-origin protection
 
-Each process owns at most eight registered ranges. A record contains:
+The intermittent VMM fault formerly tracked by `RISK-018` was traced to an IRQ
+that interrupted EL1 being treated as schedulable EL0 process state. That could
+save kernel registers into a process frame and switch process/TTBR0 before
+returning to the interrupted kernel path.
 
-- start;
-- end;
-- physical backing address when known;
+The vector-side origin gate now passes a schedulable frame only when SPSR reports
+EL0t. IRQs from EL1 still service devices and deferred runtime work, but they do
+not enter process save/preemption. Issue #63 and `RISK-018` are closed; the
+page-ownership model itself did not change.
+
+## Process user regions
+
+Each process records at most eight disjoint user ranges. A record contains:
+
+- virtual start and end;
+- physical backing address when applicable;
 - ownership flags.
 
-Region flags express ownership, not effective PTE permissions. User-copy
-validation therefore combines:
+Region flags express ownership, not effective PTE permission. User-copy checks
+combine:
 
-1. current-process range ownership;
-2. page-table readable/writable permission.
+1. ownership by the current process;
+2. readable or writable EL0 page-table permission, depending on direction.
 
 Consequences:
 
-- foreign-process-only addresses are rejected;
-- crossing a registered-region boundary is rejected;
-- zero-length validation is accepted for a non-null process;
-- image, stack, and anonymous regions can satisfy ownership checks;
-- kernel-to-user output additionally requires writable EL0 leaf entries;
-- copies remain non-fault-contained if translation changes unexpectedly after
-  validation.
+- addresses belonging only to another process are rejected;
+- a range crossing an ownership boundary is rejected;
+- image, stack, and anonymous mappings can satisfy ownership checks;
+- output additionally requires writable EL0 pages;
+- final copies remain vulnerable to a late translation change after validation.
 
-Permission-aware validation closed `RISK-001`. Recoverable final copy remains
-`RISK-015`.
+Permission-aware validation closed the original user-copy permission risk. Fault-
+contained copyin/copyout remains `RISK-015`.
 
 ## User mappings
 
-### Image
+### KLI1 image
 
-KLI1 image pages are allocated per process, mapped user read/execute, registered
-as one fixed image region, and returned during process cleanup.
+Image pages are allocated for the process, mapped EL0 read/execute, registered as
+one owned region, and returned during process cleanup.
 
 ### Stack
 
-Each process receives one 4 KiB user stack page. The slot stride leaves unmapped
-spacing. There is no dynamic stack growth.
+Each process receives one 4 KiB stack page. The fixed slot stride leaves unmapped
+spacing. Dynamic stack growth is not implemented.
 
 ### Anonymous mappings
 
-`sys_mmap`:
+`SYS_MMAP`:
 
-- accepts only `hint == 0`;
+- accepts only a zero hint;
 - rounds size to pages;
 - allocates contiguous physical pages;
-- selects addresses monotonically in the process arena;
-- supports read, write, and execute flags at the PTE layer;
+- selects a monotonically increasing address in the process mapping arena;
+- supports the published read/write/execute protection bits;
+- rejects writable plus executable mappings;
 - records physical ownership for cleanup.
 
-`sys_munmap` requires an exact mapping match, removes leaf mappings, removes the
-region record, and returns owned physical pages.
+`SYS_MUNMAP` requires an exact mapping match, removes the leaves and ownership
+record, and returns the owned physical pages.
 
-## Invariants for memory changes
+## Memory-change invariants
 
 - preserve kernel W^X;
-- preserve `.data == 0`;
+- preserve the empty loadable `.data` contract;
 - use overflow-safe range arithmetic;
-- distinguish page-table pages from mapped leaf pages;
-- provide rollback for partially constructed mappings;
-- reject invalid or unaligned roots/addresses before dereference where the
-  contract requires it;
+- distinguish page-table ownership from leaf-page ownership;
+- roll back partially constructed mappings;
+- reject invalid or unaligned roots and addresses before dereference;
+- never preempt through an IRQ frame that originated in EL1;
 - do not free a live process table;
 - test allocation failure, exact unmap, process exit, and repeated cleanup;
-- update this document and the risk register when mapping or ownership contracts
-  change.
+- update this document and the risk register when mapping or ownership changes.
