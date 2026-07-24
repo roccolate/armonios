@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 # Stages the public ABI and libkarm headers into an SDK-shaped include tree and
-# compiles a consumer using only that tree. This prevents repository-root include
-# paths from leaking into the external application contract.
+# compiles a consumer using only that tree. The normal build and host-test build
+# must both expose the same installable include root validated here.
 
 set -euo pipefail
 
