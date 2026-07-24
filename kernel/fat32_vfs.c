@@ -114,6 +114,28 @@ static int fat32_vfs_read(void *context, uint64_t offset, uint8_t *buffer,
                       bytes_read);
 }
 
+static int fat32_vfs_read_path(void *context, const char *path,
+                               uint64_t offset, uint8_t *buffer,
+                               uint64_t capacity, uint64_t *bytes_read) {
+    char relative[VFS_MAX_PATH];
+    fat32_path_info_t info;
+    fat32_file_t file;
+    fat32_fs_t *fs = fat32_vfs_fs(context);
+
+    if (bytes_read != 0) {
+        *bytes_read = 0;
+    }
+    if (fs == 0 || buffer == 0 || bytes_read == 0 ||
+        fat32_vfs_relative_path(path, relative) != 0 ||
+        relative[0] == '\0' || fat32_lookup_path(fs, relative, &info) != 0 ||
+        (info.attributes & FAT32_ATTR_DIRECTORY) != 0U || offset > info.size ||
+        fat32_open_path(fs, relative, &file) != 0) {
+        return -1;
+    }
+
+    return fat32_read(fs, &file, offset, buffer, capacity, bytes_read);
+}
+
 static int fat32_vfs_write(void *context, uint64_t offset,
                            const uint8_t *buffer, uint64_t size,
                            uint64_t *bytes_written) {
@@ -345,6 +367,7 @@ static int fat32_vfs_rename_path(void *context, const char *old_path,
 
 static const vfs_mount_ops_t g_fat32_vfs_ops = {
     .open = fat32_vfs_open_path,
+    .read_path = fat32_vfs_read_path,
     .list = fat32_vfs_list_root,
     .stat_path = fat32_vfs_stat_path,
     .list_path = fat32_vfs_list_path,
