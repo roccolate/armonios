@@ -1,0 +1,40 @@
+name: Apply VFS direct-read migration
+
+on:
+  push:
+    branches:
+      - agent/sdk-foundation-06-vfs-read-path
+    paths:
+      - tools/apply_vfs_direct_read_patch.py
+      - .github/workflows/apply-vfs-direct-read.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out migration branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/sdk-foundation-06-vfs-read-path
+          fetch-depth: 0
+
+      - name: Apply exact source replacements
+        run: python3 tools/apply_vfs_direct_read_patch.py
+
+      - name: Remove migration-only files
+        run: |
+          rm -f tools/apply_vfs_direct_read_patch.py
+          rm -f .github/workflows/apply-vfs-direct-read.yml
+
+      - name: Validate and commit migration
+        run: |
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Route direct VFS reads through mount callbacks"
+          git push origin HEAD:agent/sdk-foundation-06-vfs-read-path
