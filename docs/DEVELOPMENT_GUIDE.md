@@ -1,5 +1,7 @@
 # ArmoniOS Development Guide
 
+> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, #93, and #95. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
+
 This guide is the practical entry point for continuing development. It explains
 how to navigate the repository, choose the correct work sequence, preserve the
 kernel's contracts, and produce evidence that can be promoted into the canonical
@@ -134,7 +136,7 @@ Validate the complete destination before consuming queued state.
 | Generic VFS | `kernel/vfs.c` | Mount selection, process-local descriptors, offsets, and ownership |
 | Embedded apps | `kernel/bootfs.c`, `kernel/boot_program.c` | `/armonios` KLI1 images |
 | In-memory FS | `kernel/tmpfs.c` | Fixed-capacity test and temporary storage |
-| FAT bridge | `kernel/fat32.c`, `kernel/fat32_vfs.c` | Writable root-only FAT32 8.3 workflow |
+| FAT implementation | `kernel/fat32.c`, `kernel/fat32_directory.c`, `kernel/fat32_vfs.c` | Nested 8.3 read traversal plus root-only mutation compatibility |
 | Block devices | `drivers/storage/` | Virtio block, EMMC2 scaffolding, MBR, and bounded views |
 
 The current FAT implementation is a compatibility bridge, not the v0.4 general

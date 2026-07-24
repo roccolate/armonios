@@ -1,5 +1,7 @@
 # Current State
 
+> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, #93, and #95. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
+
 > Canonical operational source of truth for ArmoniOS.
 >
 > Evidence terminology: `DOCUMENTATION_POLICY.md`  
@@ -12,10 +14,11 @@
 ArmoniOS is a real freestanding AArch64 operating system with a verified **v0.1
 QEMU desktop baseline**.
 
-The v0.2 cleanup/runtime-hardening implementation and planned automated runtime
-evidence have landed. Formal v0.2 promotion is still blocked by explicit
-residual-risk decisions, the intermittent VMM investigation, a final dated visible
-workflow, and the release record.
+The v0.2 cleanup/runtime-hardening implementation and automated evidence have
+landed. The intermittent VMM fault was traced to EL1 IRQ frames entering process
+preemption and issue #63 is closed. Formal v0.2 promotion now remains blocked only
+by issue #76: the dated visible workflow, documentation record, tag, and release
+notes on the exact validated tree.
 
 Accurate wording:
 
@@ -50,7 +53,7 @@ complete daily-use desktop, or verified Raspberry Pi operating system.
   - `CI - Tests` `29896952435` (#435): success
 - **Production QEMU kernel:** 107918 / 108000 bytes; margin 82 bytes
 - **Runtime tracking:** issue #43 / `RISK-017`
-- **VMM investigation:** issue #63 / `RISK-018`
+- **VMM investigation:** issue #63 / `RISK-018` — CLOSED by the EL1/EL0 IRQ-origin fix
 - **Documentation synchronization:** draft PR #65, branch
   `agent/documentation-working-base`
 
@@ -73,9 +76,9 @@ and stack gates.
 | Phase | State | Meaning |
 |---|---|---|
 | v0.1 QEMU baseline | COMPLETE | Boot, desktop, narrow FAT workflow, deterministic gates, CI, and dated visible evidence exist. |
-| v0.2 cleanup/hardening | PROMOTION CANDIDATE | Runtime implementation/evidence landed. Risk disposition, issue #63, final visible evidence, and release record remain. |
-| v0.3 storage/VFS platform | NEXT AFTER v0.2 | No common path resolver, rich block descriptor, or structured filesystem ABI. |
-| v0.4 real FAT | PLANNED | Current FAT remains root-only FAT32 8.3. |
+| v0.2 cleanup/hardening | MANUAL PROMOTION PENDING | Automated implementation/evidence and issue #63 are complete; issue #76 visible validation and release record remain. |
+| v0.3 storage/VFS platform | IN PROGRESS | Block descriptors, board adapters, bounded partition views, canonical paths, mount resolution, nested FAT32 traversal, native structured metadata, and the first Files consumer are landed; errors, fsinfo, mutation, and durability remain. |
+| v0.4 real FAT | EARLY PARTIAL | Existing nested 8.3 trees can be traversed, but long names and directory mutation transactions remain. |
 | v0.5 userland runtime/widgets | PLANNED | No shared heap-backed containers or widget toolkit. |
 | v0.6 useful applications | PARTIAL DEMOS ONLY | Seven apps run; issue #2's daily workflow is incomplete. |
 | v0.7 ext2 | PLANNED | No ext2 implementation. |
@@ -256,11 +259,9 @@ workflow, tag, or release note exists.
 
 ## Incomplete product work
 
-- generic block descriptor and flush/read-only contract;
-- normalized path and mount resolver;
-- structured directory/metadata ABI;
-- mkdir, truncate, structured stat/readdir, filesystem info;
-- FAT long names/directories;
+- filesystem-specific errors and filesystem information;
+- mkdir, rmdir, truncate, nested mutation, and explicit durability;
+- FAT long names and mutation-safe directory support;
 - ext2;
 - shared userland heap/container/widget layer;
 - complete daily applications;
@@ -289,11 +290,8 @@ and limitations.
 
 ## Next sequence
 
-1. Complete or explicitly disposition PR #64 / issue #63.
-2. Accept or replace the device-drop and full-redraw residuals in `RISK-017`.
-3. Run the full automated gate on the exact promotion tree.
-4. Run the dated visible FAT workflow on that tree.
-5. Close or accept `RISK-017` and `RISK-018` with rationale.
-6. Create the v0.2 tag and release record with exact identities and limitations.
-7. Begin v0.3 through small block-descriptor, path-normalizer, mount-resolver, and
-   structured-metadata cuts.
+1. Complete issue #76 on the exact validated `main` tree.
+2. Create the v0.2 tag and release record with exact identities and limitations.
+3. Add filesystem errors and filesystem information while keeping the global ABI at 1.0.
+4. Implement truncate, mkdir/rmdir, nested mutation, and durability in small tested cuts.
+5. Add VFAT long names only after the generic mutation contracts are stable.

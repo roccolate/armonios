@@ -1,5 +1,7 @@
 # Architecture
 
+> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, #93, and #95. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
+
 ArmoniOS is a compact monolithic AArch64 operating system. Its verified runtime
 platform is QEMU `virt`. Raspberry Pi 4 remains a separate build/host-verified,
 fail-closed hardware track.
@@ -385,14 +387,18 @@ Mount callbacks currently provide the narrow operations required by bootfs,
 tmpfs, and the FAT32 bridge. Generic VFS code selects the mount; it must not embed
 FAT-specific policy.
 
-Missing v0.3 foundations:
+Landed v0.3 foundations:
 
-- common path normalization and traversal policy;
-- structured directory entries and metadata;
-- rich block-device identity/capacity/read-only/flush contract;
-- generic mkdir and truncate;
-- structured stat, readdir, and filesystem-info ABI;
-- complete filesystem driver lifecycle.
+- canonical absolute-path normalization and longest-prefix mount resolution;
+- block-device capacity/read-only/flush contracts and bounded views;
+- whole-device and primary-MBR FAT32 mounting;
+- read-only traversal of existing nested FAT32 8.3 directory trees.
+
+Native filesystem-neutral metadata/dirent records, FAT32 direct mapping, public
+`STAT_V2`/`READDIR_V2`, and Files as the first EL0 consumer are landed. Remaining
+foundations include filesystem-specific errors, filesystem information, generic
+mkdir/rmdir and truncate, nested mutation rollback, and an explicit durable-flush
+contract.
 
 ## Storage and filesystems
 
@@ -412,14 +418,15 @@ The current writable FAT path supports:
 - 512-byte sectors;
 - primary-MBR FAT32 discovery for QEMU images;
 - one mounted FAT32 volume;
-- root-directory short 8.3 names;
-- list, open, create, read, write, rename, and delete;
+- short 8.3 names;
+- traversal, listing, stat, open, and read for existing nested directories;
+- root-level create, write, rename, and delete;
 - cluster-chain growth;
-- dynamic `/fat/<name>` VFS nodes;
-- dynamic-node invalidation after rename/delete.
+- dynamic VFS nodes and invalidation after rename/delete.
 
-It does not support long names, subdirectories, FAT12/16, GPT, extended
-partitions, journaling, crash recovery, or broad interoperability.
+It does not support long names, nested mutation transactions, mkdir/rmdir,
+FAT12/16, GPT, extended partitions, journaling, crash recovery, or broad
+interoperability.
 
 Reusable MBR parsing and bounded block views are shared with the opt-in Raspberry
 Pi read-only diagnostic path. Normal Raspberry Pi storage remains unavailable.

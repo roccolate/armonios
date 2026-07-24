@@ -1,5 +1,7 @@
 # Technical Risk Register
 
+> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, #93, and #95. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
+
 This register tracks correctness defects, architectural limits, missing evidence,
 and release blockers.
 
@@ -249,15 +251,15 @@ Foundations: fixed mount callbacks, process-local descriptors, bootfs/tmpfs,
 primary-MBR FAT32 discovery, bounded block views, and a writable root-only FAT32
 8.3 bridge.
 
-Gaps:
+Landed foundations include the block-device contract, bounded partition views,
+canonical path/mount resolution, traversal of existing nested FAT32 8.3
+directories, native structured metadata callbacks, public `STAT_V2`/`READDIR_V2`,
+and Files as the first EL0 consumer. Remaining gaps:
 
-- no common normalized path resolver;
-- no explicit repeated-slash, `.`/`..`, component, or mount-boundary policy;
-- no rich block descriptor with capacity/read-only/flush contract;
-- no structured directory/metadata ABI;
-- no generic mkdir, truncate, stat, readdir, or filesystem-info operations;
-- no FAT long names/subdirectories;
-- no ext2 or reboot-persistence gate.
+- filesystem-specific errors and filesystem information;
+- generic mkdir/rmdir, truncate, nested mutation, and rollback contracts;
+- FAT long names and mutation-safe directory creation/removal;
+- ext2 and a reboot-persistence gate.
 
 **Exit criteria:** complete v0.3-v0.4 block, path, mount, structured filesystem,
 real FAT, malformed-image, nested-directory, and persistence contracts without
