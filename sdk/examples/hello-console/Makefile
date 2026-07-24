@@ -1,5 +1,6 @@
 SDK ?= ../..
 CROSS_COMPILE ?= aarch64-linux-gnu-
+SOURCE ?= main.c
 EXTRA_CFLAGS ?=
 
 CC      := $(CROSS_COMPILE)gcc
@@ -9,7 +10,7 @@ OBJCOPY := $(CROSS_COMPILE)objcopy
 BUILD_DIR ?= build
 TARGET_ELF := $(BUILD_DIR)/hello.elf
 TARGET_KLI := $(BUILD_DIR)/HELLO.KLI
-APP_OBJ := $(BUILD_DIR)/main.o
+APP_OBJ := $(BUILD_DIR)/app.o
 
 CFLAGS := -Wall -Wextra -Werror \
           -ffreestanding -nostdlib -nostartfiles \
@@ -26,7 +27,7 @@ all: $(TARGET_KLI)
 $(BUILD_DIR):
 	mkdir -p $@
 
-$(APP_OBJ): main.c | $(BUILD_DIR)
+$(APP_OBJ): $(SOURCE) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TARGET_ELF): $(APP_OBJ) \
