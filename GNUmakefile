@@ -10,6 +10,13 @@ KERNEL_SIZE_LIMIT ?= 131072
 
 include Makefile
 
+# Public ABI and userland headers are rooted at include/. Keep the historical
+# root include path during migration, but also compile the in-tree kernel,
+# applications, and assembly with the same installable paths exposed by the SDK.
+CFLAGS += -I include
+USERLAND_CFLAGS += -I include
+USERLAND_ASFLAGS += -I include
+
 FOUNDATION_OBJS := \
     $(BUILD_DIR)/drivers/storage/block_device.o \
     $(BUILD_DIR)/kernel/fat32_device.o \
