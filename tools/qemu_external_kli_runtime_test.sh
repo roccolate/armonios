@@ -36,6 +36,8 @@ if [[ ! -f "$SHELL_KLI" || ! -f "$HELLO_KLI" ]]; then
     echo 'FAIL: Shell or spawn-test HELLO.KLI artifact is missing' >&2
     exit 1
 fi
+# Preflight the binary itself before QEMU so a stale or incorrectly selected
+# source file fails deterministically rather than masquerading as a runtime bug.
 if ! grep -a -q 'External spawn parent started' "$HELLO_KLI"; then
     echo 'FAIL: runtime HELLO.KLI is not the dedicated spawn-test image' >&2
     exit 1
