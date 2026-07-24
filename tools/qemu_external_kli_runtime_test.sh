@@ -23,17 +23,21 @@ TIMEOUT="${QEMU_EXTERNAL_KLI_TIMEOUT:-25s}"
 rm -rf "$OUT_DIR" "$TEST_BUILD"
 mkdir -p "$OUT_DIR"
 
-# Build the normal QEMU tree and assemble a fresh SDK copy. Then explicitly
-# clean and rebuild the external example with the spawn-test macro so no stale
-# HELLO.KLI can satisfy the target through timestamps.
+# Build the normal QEMU tree and assemble a fresh SDK copy. The runtime smoke
+# selects a distinct source file, so a normal cached HELLO.KLI cannot satisfy
+# this target accidentally.
 make -C "$ROOT_DIR" BOARD=qemu_virt
 make -C "$ROOT_DIR" sdk
 make -C "$SDK_EXAMPLE" clean all \
     SDK="$SDK_DIR" \
-    EXTRA_CFLAGS=-DARMONIOS_EXTERNAL_KLI_SPAWN_TEST=1
+    SOURCE=spawn_test.c
 
 if [[ ! -f "$SHELL_KLI" || ! -f "$HELLO_KLI" ]]; then
     echo 'FAIL: Shell or spawn-test HELLO.KLI artifact is missing' >&2
+    exit 1
+fi
+if ! grep -a -q 'External spawn parent started' "$HELLO_KLI"; then
+    echo 'FAIL: runtime HELLO.KLI is not the dedicated spawn-test image' >&2
     exit 1
 fi
 
