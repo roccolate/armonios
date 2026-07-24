@@ -1,28 +1,32 @@
 # Filesystem errors and information ABI
 
-ArmoniOS keeps the global public ABI identifier at 1.0 during pre-release
-work. This cut adds filesystem-specific error values and `SYS_FSINFO = 51`
-without changing existing syscall numbers or layouts.
+ArmoniOS exposes filesystem-specific status values and a versioned filesystem
+information call without changing older syscall numbers or layouts.
 
-## Error values
+The global public ABI remains `1.0` during pre-release development. Optional
+filesystem capability must be queried; it must not be inferred from the ABI
+revision.
 
-The new public errors are ArmoniOS-native status values, not a POSIX errno
-compatibility promise:
+See also `PUBLIC_ABI.md`, `SYSCALLS.md`, and `VFS_METADATA_ABI.md`.
 
-| Value | Name | Meaning |
+## Filesystem statuses
+
+These are ArmoniOS-native statuses, not POSIX errno compatibility:
+
+| Value | Public name | Meaning |
 |---:|---|---|
 | -14 | `ARMONIOS_ERR_EXIST` | Destination or resource already exists. |
 | -15 | `ARMONIOS_ERR_NOTDIR` | A required path component is not a directory. |
-| -16 | `ARMONIOS_ERR_ISDIR` | An operation requiring a regular file received a directory. |
-| -17 | `ARMONIOS_ERR_NOTEMPTY` | A directory cannot be removed because it contains visible entries. |
-| -18 | `ARMONIOS_ERR_NOSPC` | The filesystem or fixed-capacity object has no remaining space. |
-| -19 | `ARMONIOS_ERR_ROFS` | The selected filesystem is read-only for the requested mutation. |
-| -20 | `ARMONIOS_ERR_NOTSUP` | The selected mount does not implement the requested operation. |
-| -21 | `ARMONIOS_ERR_RANGE` | A value or filesystem report cannot be represented safely. |
+| -16 | `ARMONIOS_ERR_ISDIR` | A regular-file operation received a directory. |
+| -17 | `ARMONIOS_ERR_NOTEMPTY` | A directory is not empty. |
+| -18 | `ARMONIOS_ERR_NOSPC` | Filesystem or fixed-capacity storage is exhausted. |
+| -19 | `ARMONIOS_ERR_ROFS` | The selected filesystem is read-only. |
+| -20 | `ARMONIOS_ERR_NOTSUP` | The provider does not implement the operation. |
+| -21 | `ARMONIOS_ERR_RANGE` | A value cannot be represented safely. |
 
-Existing errors and their numeric meanings remain frozen. Later filesystem
-operations should return the most specific value they can prove instead of
-collapsing every failure into `NOENT` or `BADF`.
+Existing status values retain their numeric meanings. New operations should
+return the most specific result the provider can prove. Frozen legacy operations
+may preserve broader historical failure behavior.
 
 ## `SYS_FSINFO`
 
@@ -32,18 +36,19 @@ x0 = absolute path inside the target mount
 x1 = pointer to arm_fsinfo_t
 ```
 
-The caller initializes `version` and `struct_size`. The kernel validates the
-complete destination, resolves the canonical path to the owning mount, builds
-one kernel-owned result, and copies it to EL0 only after successful validation.
+The path is canonicalized and resolved to the owning mount. The caller initializes
+`version` and `struct_size`. The kernel validates the complete writable
+destination, builds one kernel-owned result, validates the provider report, and
+copies the record only on success.
 
-Possible failures include:
+Typical failures:
 
-- `INVAL` for an invalid path, version, size, or user buffer;
-- `NOENT` when no mount owns the canonical path;
-- `NOTSUP` when the owning mount has no filesystem-information callback;
-- `RANGE` when a filesystem returns inconsistent or unrepresentable values.
+- `INVAL` — invalid path, version, structure size, or user buffer;
+- `NOENT` — no mount owns the canonical path;
+- `NOTSUP` — the owning mount has no filesystem-information provider;
+- `RANGE` — provider values are inconsistent or not representable.
 
-## Layout
+## Record layout
 
 ```c
 typedef struct {
@@ -60,36 +65,73 @@ typedef struct {
 } arm_fsinfo_t;
 ```
 
-The structure is fixed at 64 bytes. `filesystem` is a lower-case,
-NUL-terminated implementation name. `reserved` is zero.
+The record is fixed at 64 bytes. `filesystem` is a lower-case NUL-terminated
+implementation name. `reserved` is zero.
 
-## Flags
+## Capability flags
 
-- `ARM_FS_FLAG_READ_ONLY`
-- `ARM_FS_FLAG_DIRECTORIES`
-- `ARM_FS_FLAG_LONG_NAMES`
-- `ARM_FS_FLAG_FLUSH`
-- `ARM_FS_FLAG_TRUNCATE`
-- `ARM_FS_FLAG_FREE_BYTES_VALID`
+```text
+ARM_FS_FLAG_READ_ONLY
+ARM_FS_FLAG_DIRECTORIES
+ARM_FS_FLAG_LONG_NAMES
+ARM_FS_FLAG_FLUSH
+ARM_FS_FLAG_TRUNCATE
+ARM_FS_FLAG_FREE_BYTES_VALID
+```
 
-`free_bytes` must be ignored unless its validity flag is set. A filesystem must
-not advertise long names, truncate, durable flush, or write support merely
-because the generic VFS has a placeholder for that operation.
+Rules:
 
-## Initial FAT32 report
+- ignore `free_bytes` unless `FREE_BYTES_VALID` is present;
+- do not advertise long names until the visible naming contract exists;
+- do not advertise truncate until resize and rollback behavior exist;
+- advertise flush only when the selected transport/provider has a real callback;
+- a flush callback does not by itself prove reboot durability;
+- read-only state describes the owning filesystem/device view selected for the
+  path.
 
-The first native provider is the `/fat` mount:
+## FAT32 provider
 
-- filesystem name: `fat32`;
-- total bytes: mounted FAT32 volume sectors multiplied by 512;
-- block size: 512;
-- maximum visible 8.3 component: 12 characters;
-- maximum canonical path: 63 characters;
-- directory traversal advertised;
-- read-only reported from the mounted transport;
-- flush advertised only when the block device has a real flush callback;
-- long names, truncate, and exact free-byte accounting remain unadvertised.
+The `/fat` mount currently reports:
 
-Files is the first EL0 consumer. It displays the filesystem identity and
-read-only/read-write state while retaining its existing directory and mutation
-boundaries.
+- filesystem name `fat32`;
+- total mounted-volume capacity;
+- 512-byte blocks;
+- maximum visible 8.3 component length of 12 characters;
+- maximum canonical path length of 63 characters;
+- directory traversal support;
+- read-only state inherited from the mounted transport;
+- flush support only when the block-device path provides it.
+
+It does not advertise:
+
+- valid exact free-byte accounting;
+- long names;
+- truncate;
+- nested mutation;
+- reboot-verified durability.
+
+## Consumer behavior
+
+Files is the first graphical consumer. It displays filesystem identity, capacity,
+and read-only/read-write state without widening the current directory-mutation
+contract.
+
+A consumer should:
+
+- initialize version and size;
+- check flags before using optional fields;
+- treat unknown providers and unsupported reporting distinctly;
+- avoid interpreting `total_bytes` as writable free capacity;
+- avoid translating ArmoniOS-native statuses into guessed POSIX meanings.
+
+## Change discipline
+
+A filesystem-information change must update together:
+
+- public record or flags;
+- VFS provider contract;
+- kernel validation and copy boundary;
+- `libkarm` wrapper;
+- provider tests and ABI assertions;
+- a real consumer;
+- this document, `SYSCALLS.md`, and affected current-state/roadmap text.
