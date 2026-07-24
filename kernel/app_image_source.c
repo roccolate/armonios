@@ -38,6 +38,21 @@ static int prefix_matches(const char *text, const char *prefix,
     return 1;
 }
 
+static int text_equal(const char *left, const char *right) {
+    uint32_t i = 0;
+
+    if (left == 0 || right == 0) {
+        return left == right;
+    }
+    while (left[i] != '\0' && right[i] != '\0') {
+        if (left[i] != right[i]) {
+            return 0;
+        }
+        i++;
+    }
+    return left[i] == right[i];
+}
+
 static int copy_name(app_image_source_t *source, const char *name) {
     uint32_t length = 0;
 
@@ -81,7 +96,7 @@ int app_image_source_resolve(const char *path, app_image_source_t *source) {
         return 0;
     }
 
-    if (prefix_matches(source->path_storage, "/armonios", 0)) {
+    if (text_equal(source->path_storage, "/armonios")) {
         clear_source(source);
         return -1;
     }
