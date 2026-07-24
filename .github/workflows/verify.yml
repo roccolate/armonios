@@ -42,6 +42,9 @@ jobs:
       - name: Build kernel and userland
         run: make
 
+      - name: Test KLI1 relocation gate
+        run: bash tests/run_kli1_relocation_gate_test.sh
+
       - name: Test generic external KLI1 packager
         run: bash tests/run_kli1_generic_packager_test.sh
 
