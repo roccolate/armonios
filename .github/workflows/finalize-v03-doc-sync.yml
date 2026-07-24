@@ -1,0 +1,186 @@
+name: Finalize v0.3 documentation synchronization
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.head_ref == 'docs/sync-v03-storage-abi' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: docs/sync-v03-storage-abi
+      - name: Finalize canonical documentation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_exact(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"missing guarded text in {path}: {old!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          old_update = (
+              "> **Implementation update — 2026-07-23:** The older audit sections in "
+              "this document predate merged v0.3 PRs #80, #81, #82, #90, and #93. "
+              "Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS "
+              "checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 "
+              "validation and release-record task."
+          )
+          new_update = (
+              "> **Implementation update — 2026-07-23:** The older audit sections in "
+              "this document predate merged v0.3 PRs #80, #81, #82, #90, #93, and "
+              "#95. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS "
+              "checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 "
+              "validation and release-record task."
+          )
+          for path in [
+              "README.md",
+              "docs/CURRENT_STATE.md",
+              "docs/ROADMAP.md",
+              "docs/ARCHITECTURE.md",
+              "docs/TECHNICAL_RISKS.md",
+              "docs/SYSCALLS.md",
+              "docs/DEVELOPMENT_GUIDE.md",
+          ]:
+              replace_exact(path, old_update, new_update)
+
+          replace_exact(
+              "README.md",
+              "- **formal v0.2 blockers:** residual-risk disposition, issue #63, a final dated\n  visible workflow, and the tag/release record;",
+              "- **remaining v0.2 promotion task:** issue #76 — final dated visible workflow, documentation record, tag, and release notes;",
+          )
+          replace_exact(
+              "README.md",
+              "- **current architecture work:** v0.3 storage/VFS foundations are partly landed; structured metadata is active in PR #95;",
+              "- **current architecture work:** v0.3 block, path, mount, nested traversal, and structured metadata foundations are landed; filesystem errors, fsinfo, mutation, and durability remain;",
+          )
+
+          replace_exact(
+              "docs/CURRENT_STATE.md",
+              "- **VMM investigation:** issue #63 / `RISK-018`",
+              "- **VMM investigation:** issue #63 / `RISK-018` — CLOSED by the EL1/EL0 IRQ-origin fix",
+          )
+          replace_exact(
+              "docs/CURRENT_STATE.md",
+              "| v0.3 storage/VFS platform | IN PROGRESS | Block descriptors, board adapters, bounded partition views, canonical paths, mount resolution, and nested FAT32 traversal are landed; structured metadata is active in PR #95. |",
+              "| v0.3 storage/VFS platform | IN PROGRESS | Block descriptors, board adapters, bounded partition views, canonical paths, mount resolution, nested FAT32 traversal, native structured metadata, and the first Files consumer are landed; errors, fsinfo, mutation, and durability remain. |",
+          )
+          replace_exact(
+              "docs/CURRENT_STATE.md",
+              "- structured directory/metadata ABI promotion from PR #95;\n- filesystem-specific errors and filesystem information;",
+              "- filesystem-specific errors and filesystem information;",
+          )
+          replace_exact(
+              "docs/CURRENT_STATE.md",
+              "3. Finish structured VFS metadata in PR #95 without advancing the global ABI above 1.0.\n4. Add filesystem errors and filesystem information.\n5. Implement truncate, mkdir/rmdir, nested mutation, and durability in small tested cuts.\n6. Add VFAT long names only after the generic mutation contracts are stable.",
+              "3. Add filesystem errors and filesystem information while keeping the global ABI at 1.0.\n4. Implement truncate, mkdir/rmdir, nested mutation, and durability in small tested cuts.\n5. Add VFAT long names only after the generic mutation contracts are stable.",
+          )
+
+          replace_exact(
+              "docs/ROADMAP.md",
+              "| v0.2 cleanup/hardening | PROMOTION CANDIDATE | `RISK-017` residual disposition, `RISK-018`/issue #63, final visible pass, exact promotion runs, tag/release record |",
+              "| v0.2 cleanup/hardening | MANUAL PROMOTION PENDING | Issue #76: final dated visible pass, documentation record, tag, and release notes |",
+          )
+          replace_exact(
+              "docs/ROADMAP.md",
+              "| v0.3 storage/VFS platform | IN PROGRESS | Core block/path/mount and nested traversal foundations landed; metadata and mutation contracts remain |",
+              "| v0.3 storage/VFS platform | IN PROGRESS | Block/path/mount, nested traversal, native structured metadata, and the first Files consumer landed; errors, fsinfo, mutation, and durability remain |",
+          )
+          replace_exact(
+              "docs/ROADMAP.md",
+              "### Promotion checklist\n\n1. Complete or explicitly disposition issue #63 / `RISK-018`.\n2. Accept the absence of device-level virtio-net drop telemetry for v0.2 or land a\n   trustworthy counter contract.\n3. Accept the one-operation full-redraw boundary or add finer checkpoints and\n   evidence.\n4. Retain all existing automated subsystem and stress gates.\n5. Run `bash tools/verify.sh` on the exact final promotion tree.\n6. Run a dated visible QEMU workflow on that same tree.\n7. Close or explicitly accept `RISK-017` and `RISK-018` with rationale.\n8. Create the v0.2 tag and release record naming the tree, runs, manual tester,\n   workflow, limitations, and accepted residuals.",
+              "### Promotion checklist\n\n1. Complete issue #76 on the exact validated `main` tree.\n2. Run the dated visible QEMU workflow recorded by that issue.\n3. Record the exact automated runs, tester, setup, steps, result, and limitations.\n4. Create the v0.2 tag and release record with exact artifact identities.",
+          )
+          replace_exact(
+              "docs/ROADMAP.md",
+              "**State: NEXT AFTER v0.2**",
+              "**State: IN PROGRESS**",
+          )
+          replace_exact(
+              "docs/ROADMAP.md",
+              "### Cut 4 — structured kernel filesystem types — ACTIVE",
+              "### Cut 4 — structured kernel filesystem types — LANDED",
+          )
+          replace_exact(
+              "docs/ROADMAP.md",
+              "Keep these internal until the implementation shape is stable enough for a public\nABI.",
+              "PR #95 landed filesystem-neutral internal metadata/dirent records, native FAT32\ncallbacks, compatibility fallback for older mounts, and the public 49/50 adapters.",
+          )
+          replace_exact(
+              "docs/ROADMAP.md",
+              "### Cut 6 — append-only public ABI — ACTIVE IN PR #95",
+              "### Cut 6 — append-only public ABI — PARTLY LANDED",
+          )
+          replace_exact(
+              "docs/ROADMAP.md",
+              "- `SYS_MKDIR`;\n- `SYS_TRUNCATE`;\n- `SYS_STATX`;\n- `SYS_READDIRX`;\n- `SYS_FSINFO`.",
+              "Landed in PR #95 while the global ABI remains 1.0:\n\n- `SYS_STAT_V2 = 49`;\n- `SYS_READDIR_V2 = 50`.\n\nRemaining candidates include:\n\n- `SYS_MKDIR`;\n- `SYS_RMDIR`;\n- `SYS_TRUNCATE`;\n- `SYS_FSINFO`;\n- an explicit flush/fsync call when durable behavior exists.",
+          )
+
+          replace_exact(
+              "docs/ARCHITECTURE.md",
+              "Remaining foundations include native structured metadata promotion, filesystem\ninformation, generic mkdir/rmdir and truncate, nested mutation rollback, and an\nexplicit durable-flush contract.",
+              "Native filesystem-neutral metadata/dirent records, FAT32 direct mapping, public\n`STAT_V2`/`READDIR_V2`, and Files as the first EL0 consumer are landed. Remaining\nfoundations include filesystem-specific errors, filesystem information, generic\nmkdir/rmdir and truncate, nested mutation rollback, and an explicit durable-flush\ncontract.",
+          )
+
+          replace_exact(
+              "docs/TECHNICAL_RISKS.md",
+              "Landed foundations include the block-device contract, bounded partition views,\ncanonical path/mount resolution, and traversal of existing nested FAT32 8.3\ndirectories. Remaining gaps:\n\n- structured metadata ABI promotion and native filesystem callbacks;\n- filesystem-specific errors and filesystem information;",
+              "Landed foundations include the block-device contract, bounded partition views,\ncanonical path/mount resolution, traversal of existing nested FAT32 8.3\ndirectories, native structured metadata callbacks, public `STAT_V2`/`READDIR_V2`,\nand Files as the first EL0 consumer. Remaining gaps:\n\n- filesystem-specific errors and filesystem information;",
+          )
+
+          replace_exact(
+              "docs/SYSCALLS.md",
+              "| 48 | `sys_rename` | `x0=old_path, x1=new_path` | 0/error | Rename a FAT32 root file when the destination does not exist. |",
+              "| 48 | `sys_rename` | `x0=old_path, x1=new_path` | 0/error | Rename a FAT32 root file when the destination does not exist. |\n| 49 | `sys_stat_v2` | `x0=path, x1=stat_ptr` | 0/error | Validate a versioned 32-byte output record and return type, size, and generic attributes. |\n| 50 | `sys_readdir_v2` | `x0=path, x1=start_index, x2=entries, x3=max_entries` | entry count/error | Return up to eight complete 96-byte versioned directory records, paged by logical index. |",
+          )
+          replace_exact(
+              "docs/SYSCALLS.md",
+              "- PR #95 adds structured stat and readdir calls while preserving the global ABI 1.0 identifier.",
+              "- structured stat and readdir calls 49/50 are implemented while the global ABI identifier remains 1.0; see `VFS_METADATA_ABI.md`.",
+          )
+          replace_exact(
+              "docs/SYSCALLS.md",
+              "These calls are part of the v1 storage roadmap. PR #95 currently implements the\nstructured metadata candidates as `SYS_STAT_V2=49` and `SYS_READDIR_V2=50`; they\nare not part of `main` until that PR is promoted. Assign every remaining number\nonly when kernel code, wrappers, tests, a real userland consumer, and documentation\nland together. Append numbers; never reuse an existing slot.",
+              "Structured metadata calls 49/50 are implemented. Assign every remaining number\nonly when kernel code, wrappers, tests, a real userland consumer, and documentation\nland together. Append numbers; never reuse an existing slot.",
+          )
+          replace_exact(
+              "docs/SYSCALLS.md",
+              "| `SYS_MKDIR` | Create a directory on filesystems that support directories. |\n| `SYS_TRUNCATE` | Resize a file without rewriting it through root-only FAT behavior. |\n| `SYS_STATX` | Return structured metadata such as type, size, flags, and mount state. |\n| `SYS_READDIRX` | Return structured directory entries instead of newline-separated names. |\n| `SYS_FSINFO` | Report filesystem type, read-only state, and capacity when available. |",
+              "| `SYS_MKDIR` | Create a directory on filesystems that support directories. |\n| `SYS_RMDIR` | Remove an empty directory with filesystem-specific safety checks. |\n| `SYS_TRUNCATE` | Resize a file without rewriting it through root-only FAT behavior. |\n| `SYS_FSINFO` | Report filesystem type, read-only state, limits, and capacity when available. |\n| `SYS_FSYNC` | Request durable flush only after transport/filesystem semantics are defined. |",
+          )
+
+          replace_exact(
+              "docs/V03_IMPLEMENTATION_STATUS.md",
+              "- audited `main`: `c2b0943f6edee414e65419267575156942fa7996`;",
+              "- audited `main`: `a078c995f485bab84135233c149e28ba081b11b0`;",
+          )
+          replace_exact(
+              "docs/V03_IMPLEMENTATION_STATUS.md",
+              "## Active cut\n\nPR #95 adds structured filesystem metadata while preserving ABI 1.0:\n\n- `SYS_STAT_V2 = 49`;\n- `SYS_READDIR_V2 = 50`;\n- fixed, versioned stat and directory-entry records;\n- file/directory type and basic attributes;\n- typed `libkarm` wrappers;\n- legacy calls 45 and 46 remain unchanged.\n\nBefore promotion, PR #95 should also:\n\n- expose filesystem-neutral structured metadata inside the VFS;\n- let FAT32 provide structured entries directly instead of reparsing its textual listing;\n- include at least one real EL0 consumer, initially Files;\n- retain the ABI 1.0 identifier and all legacy layouts.\n\n",
+              "6. **Structured metadata ABI and first consumer** — PR #95\n   - filesystem-neutral `vfs_metadata_t` and `vfs_dirent_t`;\n   - native FAT32 type, size, and attribute mapping;\n   - `SYS_STAT_V2 = 49` and `SYS_READDIR_V2 = 50`;\n   - fixed versioned public records with the global ABI still at 1.0;\n   - typed `libkarm` wrappers;\n   - Files as the first EL0 consumer with a legacy fallback;\n   - legacy calls 45 and 46 remain unchanged.\n\n",
+          )
+          replace_exact(
+              "docs/V03_IMPLEMENTATION_STATUS.md",
+              "After structured metadata lands, the correct order is:",
+              "After structured metadata, the correct order is:",
+          )
+          PY
+      - name: Remove one-shot workflow
+        run: git rm .github/workflows/finalize-v03-doc-sync.yml
+      - name: Commit finalized documentation
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add README.md docs
+          git commit -m "Finalize documentation after structured metadata merge"
+          git push origin HEAD:docs/sync-v03-storage-abi
