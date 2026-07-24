@@ -49,8 +49,37 @@ $(KERNEL_ELF): $(FOUNDATION_OBJS)
 SDK_DIR ?= $(BUILD_DIR)/sdk
 SDK_KLI1_HEADER_OBJ := $(BUILD_DIR)/$(APPS_DIR)/kli1_header.o
 SDK_KLI1_END_OBJ := $(BUILD_DIR)/$(APPS_DIR)/kli1_end.o
+SDK_HELLO_DIR := $(SDK_DIR)/examples/hello-console
+SDK_HELLO_KLI := $(SDK_HELLO_DIR)/build/HELLO.KLI
+EXTERNAL_KLI_IMG ?= $(BUILD_DIR)/external-kli.img
 
-.PHONY: sdk
+.PHONY: sdk external-kli-image qemu-external-kli
 
 sdk: libkarm $(SDK_KLI1_HEADER_OBJ) $(SDK_KLI1_END_OBJ)
 	@bash tools/build_sdk.sh "$(BUILD_DIR)" "$(SDK_DIR)"
+
+$(SDK_HELLO_KLI): sdk
+	$(Q)$(MAKE) --no-print-directory -C $(SDK_HELLO_DIR) \
+	    SDK=$(abspath $(SDK_DIR))
+
+$(EXTERNAL_KLI_IMG): $(MKFAT32_IMAGE) \
+                     $(BUILD_DIR)/$(APPS_DIR)/shell.bin \
+                     $(SDK_HELLO_KLI) | $(BUILD_DIR)
+	$(LOG_MKFAT32)$(MKFAT32_IMAGE) $@ \
+	    $(BUILD_DIR)/$(APPS_DIR)/shell.bin $(SDK_HELLO_KLI)
+
+external-kli-image: $(EXTERNAL_KLI_IMG)
+	@printf "External KLI FAT32 image: %s\n" "$(EXTERNAL_KLI_IMG)"
+	@printf "Run from Shell: run /fat/HELLO.KLI\n"
+
+qemu-external-kli: qemu-check entry-check $(KERNEL_BIN) $(EXTERNAL_KLI_IMG)
+	$(LOG_QEMU)qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 128M \
+	    -display gtk,gl=off -serial stdio \
+	    -global virtio-mmio.force-legacy=false \
+	    -kernel $(KERNEL_BIN) \
+	    -drive file=$(EXTERNAL_KLI_IMG),if=none,format=raw,id=hd0 \
+	    -device virtio-blk-device,drive=hd0 \
+	    -device virtio-gpu-device,xres=640,yres=480 \
+	    -device qemu-xhci,id=xhci \
+	    -device usb-kbd,bus=xhci.0 \
+	    -device virtio-mouse-device
