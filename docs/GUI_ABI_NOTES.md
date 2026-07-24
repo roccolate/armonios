@@ -1,86 +1,93 @@
-# GUI ABI Notes
+# GUI ABI notes
 
-`SYSCALLS.md` is the authoritative syscall reference. This file records GUI rules that are easy to break while changing the compositor or userland wrappers.
+`SYSCALLS.md` is the authoritative syscall table. This document records GUI
+ownership, event, drawing, and compatibility rules that are easy to break while
+changing the compositor or desktop wrappers.
 
-Current GUI risks:
+Public values and layouts live in `include/armonios/abi/gui.h`. The canonical
+userland wrapper layer is `programs/libarmdesk/`; see `LIBARMDESK.md`.
 
-- GUI output buffers are permission-checked but not fault-contained;
-- `RISK-004` — the focus syscall path is automated and the visible files-to-editor workflow was manually verified by rocco on 2026-07-17.
+## Implemented range
 
-## Live range
+The current GUI/window syscall range is `70..86`:
 
-The implemented GUI/window range is `70..86`. IPC uses `60..61`; system information uses `100..102`.
-
-| # | Call |
+| Number | Public operation |
 |---:|---|
-| 70 | `sys_window_create` |
-| 71 | `sys_window_destroy` |
-| 72 | `sys_window_draw_text` |
-| 73 | `sys_window_draw_rect` |
-| 74 | `sys_window_event` |
-| 75 | `sys_window_set_title` |
-| 76 | `sys_window_redraw` |
-| 77 | `sys_window_focus` |
-| 78 | `sys_window_for_pid` |
-| 79 | `sys_cursor_set_shape` |
-| 80 | `sys_window_flush` |
-| 81 | `sys_window_get_bounds` |
-| 82 | `sys_window_set_bounds` |
-| 83 | `sys_window_minimize` |
-| 84 | `sys_window_restore` |
-| 85 | `sys_window_state` |
-| 86 | `sys_cursor_register_region` |
+| 70 | create window |
+| 71 | destroy window |
+| 72 | draw text |
+| 73 | draw rectangle |
+| 74 | receive event |
+| 75 | set title |
+| 76 | request redraw |
+| 77 | focus window |
+| 78 | find window for PID |
+| 79 | set cursor shape |
+| 80 | flush a damage rectangle |
+| 81 | get bounds |
+| 82 | set bounds |
+| 83 | minimize |
+| 84 | restore |
+| 85 | get state |
+| 86 | register cursor region |
 
-Append new calls. Never renumber or reuse existing entries.
+New GUI calls must be appended. Existing numbers, arguments, flags, and layouts
+must not be renumbered or reused.
 
-The v1 application and widget roadmap should prefer `libkarmdesk` helpers on
-top of this range. Add GUI syscalls only when an operation cannot be expressed
-with the existing ownership model, and keep any new number append-only.
+Prefer userland composition in `libarmdesk` when an operation can be expressed
+through the existing ABI. Add a syscall only when the kernel must own the action
+or enforce authority that userland cannot provide safely.
 
-## Ownership
+## Window ownership
+
+Window creation assigns the calling process as owner.
 
 Owner-only operations include:
 
 - destroy;
-- draw text/rect;
+- draw text and rectangles;
 - set title;
-- read events;
-- get/set bounds;
+- receive events;
+- get and set bounds;
 - minimize;
 - flush damage;
 - register cursor regions.
 
-Window creation assigns the caller as owner.
+Ownerless kernel windows use `GUI_NO_OWNER` and are omitted from ordinary
+process-window discovery.
 
-Cross-process presentation operations are intentionally limited to:
+Cross-process presentation operations are deliberately narrow so the trusted
+panel can manage application windows:
 
-- `sys_window_focus` — panel can raise an app window;
-- `sys_window_restore` — panel can restore a minimized app;
-- `sys_window_state` — panel can read minimized/focused state;
-- `sys_window_for_pid` — panel can enumerate app windows.
+- focus;
+- restore;
+- inspect state;
+- discover a process-owned window.
 
-Ownerless windows use `GUI_NO_OWNER` and are skipped by process-window enumeration.
-
-Do not expand cross-process mutation casually. A new exception requires a documented desktop responsibility and ABI tests.
-
-Panel-driven v1 desktop behavior, such as task switching or restore/focus, must
-continue to use narrow presentation permissions. Do not give the panel broad
-ownership of application windows for convenience.
+Do not expand cross-process mutation for convenience. A new exception requires a
+desktop responsibility, authority analysis, public ABI decision, and tests.
+Before untrusted external applications are supported, this trusted-desktop model
+needs an explicit capability or authority layer.
 
 ## Focus policy
 
 Current behavior:
 
-- the first focusable window receives focus when no window is focused;
-- mouse clicks can focus and raise a window;
-- `sys_window_focus` can focus and raise a selected window;
-- libkarmdesk application wrappers request focus after creating a normal window.
+- the first focusable window receives focus when none is active;
+- mouse clicks can raise and focus a window;
+- the focus syscall can raise and focus a selected window;
+- normal `libarmdesk` application wrappers request focus after successful window
+  creation;
+- windows marked `GUI_WINDOW_NO_FOCUS`, such as docks or taskbars, cannot take
+  normal focus.
 
-The stable policy is wrapper-driven focus for normal app windows plus kernel-side rejection for `GUI_WINDOW_NO_FOCUS` docks and taskbars. `tools/qemu_focus_test.sh` verifies the syscall path with serial markers; visible human confirmation remains separate evidence and was last recorded by rocco on 2026-07-17.
+Deterministic focus behavior is exercised by the QEMU focus gate. Visible layout
+and interaction remain separate manual evidence and must be recorded against the
+exact tested tree.
 
-## Event buffer
+## Events
 
-`sys_window_event` writes fixed 12-byte records:
+`gui_event_t` is a frozen 12-byte public record:
 
 ```c
 typedef struct {
@@ -90,7 +97,7 @@ typedef struct {
 } gui_event_t;
 ```
 
-Event IDs are ABI:
+Current event values:
 
 | Type | Name | `data1` | `data2` |
 |---:|---|---|---|
@@ -103,54 +110,73 @@ Event IDs are ABI:
 | 7 | `GUI_EVENT_MINIMIZE` | 0 | 0 |
 | 8 | `GUI_EVENT_MAXIMIZE` | 0 | 0 |
 
-The call waits for a bounded number of scheduler turns and returns `ERR_AGAIN` when no event is available.
+The receive call performs a bounded wait and returns `AGAIN` when no event becomes
+available. It validates the complete writable destination before consuming the
+queued event.
 
-The destination is validated as a registered process range and writable EL0 pages. The same rule applies to bounds and state output buffers. Copies are not fault-contained against unexpected faults after validation.
+Final user copies are permission-checked but not fault-contained against a late
+translation fault after validation.
 
-## Drawing and backing buffers
+## Drawing and backing storage
 
-- owner drawing lands in a per-window kernel backing buffer;
-- title-bar height is added by the kernel, so owner coordinates remain content-local;
-- `sys_window_flush` adds a content-local damage rectangle;
-- damage rectangles are framebuffer-coordinate rectangles after syscall conversion;
-- the compositor clips/merges damage and can collapse to a full-redraw sentinel;
-- partial repaint clips every repaint to the active damage rectangle;
-- the cursor is drawn last, after windows, on both full and partial repaint;
-- backing storage is freed when the window is destroyed;
-- resize must allocate replacement storage successfully before discarding the old buffer.
+- application drawing targets a kernel-owned per-window backing buffer;
+- owner coordinates are content-local;
+- title-bar height and decoration remain kernel policy;
+- damage flush converts a content-local rectangle into framebuffer coordinates;
+- compositor damage is clipped and merged;
+- excessive damage may collapse to one full-redraw sentinel;
+- partial repaint clips every draw to the active damage rectangle;
+- the cursor is drawn after windows for full and partial repaint;
+- backing storage is freed with the window;
+- resize allocates replacement storage before releasing the old buffer.
+
+A failed renderer submission consumes no pending damage. Runtime-service redraw
+budgets and continuation are defined in `RUNTIME_SERVICE.md`.
 
 ## Window state
 
-`sys_window_state` writes a 32-bit bitmap:
+The public state result is a 32-bit bitmap:
 
 ```text
 bit 0  minimized
 bit 1  focused
 ```
 
-Minimized windows are skipped by composition. Restore clears minimized state, raises the window, and emits `GUI_EVENT_MAXIMIZE`.
+Minimized windows are skipped by composition. Restore clears minimized state,
+raises the window, and emits `GUI_EVENT_MAXIMIZE`.
 
 ## Cursor regions
 
-A window owner can configure up to `GUI_MAX_CURSOR_REGIONS` content-local rectangles.
+A window owner can configure a fixed number of content-local cursor regions.
+
+Rules:
 
 - slots are checked in ascending order;
-- first matching region wins;
+- the first matching region wins;
 - title-bar cursor behavior remains kernel-owned;
 - `GUI_CURSOR_REGION_DELETE` clears a slot;
-- regions are removed when the window is destroyed.
+- all regions disappear when the window is destroyed.
 
-## Compatibility checklist
+## libarmdesk boundary
 
-A GUI ABI change must update:
+The canonical desktop wrapper is `programs/libarmdesk/gui.h`.
+`programs/libkarmdesk/gui.h` is a temporary compatibility include only.
 
-- `kernel/syscall_numbers.h`;
-- syscall dispatch and owner checks;
-- `kernel/gui*.h` public constants/structures;
-- `programs/libkarmdesk` wrappers;
-- shipping applications;
-- `tests/test_window_abi.c` and relevant GUI tests;
-- `SYSCALLS.md` and this file;
-- `CURRENT_STATE.md` if evidence or user-visible behavior changes.
+Current `main` has geometry and theme foundations but no promoted generic widget
+toolkit. Buttons, text fields, layouts, lists, dialogs, and notifications remain
+future work until merged with tests and real consumers.
 
-Do not describe a GUI workflow as verified without recording the exact visible steps, commit, environment, and tester.
+## Change checklist
+
+A GUI ABI or compositor-boundary change must update together:
+
+- `include/armonios/abi/gui.h` when public values or layouts change;
+- public syscall numbers and dispatch when a call changes;
+- ownership and authority checks;
+- kernel GUI implementation;
+- `libarmdesk` wrappers and compatibility paths;
+- affected applications;
+- ABI, focus, event, damage, and ownership tests;
+- `SYSCALLS.md`, `LIBARMDESK.md`, and this document;
+- current state, risks, or roadmap when capability changes;
+- visible evidence when layout or interaction is claimed.
