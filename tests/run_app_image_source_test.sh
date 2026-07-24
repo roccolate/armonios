@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# Exercise the standalone canonical source selector before the process lifecycle
+# consumes it, keeping bootfs namespace and VFS basename rules independently
+# testable.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
