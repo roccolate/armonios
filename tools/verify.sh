@@ -40,6 +40,7 @@ run_gate process-parent-wait bash tests/run_process_parent_wait_test.sh
 run_gate process-fd-isolation bash tests/run_vfs_process_fd_test.sh
 run_gate vfs-path-resolution bash tests/run_vfs_path_test.sh
 run_gate vfs-direct-read bash tests/run_vfs_direct_read_test.sh
+run_gate user-image-vfs-loader bash tests/run_user_image_vfs_loader_test.sh
 run_gate usercopy-host bash tests/run_user_copy_permissions_test.sh
 run_gate libkarm-sdk-headers bash tests/run_libkarm_sdk_headers_test.sh
 run_gate sdk-bundle bash tests/run_sdk_bundle_test.sh

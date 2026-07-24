@@ -101,7 +101,8 @@ int user_image_load_flat(user_image_t *image, const char *name,
         return -1;
     }
 
-    if (entry_offset < header_size || entry_offset >= image_size) {
+    if (entry_offset < header_size || entry_offset >= image_size ||
+        (entry_offset & 3U) != 0U) {
         return -1;
     }
 
@@ -115,9 +116,9 @@ int user_image_load_flat(user_image_t *image, const char *name,
 }
 
 int user_image_load_bootfs_flat(user_image_t *image, const char *image_name,
-                                const char *bootfs_name, uint64_t load_base,
-                                uint64_t load_capacity,
-                                uint32_t entry_index) {
+                                 const char *bootfs_name, uint64_t load_base,
+                                 uint64_t load_capacity,
+                                 uint32_t entry_index) {
     const bootfs_file_t *file = bootfs_find(bootfs_name);
 
     if (file == 0) {
@@ -127,6 +128,43 @@ int user_image_load_bootfs_flat(user_image_t *image, const char *image_name,
     return user_image_load_flat(image, image_name, load_base, load_capacity,
                                 (uint64_t)(uintptr_t)file->data, file->size,
                                 entry_index);
+}
+
+int user_image_load_vfs_flat(user_image_t *image, const char *image_name,
+                              const char *path, uint64_t load_base,
+                              uint64_t load_capacity,
+                              uint32_t entry_index) {
+    vfs_metadata_t metadata;
+    uint8_t *load = (uint8_t *)(uintptr_t)load_base;
+    const user_flat_image_header_t *header;
+    uint64_t offset = 0;
+
+    if (image == 0 || image_name == 0 || path == 0 || load_base == 0 ||
+        load_capacity == 0 || vfs_metadata(path, &metadata) != 0 ||
+        metadata.type != VFS_FILE_TYPE_REGULAR ||
+        metadata.size < sizeof(user_flat_image_header_t) ||
+        metadata.size > load_capacity) {
+        return -1;
+    }
+
+    while (offset < metadata.size) {
+        uint64_t count = 0;
+
+        if (vfs_read(path, offset, load + offset, metadata.size - offset,
+                     &count) != 0 || count == 0 ||
+            count > metadata.size - offset) {
+            return -1;
+        }
+        offset += count;
+    }
+
+    header = (const user_flat_image_header_t *)(const void *)load;
+    if (header->image_size != metadata.size) {
+        return -1;
+    }
+
+    return user_image_load_flat(image, image_name, load_base, load_capacity,
+                                load_base, metadata.size, entry_index);
 }
 
 int user_image_prepare_process(process_t *process, const user_image_t *image,
