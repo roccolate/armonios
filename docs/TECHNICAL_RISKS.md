@@ -1,329 +1,265 @@
 # Technical Risk Register
 
-> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, #93, and #95. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
+This register contains active correctness, architecture, product, and hardware
+risks. Closed investigations are summarized without retaining their full working
+notes in the live register.
 
-This register tracks correctness defects, architectural limits, missing evidence,
-and release blockers.
-
-- Operational truth: `CURRENT_STATE.md`
-- Milestone order: `ROADMAP.md`
-- Evidence rules: `DOCUMENTATION_POLICY.md`
-- Work procedures: `DEVELOPMENT_GUIDE.md`
+- current implementation: `CURRENT_STATE.md`;
+- implemented design: `ARCHITECTURE.md`;
+- future milestone order: `ROADMAP.md`;
+- evidence terminology: `DOCUMENTATION_POLICY.md`.
 
 A risk remains open until its exit criteria are met or a named release explicitly
-accepts the residual with rationale. Green reruns and clean soaks are evidence,
-not automatic root-cause closure.
+accepts the residual with rationale.
 
 ## Severity and status
 
-- **P0** — can compromise correctness, isolation, data integrity, or the affected
-  release's core contract.
+- **P0** — can compromise correctness, isolation, data integrity, or a core
+  contract of the affected release;
 - **P1** — materially affects stability, responsiveness, reproducibility,
-  maintainability, or required behavior.
-- **P2** — deliberate future hardening that does not currently block the named
-  baseline.
+  maintainability, or required product behavior;
+- **P2** — deliberate future hardening that does not block the current baseline.
 
 | Status | Meaning |
 |---|---|
 | `OPEN` | Exit criteria are incomplete. |
-| `OPEN; EVIDENCE IN PROGRESS` | Investigation exists but has not changed the promoted claim. |
-| `ACCEPTED FOR <release>` | Residual is explicitly bounded and accepted for one release; it is not closed. |
-| `PARTIAL / FUTURE` | Some foundation exists; stronger design is deferred. |
-| `CLOSED` | Exit criteria and exact evidence are recorded. |
+| `PARTIAL / FUTURE` | A usable foundation exists; a stronger design is deferred. |
+| `ACCEPTED FOR <release>` | A bounded residual is explicitly accepted for one release. |
+| `CLOSED` | Root cause or completion criteria and evidence are recorded. |
 
-Hardware-track severity does not block QEMU while unsupported capabilities fail
-closed and no physical support claim is made.
+Hardware-track risks do not block the QEMU release while unsupported capabilities
+fail closed and no physical support claim is made.
 
-## Summary
+## Current summary
 
 | ID | Severity | Area | Status | Release impact |
 |---|---:|---|---|---|
-| RISK-001 | P0 | User-copy permissions | CLOSED | v0.1 isolation |
-| RISK-002 | P0 | VFS descriptors | CLOSED | v0.1 process correctness |
-| RISK-003 | P1 | Visible FAT workflow | CLOSED | v0.1 desktop evidence |
-| RISK-004 | P1 | Desktop focus | CLOSED | v0.1 usability |
-| RISK-005 | P1 | Deterministic QEMU gates | CLOSED | v0.1 reproducibility |
-| RISK-006 | P1 | RPi build contract | CLOSED | Build boundary only |
-| RISK-007 | P0 hardware | Raspberry Pi runtime/storage | OPEN | Blocks physical support claims |
-| RISK-008 | P2 future | Address-space architecture | PARTIAL / FUTURE | Stronger isolation/scaling |
-| RISK-009 | P1 | KLI1 mutable storage | CLOSED | Image contract |
-| RISK-010 | P2 | Scheduling description | CLOSED | Architecture accuracy |
-| RISK-011 | P1 | Verification infrastructure | CLOSED | Reproducibility |
-| RISK-012 | P1 v0.2 | Syscall buffer ownership | CLOSED | v0.2 cleanup |
-| RISK-013 | P1 v1 | Storage/VFS platform | OPEN | Blocks v1 filesystem workflow |
-| RISK-014 | P1 v1 | Desktop applications | OPEN | Blocks v1 usability |
-| RISK-015 | P2 | Fault-contained user copy | OPEN | Future syscall hardening |
-| RISK-016 | P1 | Process lifecycle | CLOSED | Parent/wait correctness |
-| RISK-017 | P1 v0.2 | Deferred runtime execution | OPEN; AUTOMATED CONTRACT COMPLETE | Blocks formal v0.2 pending residual disposition and visible evidence |
-| RISK-018 | P1 v0.2 | Intermittent EL1 VMM fault | OPEN; EVIDENCE IN PROGRESS | Blocks an unqualified reproducibility claim |
+| RISK-007 | P0 hardware | Raspberry Pi physical runtime | OPEN | Blocks physical support claims only |
+| RISK-008 | P2 | Address-space architecture | PARTIAL / FUTURE | Stronger isolation and scaling |
+| RISK-013 | P1 for v1 | Storage and VFS completeness | OPEN | Blocks the v1 filesystem workflow |
+| RISK-014 | P1 for v1 | Desktop application usefulness | OPEN | Blocks v1 usability |
+| RISK-015 | P2 | Fault-contained user copy | OPEN | Future syscall-boundary hardening |
 
-## RISK-017 — Deferred runtime execution needs release disposition
+Release task issue #76 is separate from the technical register. It is the only
+remaining v0.2 promotion task: a dated visible workflow, exact validated tree,
+tag, and release record.
 
-**Severity:** P1  
-**Tracking:** issue #43  
-**Scope:** interrupt-to-EL0 latency, responsiveness, fairness, exception-stack
-occupancy, v0.2 promotion
+## RISK-013 — Storage and VFS are incomplete for v1
 
-### Implementation history
+**Severity:** P1 for v1  
+**Status:** OPEN
 
-- telemetry: PRs #44-#48;
-- bounded network RX: PR #50;
-- bounded shared input: PR #52;
-- runtime-state compaction: PR #54;
-- bounded USB HID visits: PR #55;
-- bounded virtio-input draining: PR #56;
-- bounded partial damage: PR #58;
-- service-wide deadline: PR #60 / original merge `1e51e818`;
-- forced-expiry heartbeat stress: PR #61 / original merge `172496d8`;
-- strict NETWORK routing and natural RX saturation: PR #62.
+### Implemented foundation
 
-PR #62 provenance:
+- process-local descriptors;
+- bootfs and tmpfs;
+- generic mounts and canonical paths;
+- longest-prefix mount resolution;
+- generic block-device capacity, read-only, flush, and bounded views;
+- whole-device and primary-MBR FAT32 discovery;
+- nested read traversal of existing FAT32 8.3 directories;
+- native structured metadata and directory entries;
+- public `STAT_V2`, `READDIR_V2`, and `FSINFO`;
+- filesystem-specific native error values.
 
-- original GitHub merge metadata:
-  `7ea3d309047659c8bbe9c601c3d98217bcaafb02`;
-- current-main runtime replay:
-  `d5c104a0badc3a2d553516159b2b745737dd252f`.
+### Remaining risk
 
-The current audited main tree is recorded in `CURRENT_STATE.md`.
+The system cannot yet provide the v1 storage workflow because it lacks:
 
-### Current contract
+- complete seek behavior;
+- truncate and safe file shrink/grow;
+- mkdir/rmdir;
+- rollback-safe nested create, unlink, rename, and move;
+- VFAT long names;
+- exact free-space accounting;
+- explicit durable flush/fsync behavior;
+- reboot-persistence proof;
+- ext2 read-only support;
+- broad malformed-image and interoperability coverage.
 
-The timer callback performs only fixed accounting, rearm, readiness publication,
-and scheduler-counter work. The runtime service runs after EOI and before process
-dispatch and `eret`.
-
-| Work class | Rule | Continuation |
-|---|---|---|
-| Whole service | Deadline at `start + CNTFRQ_EL0 / timer_hz` at safe checkpoints | Republish original work snapshot on expiry. |
-| Virtio-input | <= negotiated ring and <=16 descriptors/call | Later descriptors remain in ring. |
-| USB HID | Four fixed device visits/call | All supported direct slots fit. |
-| Shared input | 16 events/active pass | Requeue INPUT when events remain. |
-| Partial redraw | Eight ordered rectangles/successful submission | Preserve remainder; failure consumes none. |
-| Virtio-net RX | 16 valid frames/NETWORK pass | Conservatively requeue NETWORK at cap. |
-
-Network polling and descriptor receive consume nothing outside NETWORK phase.
-Deadline expiry is counted once, republishes original readiness, skips later
-optional work, and returns toward process dispatch.
-
-The deadline is cooperative. It cannot interrupt a full redraw or driver call
-already in progress.
-
-### Telemetry
-
-The internal snapshot records requests, coalescing, empty/non-empty passes,
-requeues, duration, deadline exhaustion, input production/consumption, queue
-pressure/overflow, USB polls, consumed network frames, redraw/damage/full-redraw
-counts, count-budget exhaustion, configured timing, pending work, and last work.
-
-The layout is kernel-internal and is not a stable Monitor/syscall ABI.
-
-### Automated evidence
-
-Forced-expiry stress recorded 509 EL0 heartbeats, 311 deadline republications,
-input/redraw/network/DHCP activity, zero observable input overflow, and zero panic.
-The expiry is deliberate instrumentation, not natural latency evidence.
-
-Natural RX stress preserved the production deadline and recorded:
-
-```text
-EL0 yields:                       38,912
-input events consumed:                 16
-redraw submissions:                   738
-virtio-net frames consumed:        29,234
-maximum frames/pass:                   16
-network cap exhaustions:             1,827
-runtime requeues:                    1,827
-natural deadline overruns:               0
-maximum duration:                  385,763 / 625,000 ticks (61.7%)
-observable input overflow:               0
-panic markers:                           0
-```
-
-Evidence identity:
-
-- implementation/evidence head:
-  `eac4ff990baddbf83406567b4a20e58bcae6600d`;
-- final PR #62 head:
-  `04f65776d1bbe07545113652342c32f2448bfc7b`;
-- original final PR validation:
-  - `Verify ArmoniOS` `29896952424` (#295): success;
-  - `CI - Tests` `29896952435` (#435): success;
-- production kernel 107918 / 108000 bytes; margin 82 bytes.
-
-Current-main final-tree workflows are recorded separately in `CURRENT_STATE.md`.
-
-### Residual boundary
-
-- No trustworthy device/ring-drop counter exists. Consumed frames prove progress
-  only after software observes them.
-- One already-started full redraw or driver call can cross the nominal interval.
-- The evidence does not prove indefinite fairness, every possible workload, or
-  SMP behavior.
-- The pending/telemetry model assumes one core and one consumer.
+The current FAT path supports existing nested reads but root-only mutation. A
+power loss or reboot persistence claim is not yet justified.
 
 ### Exit criteria
 
-1. Accept missing device-level RX-drop telemetry for v0.2 or land a trustworthy
-   counter contract.
-2. Accept the one-operation full-redraw boundary or add finer checkpoints and
-   evidence.
-3. Retain all subsystem and both runtime stress gates.
-4. Record a dated visible workflow on the final promotion tree.
-5. Resolve or explicitly accept `RISK-018`.
-6. Record final promotion tree, runs, tag, accepted residuals, and release notes.
-
-A future wakeable EL1 service is an optional redesign, not a requirement for the
-current bounded cooperative contract.
-
-## RISK-018 — Intermittent EL1 VMM data abort during FAT32 smoke
-
-**Severity:** P1  
-**Tracking:** issue #63  
-**First observation:** PR #62 validation, `Verify ArmoniOS` run `29894678482`,
-first attempt
-
-### Observation
-
-One `qemu-fs-test` boot reached the EL0 panel path and then panicked:
-
-```text
-ESR 0x96000004
-ELR 0x40089cac
-FAR 0x00003fdfd5033000
-```
-
-The archived ELF resolves the ELR to the `table[index]` load in `next_table()` in
-`kernel/mm/vmm.c`.
-
-The same source commit passed its rerun and later matrices, including final PR #62
-validation. The observation is intermittent. It is neither attributed to PR #62
-nor dismissed as infrastructure-only without stronger evidence.
-
-Possible classes include stale page-table state, premature table reclamation,
-allocator corruption/double release, unrelated overwrite, lifecycle use after
-transition, timing-sensitive boot interaction, or a bounded external QEMU/runner
-cause.
-
-### PR #64 investigation status
-
-Draft PR #64 proposes repeated boots of the unchanged production kernel/FAT image
-with live GDB capture on panic.
-
-Proposed evidence includes:
-
-- per-boot storage, mount, and panel assertions;
-- QEMU GDB server available without pausing normal execution;
-- panic detection while guest state remains inspectable;
-- registers, TTBRs, backtrace, current process, PMM globals/bitmap, and
-  `next_table` disassembly;
-- ELR resolution and retained serial/QEMU stderr logs.
-
-Branch identity:
-
-- branch `agent/vmm-fat32-soak-diagnostics`;
-- head `be42617d7286d7ebb6371b0a544072964b332cd7`;
-- `Verify ArmoniOS` `29899076138` (#299): success;
-- `CI - Tests` `29899076105` (#439): **cancelled by the workflow time limit**.
-
-The cancelled run is not passing evidence. Its artifacts may still be useful for
-investigation. PR #64 remains unpromoted and does not change the `main` claim.
-
-Even a completed clean soak would prove only non-reproduction for the tested
-sample and conditions; it would not identify the root cause by itself.
-
-### Exit criteria
-
-1. Land a repeatable production FAT32 soak or equivalent reproduction gate.
-2. Capture process, table root, virtual address, level/index, and allocator context
-   if the failure occurs.
-3. Identify and fix the root cause, or bound an external cause with strong
-   repeat evidence and rationale.
-4. Add focused regression coverage for the demonstrated cause.
-5. Preserve size, `.data`, W^X, ABI, and lifecycle contracts.
-6. Run the full promotion gate on the final tree.
-7. Update current state and v0.2 release disposition.
-
-## RISK-013 — Storage and VFS are too narrow for v1
-
-**Severity:** P1 for v1
-
-Foundations: fixed mount callbacks, process-local descriptors, bootfs/tmpfs,
-primary-MBR FAT32 discovery, bounded block views, and a writable root-only FAT32
-8.3 bridge.
-
-Landed foundations include the block-device contract, bounded partition views,
-canonical path/mount resolution, traversal of existing nested FAT32 8.3
-directories, native structured metadata callbacks, public `STAT_V2`/`READDIR_V2`,
-and Files as the first EL0 consumer. Remaining gaps:
-
-- filesystem-specific errors and filesystem information;
-- generic mkdir/rmdir, truncate, nested mutation, and rollback contracts;
-- FAT long names and mutation-safe directory creation/removal;
-- ext2 and a reboot-persistence gate.
-
-**Exit criteria:** complete v0.3-v0.4 block, path, mount, structured filesystem,
-real FAT, malformed-image, nested-directory, and persistence contracts without
-FAT policy returning to generic VFS.
+1. Complete the v0.3 generic seek, truncate, directory mutation, rollback, and
+   durability contracts.
+2. Complete the v0.4 FAT long-name and interoperability workflow.
+3. Add malformed-image, capacity, rollback, and reboot-persistence fixtures.
+4. Keep FAT-specific policy outside generic VFS.
+5. Record a dated visible nested create/edit/move/reboot/delete workflow.
+6. Add ext2 read-only or explicitly revise the v1 product scope.
 
 ## RISK-014 — Desktop applications are incomplete daily tools
 
 **Severity:** P1 for v1  
-**Tracking:** issue #2 / v0.6
+**Tracking:** issue #2  
+**Status:** OPEN
 
-Seven applications run, but Files is root-only, Editor is 512 bytes with a
-caret-line viewport, Shell lacks complete path-aware workflows, Control/Monitor
-are narrow, no shared runtime/widget layer exists, and no reboot-persistence
-workflow is complete.
+Seven applications run, but the product workflow remains incomplete:
 
-v0.6 depends on v0.3 paths/metadata, v0.4 real FAT, and v0.5 userland
-runtime/widgets.
+- Files is centered on `/fat`, short names, and root mutation;
+- Editor has a small fixed text model and limited viewport behavior;
+- Shell lacks the complete path-aware file workflow;
+- Monitor and Control expose narrow demonstrations;
+- settings and files do not yet have a complete reboot-persistence story;
+- reusable `libarmdesk` controls and layouts are not promoted;
+- long visible-session evidence is incomplete.
+
+The early `libkarm` runtime foundation reduces duplicated allocation, container,
+and file-read logic, but it does not by itself make the applications complete.
+
+### Exit criteria
+
+1. Complete v0.3 storage/VFS and v0.4 FAT prerequisites.
+2. Promote only the `libkarm` and `libarmdesk` components required by real apps.
+3. Deliver the application workflows listed under v0.6 in `ROADMAP.md`.
+4. Surface useful, specific, recoverable errors.
+5. Prove persistence where applications claim it.
+6. Record a dated multi-application visible workflow without freeze or corruption.
 
 ## RISK-015 — User copy is not fault-contained
 
-**Severity:** P2
+**Severity:** P2  
+**Status:** OPEN
 
-Permission/range validation and kernel-owned payloads exist. Final copy still uses
-ordinary EL1 loads/stores; no exception fixup converts a late translation fault
-into a syscall error.
+### Implemented foundation
 
-**Exit criteria:** recoverable copy helpers, fault/fixup tests, preserved error
-semantics, and proof that bad/racy user addresses cannot enter fatal EL1.
+- complete range and overflow validation;
+- registered process-region validation;
+- page-table presence and permission checks;
+- kernel-owned syscall request/response buffers;
+- output validation before provider execution;
+- invalid-output and permission regressions.
 
-## RISK-007 — Raspberry Pi runtime/storage lack physical evidence
+### Remaining risk
 
-**Severity:** P0 hardware track
+The final copy still uses ordinary EL1 loads and stores. No exception-table or
+fault-fixup mechanism converts a late translation fault into a normal syscall
+error. A racing or unexpectedly invalid mapping could therefore still become a
+fatal EL1 exception after validation.
 
-The tree includes a cross-build backend, EMMC2/SDHCI and mailbox code, diagnostic
-telemetry, MBR/block views, an opt-in read-only probe package, and fail-closed
-normal capabilities.
+### Exit criteria
 
-It has no promoted physical boot, timer, memory, storage, framebuffer, input, USB,
-network, or desktop evidence.
+1. Add recoverable copyin/copyout helpers.
+2. Define the exception/fixup contract and allowed fault classes.
+3. Add deterministic invalidation/race fixtures.
+4. Preserve existing public error and partial-progress semantics.
+5. Prove a bad user address cannot convert an otherwise recoverable syscall into
+   a kernel panic.
 
-**Exit criteria:** controlled CPU entry/core parking, repeatable cold-boot serial,
-exact board/firmware setup, memory/timer evidence, safe card reads, subsystem
-validation, and a separate safety milestone for writes.
+## RISK-007 — Raspberry Pi physical runtime is unverified
 
-## RISK-008 — Future address-space hardening
+**Severity:** P0 hardware track  
+**Status:** OPEN
 
-Kernel W^X exists, but every process TTBR0 includes kernel/RAM identity mappings
-and switches use broad invalidation.
+### Implemented foundation
 
-Future work: TTBR1, user-only TTBR0, ASIDs, scoped invalidation, global/non-global
-policy, stale-translation tests, and eventually SMP-safe state where applicable.
+- Raspberry Pi cross-build target;
+- mailbox and EMMC2/SDHCI scaffolding;
+- CSD-derived diagnostic capacity;
+- MBR parsing and bounded block views;
+- opt-in read-only probe package;
+- normal unsupported capabilities fail closed.
 
-## Closed-risk evidence summary
+### Remaining risk
 
-| Risk | Closure evidence |
-|---|---|
-| RISK-001 | Permission-aware page-table checks and invalid-output regressions |
-| RISK-002 | Process-local descriptor ownership and exit cleanup |
-| RISK-003 | FAT + GPU wiring and 2026-07-17 visible workflow |
-| RISK-004 | Focus marker and Files-to-Editor workflow evidence |
-| RISK-005 | Deterministic subsystem scripts with explicit assertions |
-| RISK-006 | RPi4 build contract with unsupported capabilities failing closed |
-| RISK-009 | KLI1 linker assertions and synthetic rejection tests |
-| RISK-010 | Explicit EL0/helper/post-EOI execution documentation |
-| RISK-011 | One-command automated baseline and hosted artifacts |
-| RISK-012 | Kernel-owned syscall payload and output validation boundaries |
-| RISK-016 | Parent-owned zombie/wait lifecycle regression |
+There is no promoted physical evidence for:
+
+- controlled CPU entry and core parking;
+- repeatable cold boot and serial output;
+- memory discovery and timer behavior;
+- normal storage mounting;
+- framebuffer and desktop rendering;
+- input, USB, or network;
+- safe writable media behavior.
+
+### Exit criteria
+
+1. Record exact board revision, firmware, boot files, power, and media setup.
+2. Prove repeatable cold boot and serial output.
+3. Validate exception level, core parking, memory, timer, and interrupt routing.
+4. Validate read-only media discovery and bounded reads.
+5. Promote framebuffer, input, USB, and network independently.
+6. Treat writable storage as a separate safety milestone with sacrificial-media
+   tests and recovery procedures.
+
+## RISK-008 — Address-space architecture needs future hardening
+
+**Severity:** P2  
+**Status:** PARTIAL / FUTURE
+
+Kernel W^X and per-process TTBR0 roots exist, but the current process address
+space also contains the kernel/RAM identity mappings needed by exception
+handling. Context switches use broad TLB invalidation.
+
+Future work:
+
+- TTBR1 for kernel mappings;
+- user-only TTBR0 roots;
+- ASIDs;
+- global/non-global mapping policy;
+- scoped invalidation;
+- stale-translation tests;
+- explicit SMP-safe state if multi-core execution is introduced.
+
+### Exit criteria
+
+1. Define the intended kernel/user virtual-address split.
+2. Move kernel mappings to TTBR1 without breaking exception entry.
+3. Add ASID allocation and rollover policy.
+4. Replace broad invalidation where safe.
+5. Add cross-process stale-translation and teardown tests.
+
+## Closed risks
+
+| ID | Area | Closure summary |
+|---|---|---|
+| RISK-001 | User-copy permissions | Page-table permission checks and invalid-output regressions |
+| RISK-002 | VFS descriptors | Process-local ownership and exit cleanup |
+| RISK-003 | Visible FAT workflow | Recorded v0.1 FAT + GPU visible workflow |
+| RISK-004 | Desktop focus | Focus and Files-to-Editor workflow gates |
+| RISK-005 | Deterministic QEMU gates | Explicit subsystem scripts and hosted evidence |
+| RISK-006 | Raspberry Pi build contract | Unsupported normal capabilities fail closed |
+| RISK-009 | KLI1 mutable storage | Linker assertions and rejection fixtures |
+| RISK-010 | Scheduling description | EL0, helper, IRQ, and post-EOI execution are separated accurately |
+| RISK-011 | Verification infrastructure | One-command baseline plus hosted artifacts |
+| RISK-012 | Syscall buffer ownership | Kernel-owned payload and complete output validation |
+| RISK-016 | Process lifecycle | Parent-owned zombie/wait and teardown regression |
+| RISK-017 | Deferred runtime execution | Count bounds, cooperative deadline, continuation, routing, telemetry, and stress evidence; issue #43 closed |
+| RISK-018 | Intermittent EL1 VMM fault | EL1 IRQ frames were entering process preemption; origin gate fixed the defect, issue #63 closed, repeated FAT32 soak retained |
+
+## Closed-risk details that remain architectural invariants
+
+### RISK-017
+
+The timer hard IRQ remains limited to fixed accounting, rearm, readiness
+publication, and scheduler counters. Post-EOI work remains count-bounded and
+subject to a cooperative whole-service deadline. Work interrupted by the
+deadline is republished rather than silently discarded.
+
+The current virtio-net interface still lacks a trustworthy device-level drop
+counter, and one already-started full redraw or driver operation is not
+asynchronously preempted. These are documented boundaries of the closed v0.2
+contract rather than claims of nonexistent telemetry or hard real-time behavior.
+
+### RISK-018
+
+The intermittent VMM panic occurred when an IRQ taken during EL1 execution was
+passed into the process-preemption path as if it were an EL0 frame. The origin
+gate now supplies a schedulable frame only when the saved PSTATE returns to EL0.
+EL1-origin interrupts cannot save process state, switch TTBR0, or preempt the
+interrupted kernel path.
+
+The semantic/assembly regression and repeated production FAT32 boot coverage
+must remain permanent gates.
+
+## Maintenance rules
+
+- Do not reopen a closed risk merely because its detailed history moved out of
+  this file; reopen it only with new contradictory evidence.
+- Add a new risk when the failure mode, severity, and exit criteria are distinct.
+- Do not use green reruns as a substitute for root-cause analysis.
+- Keep release-record tasks separate from implementation risks.
+- Update this register in the same change that closes, accepts, or materially
+  changes a risk boundary.
