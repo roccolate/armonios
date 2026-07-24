@@ -72,6 +72,9 @@ jobs:
       - name: Test canonical VFS paths
         run: bash tests/run_vfs_path_test.sh
 
+      - name: Test direct VFS path reads
+        run: bash tests/run_vfs_direct_read_test.sh
+
       - name: Test nested FAT32 directories
         run: bash tests/run_fat32_directory_test.sh
 
