@@ -1,5 +1,7 @@
 SDK ?= ../..
 CROSS_COMPILE ?= aarch64-linux-gnu-
+SOURCE ?= main.c
+EXTRA_CFLAGS ?=
 
 CC      := $(CROSS_COMPILE)gcc
 LD      := $(CROSS_COMPILE)ld
@@ -8,7 +10,7 @@ OBJCOPY := $(CROSS_COMPILE)objcopy
 BUILD_DIR ?= build
 TARGET_ELF := $(BUILD_DIR)/hello.elf
 TARGET_KLI := $(BUILD_DIR)/HELLO.KLI
-APP_OBJ := $(BUILD_DIR)/main.o
+APP_OBJ := $(BUILD_DIR)/app.o
 
 CFLAGS := -Wall -Wextra -Werror \
           -ffreestanding -nostdlib -nostartfiles \
@@ -16,7 +18,7 @@ CFLAGS := -Wall -Wextra -Werror \
           -fno-pic -fno-pie \
           -ffunction-sections -fdata-sections \
           -mcpu=cortex-a72 -std=c11 -Os -g \
-          -I$(SDK)/include
+          -I$(SDK)/include $(EXTRA_CFLAGS)
 
 .PHONY: all clean
 
@@ -25,7 +27,7 @@ all: $(TARGET_KLI)
 $(BUILD_DIR):
 	mkdir -p $@
 
-$(APP_OBJ): main.c | $(BUILD_DIR)
+$(APP_OBJ): $(SOURCE) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TARGET_ELF): $(APP_OBJ) \

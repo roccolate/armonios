@@ -71,6 +71,22 @@ static void test_external_paths_resolve_to_canonical_vfs(void) {
     CHECK_TRUE(text_equal(source.name, "HELLO.KLI"));
 }
 
+static void test_shell_run_absolute_path_resolves_to_vfs(void) {
+    app_image_source_t source;
+
+    /* `run /fat/HELLO.KLI` is passed to spawn in this historical shape. */
+    CHECK_EQ(0, app_image_source_resolve(
+                    "/armonios//fat/HELLO.KLI", &source));
+    CHECK_EQ(APP_IMAGE_SOURCE_VFS, source.kind);
+    CHECK_TRUE(text_equal(source.path, "/fat/HELLO.KLI"));
+    CHECK_TRUE(text_equal(source.name, "HELLO.KLI"));
+
+    CHECK_EQ(0, app_image_source_resolve(
+                    "/armonios///fat/APPS/../HELLO.KLI", &source));
+    CHECK_EQ(APP_IMAGE_SOURCE_VFS, source.kind);
+    CHECK_TRUE(text_equal(source.path, "/fat/HELLO.KLI"));
+}
+
 static void test_invalid_spawn_paths_are_rejected(void) {
     app_image_source_t source;
     const char *too_long =
@@ -89,6 +105,7 @@ static void test_invalid_spawn_paths_are_rejected(void) {
 int main(void) {
     test_builtin_paths_resolve_to_bootfs();
     test_external_paths_resolve_to_canonical_vfs();
+    test_shell_run_absolute_path_resolves_to_vfs();
     test_invalid_spawn_paths_are_rejected();
     return 0;
 }

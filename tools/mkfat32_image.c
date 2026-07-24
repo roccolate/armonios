@@ -8,7 +8,7 @@
 #define FAT_COUNT 1U
 #define FAT_SECTORS 16U
 #define ROOT_CLUSTER 2U
-#define FILE_FIRST_CLUSTER 3U
+#define SHELL_FIRST_CLUSTER 3U
 #define EDIT_CLUSTER_COUNT 8U
 #define IMAGE_SIZE (TOTAL_SECTORS * SECTOR_SIZE)
 #define FAT32_EOC 0x0fffffffU
@@ -28,7 +28,7 @@ static void put_le32(uint8_t *p, uint32_t value) {
 static long file_size(FILE *file) {
     long size;
 
-    if (fseek(file, 0, SEEK_END) != 0) {
+    if (file == NULL || fseek(file, 0, SEEK_END) != 0) {
         return -1;
     }
 
@@ -38,6 +38,14 @@ static long file_size(FILE *file) {
     }
 
     return size;
+}
+
+static uint32_t clusters_for_size(uint32_t size) {
+    return (size + SECTOR_SIZE - 1U) / SECTOR_SIZE;
+}
+
+static uint32_t data_start_sector(void) {
+    return RESERVED_SECTORS + FAT_COUNT * FAT_SECTORS;
 }
 
 static void write_boot_sector(uint8_t *image) {
@@ -104,15 +112,20 @@ static void write_cluster_chain(uint8_t *fat, uint32_t first_cluster,
     }
 }
 
-static void write_fat(uint8_t *image, uint32_t file_cluster_count,
-                      uint32_t edit_first_cluster) {
+static void write_fat(uint8_t *image, uint32_t shell_cluster_count,
+                      uint32_t edit_first_cluster,
+                      uint32_t hello_cluster_count,
+                      uint32_t hello_first_cluster) {
     uint8_t *fat = &image[RESERVED_SECTORS * SECTOR_SIZE];
 
     put_le32(&fat[0], 0x0ffffff8U);
     put_le32(&fat[4], FAT32_EOC);
     put_le32(&fat[ROOT_CLUSTER * 4U], FAT32_EOC);
-    write_cluster_chain(fat, FILE_FIRST_CLUSTER, file_cluster_count);
+    write_cluster_chain(fat, SHELL_FIRST_CLUSTER, shell_cluster_count);
     write_cluster_chain(fat, edit_first_cluster, EDIT_CLUSTER_COUNT);
+    if (hello_cluster_count != 0U) {
+        write_cluster_chain(fat, hello_first_cluster, hello_cluster_count);
+    }
 }
 
 static void write_dir_entry(uint8_t *entry, const char name[11],
@@ -123,40 +136,47 @@ static void write_dir_entry(uint8_t *entry, const char name[11],
 
     entry[11] = 0x20;
     put_le16(&entry[20], 0);
-    put_le16(&entry[26], first_cluster);
+    put_le16(&entry[26], (uint16_t)first_cluster);
     put_le32(&entry[28], file_size_bytes);
 }
 
-static void write_root_entries(uint8_t *image, uint32_t file_size_bytes,
-                               uint32_t edit_first_cluster) {
-    uint32_t data_start = RESERVED_SECTORS + FAT_COUNT * FAT_SECTORS;
-    uint8_t *root = &image[data_start * SECTOR_SIZE];
+static void write_root_entries(uint8_t *image, uint32_t shell_size,
+                               uint32_t edit_first_cluster,
+                               uint32_t hello_size,
+                               uint32_t hello_first_cluster) {
+    uint8_t *root = &image[data_start_sector() * SECTOR_SIZE];
     const char shell_name[11] = {
         'S', 'H', 'E', 'L', 'L', ' ', ' ', ' ', 'B', 'I', 'N',
     };
     const char edit_name[11] = {
         'E', 'D', 'I', 'T', ' ', ' ', ' ', ' ', 'T', 'X', 'T',
     };
+    const char hello_name[11] = {
+        'H', 'E', 'L', 'L', 'O', ' ', ' ', ' ', 'K', 'L', 'I',
+    };
     static const char edit_text[] = "ArmoniOS editable FAT32 file\n";
 
-    write_dir_entry(root, shell_name, FILE_FIRST_CLUSTER,
-                    file_size_bytes);
+    write_dir_entry(root, shell_name, SHELL_FIRST_CLUSTER, shell_size);
     write_dir_entry(root + 32U, edit_name, edit_first_cluster,
                     sizeof(edit_text) - 1U);
+    if (hello_size != 0U) {
+        write_dir_entry(root + 64U, hello_name, hello_first_cluster,
+                        hello_size);
+    }
 }
 
-static int copy_payload(uint8_t *image, FILE *input, uint32_t file_size_bytes) {
-    uint32_t data_start = RESERVED_SECTORS + FAT_COUNT * FAT_SECTORS;
-    uint32_t file_lba = data_start + (FILE_FIRST_CLUSTER - ROOT_CLUSTER);
-    uint8_t *dest = &image[file_lba * SECTOR_SIZE];
+static int copy_payload(uint8_t *image, FILE *input, uint32_t size,
+                        uint32_t first_cluster) {
+    uint32_t lba = data_start_sector() + (first_cluster - ROOT_CLUSTER);
+    uint8_t *dest = &image[lba * SECTOR_SIZE];
 
-    return fread(dest, 1, file_size_bytes, input) == file_size_bytes ? 0 : -1;
+    return fread(dest, 1, size, input) == size ? 0 : -1;
 }
 
 static void write_edit_payload(uint8_t *image, uint32_t edit_first_cluster) {
-    uint32_t data_start = RESERVED_SECTORS + FAT_COUNT * FAT_SECTORS;
-    uint32_t file_lba = data_start + (edit_first_cluster - ROOT_CLUSTER);
-    uint8_t *dest = &image[file_lba * SECTOR_SIZE];
+    uint32_t lba = data_start_sector() +
+                   (edit_first_cluster - ROOT_CLUSTER);
+    uint8_t *dest = &image[lba * SECTOR_SIZE];
     static const char edit_text[] = "ArmoniOS editable FAT32 file\n";
 
     for (uint32_t i = 0; i + 1U < sizeof(edit_text); i++) {
@@ -165,70 +185,111 @@ static void write_edit_payload(uint8_t *image, uint32_t edit_first_cluster) {
 }
 
 int main(int argc, char **argv) {
-    FILE *input;
-    FILE *output;
-    uint8_t *image;
-    long input_size;
-    uint32_t cluster_count;
+    FILE *shell = NULL;
+    FILE *hello = NULL;
+    FILE *output = NULL;
+    uint8_t *image = NULL;
+    long shell_size_long;
+    long hello_size_long = 0;
+    uint32_t shell_size;
+    uint32_t hello_size = 0U;
+    uint32_t shell_cluster_count;
+    uint32_t hello_cluster_count = 0U;
     uint32_t edit_first_cluster;
-    uint32_t max_payload;
+    uint32_t hello_first_cluster;
+    uint32_t data_cluster_capacity;
+    uint32_t used_cluster_count;
+    int result = 1;
 
-    if (argc != 3) {
-        fprintf(stderr, "usage: %s output.img input.bin\n", argv[0]);
+    if (argc != 3 && argc != 4) {
+        fprintf(stderr,
+                "usage: %s output.img shell.bin [external.kli]\n",
+                argv[0]);
         return 1;
     }
 
-    input = fopen(argv[2], "rb");
-    if (input == NULL) {
+    shell = fopen(argv[2], "rb");
+    if (shell == NULL) {
         perror(argv[2]);
-        return 1;
+        goto cleanup;
+    }
+    shell_size_long = file_size(shell);
+    if (shell_size_long <= 0 || (uint64_t)shell_size_long > UINT32_MAX) {
+        fprintf(stderr, "shell payload size is invalid\n");
+        goto cleanup;
+    }
+    shell_size = (uint32_t)shell_size_long;
+
+    if (argc == 4) {
+        hello = fopen(argv[3], "rb");
+        if (hello == NULL) {
+            perror(argv[3]);
+            goto cleanup;
+        }
+        hello_size_long = file_size(hello);
+        if (hello_size_long <= 0 ||
+            (uint64_t)hello_size_long > UINT32_MAX) {
+            fprintf(stderr, "external payload size is invalid\n");
+            goto cleanup;
+        }
+        hello_size = (uint32_t)hello_size_long;
     }
 
-    input_size = file_size(input);
-    max_payload = (TOTAL_SECTORS - (RESERVED_SECTORS + FAT_COUNT * FAT_SECTORS) -
-                   (FILE_FIRST_CLUSTER - ROOT_CLUSTER) -
-                   EDIT_CLUSTER_COUNT) * SECTOR_SIZE;
-    if (input_size <= 0 || (uint32_t)input_size > max_payload) {
-        fprintf(stderr, "input size is invalid for tiny FAT32 image\n");
-        fclose(input);
-        return 1;
+    shell_cluster_count = clusters_for_size(shell_size);
+    hello_cluster_count = hello_size == 0U ? 0U : clusters_for_size(hello_size);
+    edit_first_cluster = SHELL_FIRST_CLUSTER + shell_cluster_count;
+    hello_first_cluster = edit_first_cluster + EDIT_CLUSTER_COUNT;
+    data_cluster_capacity = TOTAL_SECTORS - data_start_sector();
+    used_cluster_count = 1U + shell_cluster_count + EDIT_CLUSTER_COUNT +
+                         hello_cluster_count;
+    if (used_cluster_count > data_cluster_capacity) {
+        fprintf(stderr, "payloads do not fit in tiny FAT32 image\n");
+        goto cleanup;
     }
 
     image = (uint8_t *)calloc(1, IMAGE_SIZE);
     if (image == NULL) {
-        fclose(input);
-        return 1;
+        goto cleanup;
     }
 
-    cluster_count = ((uint32_t)input_size + SECTOR_SIZE - 1U) / SECTOR_SIZE;
-    edit_first_cluster = FILE_FIRST_CLUSTER + cluster_count;
     write_boot_sector(image);
-    write_fat(image, cluster_count, edit_first_cluster);
-    write_root_entries(image, (uint32_t)input_size, edit_first_cluster);
-    if (copy_payload(image, input, (uint32_t)input_size) != 0) {
-        fprintf(stderr, "failed to copy input payload\n");
-        free(image);
-        fclose(input);
-        return 1;
+    write_fat(image, shell_cluster_count, edit_first_cluster,
+              hello_cluster_count, hello_first_cluster);
+    write_root_entries(image, shell_size, edit_first_cluster,
+                       hello_size, hello_first_cluster);
+    if (copy_payload(image, shell, shell_size, SHELL_FIRST_CLUSTER) != 0) {
+        fprintf(stderr, "failed to copy shell payload\n");
+        goto cleanup;
     }
     write_edit_payload(image, edit_first_cluster);
-    fclose(input);
+    if (hello != NULL &&
+        copy_payload(image, hello, hello_size, hello_first_cluster) != 0) {
+        fprintf(stderr, "failed to copy external payload\n");
+        goto cleanup;
+    }
 
     output = fopen(argv[1], "wb");
     if (output == NULL) {
         perror(argv[1]);
-        free(image);
-        return 1;
+        goto cleanup;
     }
-
     if (fwrite(image, 1, IMAGE_SIZE, output) != IMAGE_SIZE) {
         fprintf(stderr, "failed to write image\n");
-        fclose(output);
-        free(image);
-        return 1;
+        goto cleanup;
     }
 
-    fclose(output);
+    result = 0;
+
+cleanup:
+    if (output != NULL) {
+        fclose(output);
+    }
+    if (hello != NULL) {
+        fclose(hello);
+    }
+    if (shell != NULL) {
+        fclose(shell);
+    }
     free(image);
-    return 0;
+    return result;
 }
