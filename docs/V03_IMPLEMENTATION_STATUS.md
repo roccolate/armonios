@@ -51,13 +51,15 @@ The following v0.3 foundations are already merged:
    - explicit rejection of nested create/unlink/rename until mutation transactions exist.
 
 6. **Structured metadata ABI and first consumer** — PR #95
+   - squash merge `a078c995f485bab84135233c149e28ba081b11b0`;
    - filesystem-neutral `vfs_metadata_t` and `vfs_dirent_t`;
    - native FAT32 type, size, and attribute mapping;
    - `SYS_STAT_V2 = 49` and `SYS_READDIR_V2 = 50`;
    - fixed versioned public records with the global ABI still at 1.0;
    - typed `libkarm` wrappers;
    - Files as the first EL0 consumer with a legacy fallback;
-   - legacy calls 45 and 46 remain unchanged.
+   - legacy calls 45 and 46 remain unchanged;
+   - final validation: Export FAT32 #157, Verify ArmoniOS #496, and CI - Tests #630 succeeded.
 
 ## Remaining v0.3 work
 
