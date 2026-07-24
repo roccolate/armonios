@@ -119,6 +119,16 @@ int user_image_load_bootfs_flat(user_image_t *image, const char *image_name,
                                  const char *bootfs_name, uint64_t load_base,
                                  uint64_t load_capacity,
                                  uint32_t entry_index) {
+#if defined(ARMONIOS_EXTERNAL_KLI_BOOT_TEST)
+    /*
+     * Runtime-test builds replace only the initial embedded process image with
+     * the SDK artifact from FAT32. Production builds never compile this path.
+     */
+    (void)image_name;
+    (void)bootfs_name;
+    return user_image_load_vfs_flat(image, "HELLO.KLI", "/fat/HELLO.KLI",
+                                    load_base, load_capacity, entry_index);
+#else
     const bootfs_file_t *file = bootfs_find(bootfs_name);
 
     if (file == 0) {
@@ -128,12 +138,13 @@ int user_image_load_bootfs_flat(user_image_t *image, const char *image_name,
     return user_image_load_flat(image, image_name, load_base, load_capacity,
                                 (uint64_t)(uintptr_t)file->data, file->size,
                                 entry_index);
+#endif
 }
 
 int user_image_load_vfs_flat(user_image_t *image, const char *image_name,
-                              const char *path, uint64_t load_base,
-                              uint64_t load_capacity,
-                              uint32_t entry_index) {
+                             const char *path, uint64_t load_base,
+                             uint64_t load_capacity,
+                             uint32_t entry_index) {
     vfs_metadata_t metadata;
     uint8_t *load = (uint8_t *)(uintptr_t)load_base;
     const user_flat_image_header_t *header;
