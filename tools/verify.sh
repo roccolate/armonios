@@ -40,6 +40,7 @@ run_gate process-parent-wait bash tests/run_process_parent_wait_test.sh
 run_gate process-fd-isolation bash tests/run_vfs_process_fd_test.sh
 run_gate vfs-path-resolution bash tests/run_vfs_path_test.sh
 run_gate usercopy-host bash tests/run_user_copy_permissions_test.sh
+run_gate kli1-relocation-gate bash tests/run_kli1_relocation_gate_test.sh
 run_gate kli1-generic-packager bash tests/run_kli1_generic_packager_test.sh
 run_gate kli1-contract bash tests/run_kli1_contract_test.sh
 run_gate vmm-soak-lifecycle-host bash tests/run_vmm_soak_lifecycle_test.sh
