@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #define APP_IMAGE_BOOTFS_PREFIX "/armonios/"
+#define APP_IMAGE_SHELL_ABSOLUTE_PREFIX "/armonios//"
 
 static void clear_source(app_image_source_t *source) {
     if (source == 0) {
@@ -71,6 +72,7 @@ static int copy_name(app_image_source_t *source, const char *name) {
 }
 
 int app_image_source_resolve(const char *path, app_image_source_t *source) {
+    const char *candidate = path;
     uint32_t prefix_length = 0;
     uint32_t basename = 1U;
 
@@ -79,7 +81,18 @@ int app_image_source_resolve(const char *path, app_image_source_t *source) {
     }
     clear_source(source);
 
-    if (vfs_normalize_path(path, source->path_storage) != 0 ||
+    /*
+     * Shell's historical `run` command prefixes every first argument with
+     * `/armonios/`. When the argument itself is absolute, that produces
+     * `/armonios//fat/APP.KLI`. Preserve ordinary built-in behavior while
+     * treating the doubled separator as an explicit absolute VFS request.
+     */
+    if (prefix_matches(path, APP_IMAGE_SHELL_ABSOLUTE_PREFIX,
+                       &prefix_length)) {
+        candidate = &path[prefix_length - 1U];
+    }
+
+    if (vfs_normalize_path(candidate, source->path_storage) != 0 ||
         source->path_storage[0] != '/' ||
         source->path_storage[1] == '\0') {
         return -1;
