@@ -1,204 +1,191 @@
-# Agent Guide
+# Agent guide
 
-This file is the live operating entry point for agents working in ArmoniOS.
-
-Do not treat it as the source of current verification evidence. Read the canonical
-status and risk documents before changing code.
+This is the compact operating entry point for agents working in ArmoniOS. It is
+not the source of current verification evidence.
 
 ## Read first
 
-1. `docs/CURRENT_STATE.md` — audited operational truth
-2. `docs/TECHNICAL_RISKS.md` — open correctness and release risks
-3. `docs/ROADMAP.md` — milestone order and exit criteria
-4. `docs/DEVELOPMENT_GUIDE.md` — repository map and change workflow
-5. `docs/ARCHITECTURE.md` — implemented system design
-6. `docs/RUNTIME_SERVICE.md` — exact post-EOI contract
-7. `docs/MEMORY_MAP.md` — address-space and mapping policy
-8. `docs/SYSCALLS.md` and `docs/GUI_ABI_NOTES.md` — user/kernel ABI
-9. `docs/CONTRIBUTING.md` — evidence, style, and PR discipline
-10. `docs/PORTING.md` — board contract and hardware evidence
-11. `docs/DOCUMENTATION_POLICY.md` — claim and evidence rules
+1. `docs/CURRENT_STATE.md` — current `main` capability;
+2. `docs/TECHNICAL_RISKS.md` — active risks;
+3. `docs/ROADMAP.md` — remaining milestone order;
+4. `docs/DEVELOPMENT_GUIDE.md` — repository map and workflow;
+5. `docs/ARCHITECTURE.md` — implemented design;
+6. the focused reference for the subsystem;
+7. `docs/CONTRIBUTING.md` — contribution and evidence discipline;
+8. `docs/DOCUMENTATION_POLICY.md` — claim rules.
 
-`CURRENT_STATE.md` says what is verified. `ROADMAP.md` says what is planned.
-Issues, PRs, comments, and chat summaries are context until canonical documents are
-updated.
+Useful focused references include:
 
-## Current project classification
+- `docs/RUNTIME_SERVICE.md`;
+- `docs/MEMORY_MAP.md`;
+- `docs/SYSCALLS.md`;
+- `docs/PUBLIC_ABI.md`;
+- `docs/LIBKARM.md`;
+- `docs/LIBARMDESK.md`;
+- `docs/GUI_ABI_NOTES.md`;
+- `docs/V03_IMPLEMENTATION_STATUS.md`;
+- `docs/PORTING.md`.
 
-ArmoniOS has a verified v0.1 QEMU desktop baseline. The v0.2 runtime-hardening
-implementation and automated evidence have landed, but formal v0.2 promotion is
-still blocked by the residual-risk and release-evidence work listed in
-`CURRENT_STATE.md`.
+Issues, PRs, reviews, and chat summaries are context until their durable facts are
+promoted into canonical documentation.
 
-Do not call the tree a release candidate while required P1 dispositions and the
-final visible pass are missing. Use **v0.2 promotion candidate** or **v0.2
-hardening candidate**.
+## Current classification
 
-The current production kernel remains under the fixed 108000-byte ceiling. Do not
-raise that ceiling to avoid compaction or design work.
+- v0.1 QEMU graphical baseline: verified;
+- v0.2 runtime-hardening implementation and automated evidence: complete;
+- v0.2 release record: pending issue #76 for the final visible workflow, exact
+  promotion tree, tag, and release notes;
+- v0.3 storage/VFS platform: active;
+- v0.5 userland runtime: early partial through `libkarm`;
+- reusable widget toolkit: not promoted;
+- Raspberry Pi 4: build/host-contract scaffolding only.
 
-The next product milestone after formal v0.2 promotion is v0.3 storage/VFS
-infrastructure. Do not bypass it with broad Files, Editor, Shell, or FAT-specific
-polish.
+RISK-017 and RISK-018 are closed. Do not repeat their old investigation state or
+block v0.3 work on them. Do not call the tree a completed v0.2 release while issue
+#76 remains open.
 
-## Current runtime facts
+## Image and build policy
 
-The execution model is:
+The default QEMU image budget is **128 KiB (131072 bytes)**.
 
-```text
-preemptive EL0 processes
-  -> bounded hard IRQ callback
-  -> EOI
-  -> measured post-EOI EL1 runtime pass
-  -> process dispatch
-  -> eret
+Measure the current image instead of copying a stale size into documentation:
 
-plus cooperative EL1 helper threads
+```sh
+make BOARD=qemu_virt size
 ```
 
-EOI is not exception return. During the runtime pass:
+Preserve:
 
-- execution remains in EL1;
-- EL0 remains paused;
-- the 288-byte exception frame remains on the EL1 stack;
-- normal IRQs remain masked by the vector entry state;
-- the service is cooperatively bounded at explicit checkpoints, not
-  asynchronously preempted.
+- freestanding C11 and narrow AArch64 assembly;
+- no hidden libc, POSIX, C++, dynamic linker, or hosted runtime;
+- kernel W^X;
+- empty loadable `.data` for the production kernel and shipping KLI1 images;
+- userland stack gate;
+- deterministic QEMU and host tests;
+- fail-closed unsupported board capabilities.
 
-Current enforced runtime rules:
+## Execution model
 
-- whole service: one nominal timer interval at safe checkpoints;
-- virtio-input producer: at most one negotiated ring length and no more than 16
-  used descriptors per call;
-- USB HID producer: at most four fixed device visits per call;
-- shared input consumer: at most 16 events per active pass;
-- partial compositor damage: at most eight ordered rectangles per successful
-  redraw submission;
-- virtio-net RX: at most 16 valid frames per active NETWORK pass;
-- network polling and receive consume nothing outside the NETWORK phase;
-- deadline expiry is counted once and republishes the original work snapshot;
-- native continuation remains in queues, rings, or the damage list.
+```text
+EL0 process or EL1 kernel path
+  -> IRQ entry
+  -> fixed hard callback
+  -> interrupt-controller EOI
+  -> bounded post-EOI EL1 runtime service
+  -> process dispatch only for an IRQ that originated from EL0
+  -> eret
+```
 
-Known runtime boundaries:
+Only an IRQ frame from EL0 may enter process save/preemption. An IRQ that
+interrupts EL1 may service devices and deferred work but must return to the exact
+interrupted kernel path without switching process or TTBR0.
 
-- one already-started full redraw or driver call may cross the nominal deadline
-  before the next checkpoint;
-- device/ring RX drops are not observable through the current virtio-net
-  interface;
-- pending state and telemetry assume one CPU and one consumer;
-- runtime telemetry is kernel-internal and is not a public syscall ABI.
+The post-EOI service remains inside exception context. EL0 is paused, the frame
+remains on the EL1 stack, and the deadline is cooperative rather than
+asynchronous.
 
-Read `docs/RUNTIME_SERVICE.md` before changing `kernel/irq.c`, timer publication,
-input routing, compositor submission, USB polling, or virtio-net receive.
+Current runtime rules:
 
-## Current release blockers
+- one nominal timer interval as the service-wide checkpoint budget;
+- virtio-input: one negotiated ring length, capped at 16 descriptors;
+- USB HID: four direct-device visits;
+- shared input: 16 events;
+- partial redraw: eight ordered rectangles after successful submission;
+- virtio-net RX: 16 valid frames in NETWORK phase;
+- network receive consumes nothing outside NETWORK phase;
+- deadline expiry republishes conservative readiness;
+- native continuation remains in rings, queues, or damage state.
 
-Do not hide or silently downgrade these:
+Consumption counters do not prove absence of device/ring drops. Internal runtime
+telemetry is not a public ABI.
 
-- `RISK-017`: residual v0.2 runtime-boundary disposition and final visible evidence;
-- `RISK-018` / issue #63: intermittent EL1 VMM data abort investigation;
-- final v0.2 promotion commit, exact full-gate evidence, tag, and release record.
+## Ownership rules
 
-The repeated FAT32/VMM soak work in PR #64 is investigation evidence only until it
-is merged and promoted into `CURRENT_STATE.md`.
+Every allocated or process-visible resource needs:
 
-## Architectural invariants
+- explicit owner;
+- valid lifetime;
+- foreign-use rejection where applicable;
+- failure rollback;
+- exactly-once cleanup;
+- repeated-cleanup or invalid-state tests.
 
-Preserve the invariants relevant to each change:
+Keep page-table pages separate from mapped leaf-page ownership. Do not pass raw
+user pointers into lower subsystems; import input and build output in kernel-owned
+storage.
 
-- freestanding C11 kernel and userland;
-- narrow AArch64 assembly boundaries;
-- `.data == 0` for the production kernel and shipping KLI1 images;
-- kernel W^X policy;
-- 108000-byte production kernel ceiling;
-- 3072-byte userland stack gate unless deliberately revised;
-- append-only syscall numbers and stable public structure layouts;
-- explicit ownership and cleanup for pages, tables, descriptors, windows, IPC,
-  mappings, and process resources;
-- process-local VFS descriptors;
-- fail-closed unverified Raspberry Pi capabilities;
-- deterministic QEMU assertions rather than timeout-only launches;
-- exact separation of host, build, QEMU, manual, and physical evidence.
+Final user copies are permission-aware but not fault-contained. Do not claim
+recoverable copyin/copyout until RISK-015 is resolved.
 
-## Change discipline
+## ABI rules
 
-### Memory, VMM, process, and user-copy
+Public numbers and records live under `include/armonios/abi/`.
 
-- Keep leaf-page ownership separate from page-table ownership.
-- Add rollback, failure, cleanup, and double-release tests.
-- Do not free a page-table hierarchy while any live process can activate it.
-- Validate overflow-safe ranges before mapping or copying.
-- Do not pass raw user pointers into lower subsystems.
-- Import input into kernel-owned buffers and build output there before copying.
-- Fault-contained copyin/copyout remains open hardening; do not claim current
-  permission checks make final loads/stores recoverable.
+- append syscall numbers;
+- never reuse a number or status value;
+- preserve published layout sizes and field order;
+- use explicitly versioned replacement records for richer contracts;
+- update kernel, wrappers, tests, real consumer, and docs together;
+- keep `libkarm` GUI-independent;
+- put desktop wrappers and shared controls in `libarmdesk`.
 
-### Runtime and interrupts
+Current VFS ABI includes structured metadata calls 49/50 and filesystem
+information call 51. Planned mutation operations are not current ABI until merged.
 
-- Keep the physical timer callback fixed and bounded.
-- Do not render, block, allocate through an unbounded path, drain arbitrary
-  queues, parse arbitrary traffic, or scan dynamic structures in hard IRQ.
-- Post-EOI work still pauses EL0; preserve count and time stop rules.
-- Count completed work or real device operations, not generic attempts.
-- Preserve independent PERIODIC, INPUT, and NETWORK readiness.
-- Preserve strict NETWORK-phase routing.
-- Preserve input ring, queue, and damage-list continuation semantics.
-- Do not infer loss absence from consumption counters.
+## Storage rules
 
-### Syscall and ABI
+Current foundations include:
 
-- Append syscall numbers; never reuse one.
-- Land kernel dispatch, user wrappers, tests, and ABI documentation together.
-- Validate complete output destinations before consuming events or IPC state.
-- Add a versioned diagnostic ABI before exposing internal runtime telemetry.
-- Planned v0.3 filesystem syscalls are not current ABI.
+- generic block devices and bounded views;
+- whole-device and primary-MBR FAT32 discovery;
+- canonical paths and longest-prefix mount resolution;
+- existing nested 8.3 read traversal;
+- structured metadata and filesystem information.
 
-### Storage and filesystems
+Current mutation remains root-entry only. Long names, mkdir/rmdir, truncate,
+nested mutation, and reboot-verified durability are incomplete.
 
-- Keep filesystem policy behind generic mount/filesystem callbacks.
-- Do not call the root-only 8.3 bridge general FAT.
-- Add host fixtures, malformed-input tests, and overflow checks before QEMU claims.
-- Add reboot/persistence evidence before claiming durable writes.
-- Keep Raspberry Pi normal storage fail closed until physical evidence exists.
+Keep filesystem policy behind filesystem callbacks. Add malformed fixtures,
+overflow checks, read-only behavior, specific statuses, rollback, and one real
+consumer. Do not claim durability without a reboot test.
 
-### Userland and GUI
+## Userland and desktop rules
 
-- Shipping KLI1 images keep mutable `.data` and `.bss` empty.
-- Use `SYS_MMAP` for large mutable state.
-- Keep stack checks green.
-- Run visible QEMU for layout, focus, keyboard, mouse, or workflow claims.
-- Do not add controls that do not perform a real action.
-- Do not broaden v0.6 application work before v0.3-v0.5 foundations.
+`libkarm` currently provides syscall wrappers, minimal I/O, monotonic arenas,
+growable buffers, dynamic strings, complete descriptor writes, and rollback-safe
+file reads.
 
-## Verification workflow
+`libarmdesk` currently provides GUI wrappers, rectangle helpers, and theme tokens.
+The closed unmerged widget work is not part of `main`.
 
-Use the smallest relevant focused test while developing. Before promotion run:
+For userland changes:
+
+- keep mutable static `.data` and `.bss` empty;
+- use `SYS_MMAP` for larger mutable state;
+- measure stack and image size;
+- land reusable components with tests and a real application consumer;
+- run visible QEMU for layout or interaction claims;
+- do not add controls that perform no real action.
+
+## Raspberry Pi rules
+
+Generic code must not contain board physical addresses or silently assume virtio.
+A board implementation satisfies the generic contract or fails unsupported
+capabilities explicitly.
+
+`make BOARD=rpi4` and diagnostic probe tests are build/host evidence only. Physical
+support requires exact board, firmware, boot, serial, memory/timer, subsystem,
+repeatability, and destructive-storage safety evidence.
+
+## Verification
+
+Develop with focused tests. Before promotion run:
 
 ```sh
 bash tools/verify.sh
 ```
 
-Relevant focused commands include:
-
-```sh
-make BOARD=qemu_virt
-make BOARD=qemu_virt size
-make -C tests test
-bash tests/run_runtime_service_test.sh
-bash tests/run_input_queue_stats_test.sh
-bash tests/run_process_parent_wait_test.sh
-bash tests/run_vfs_process_fd_test.sh
-bash tests/run_user_copy_permissions_test.sh
-bash tests/run_kli1_contract_test.sh
-make stack-check
-make qemu-fs-test
-bash tools/qemu_usercopy_test.sh
-bash tools/qemu_focus_test.sh
-bash tools/qemu_marker_test.sh all
-bash tools/qemu_runtime_stress_test.sh
-bash tools/qemu_runtime_net_stress_test.sh
-bash tools/qemu_fb_fat_test.sh
-```
+Common focused commands are maintained in `docs/DEVELOPMENT_GUIDE.md`.
 
 Visible evidence is separate:
 
@@ -206,34 +193,32 @@ Visible evidence is separate:
 make qemu-fb-visible
 ```
 
-Record tester, date, exact commit/image, workflow, observed behavior, and
-limitations. Serial markers are not visible manual validation.
+Record tester, date, exact tree/image, setup, workflow, result, and limitations.
 
 ## Documentation rules
 
-- Keep canonical repository documentation in English.
-- Update from evidence, not intent.
-- Record exact commit trees and workflow run IDs for promoted baselines.
-- Distinguish PR-head, synthetic merge, final merge, local, QEMU, and hardware
-  evidence.
-- A documentation-only change may clarify or downgrade a claim, but may not
-  upgrade runtime evidence.
-- Update risk state first, current state second, contract documents third, roadmap
-  fourth, operating guides fifth, and README last.
-- Do not create another current-state, audit, handoff, archive, or latest-status
-  file.
+- describe current facts in present tense;
+- label future work explicitly;
+- do not create a competing current-state or progress-log document;
+- keep hashes, workflow IDs, measured sizes, and dated observations in
+  `docs/history/` or release records;
+- documentation-only work may correct or downgrade claims, but may not invent
+  runtime evidence;
+- update focused references with code, broader canonical documents when their
+  role changes, and README last.
 
 ## Pull-request expectations
 
-Every behavior-changing PR must state:
+A behavior-changing PR should state:
 
-- the exact problem and affected contract;
-- ownership and failure behavior;
-- focused commands and exact results;
-- full-gate evidence on the final tree;
-- manual checks or an explicit `not run` entry;
+- exact problem and contract;
+- implementation and ownership/failure boundary;
+- compatibility impact;
+- focused commands and results;
+- full-gate result on the final tree;
+- manual evidence or explicit `not run`;
 - what the evidence does not prove;
 - risk and documentation changes.
 
-Keep PRs narrow enough that code, tests, evidence, and documentation describe one
-coherent contract.
+Keep the change small enough that code, tests, evidence, and documentation remain
+one coherent reviewable unit.
