@@ -1,26 +1,73 @@
 #!/usr/bin/env bash
 
-# Verifies the KLI1 mutable-storage contract on the shipping apps.
+# Verifies the public KLI1 ABI and mutable-storage contract.
 #
-# The .user_image layout (programs/apps/image.ld) forbids .data and .bss in
-# the flat image. Any app needing mutable static state must obtain it through
+# include/armonios/abi/kli.h is the SDK-facing source of truth for the on-disk
+# header. The .user_image layout (programs/apps/image.ld) forbids .data and .bss
+# in the flat image. Any app needing mutable static state must obtain it through
 # SYS_MMAP at runtime.
 #
-# This runner checks three things per app:
-#   1. The shippable .elf links cleanly under the production user image.ld.
-#   2. The resulting ELF has no .data or .bss sections.
-#   3. A regression build that *would* emit .bss is rejected by the linker
-#      ASSERT, so the contract is genuinely enforced rather than silently
-#      dropping the offending section.
+# This runner checks:
+#   1. the public header compiles standalone with only -I include;
+#   2. its constants, offsets, and total size remain the KLI1 wire layout;
+#   3. every shipping .elf links under the production user image.ld;
+#   4. every shipping ELF has no .data or .bss sections;
+#   5. a regression source that emits .bss is rejected by the linker ASSERT.
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="$ROOT_DIR/build/tests"
 BIN_DIR="$ROOT_DIR/build/programs/apps"
+HOST_CC="${HOST_CC:-cc}"
 OBJDUMP="${OBJDUMP:-aarch64-linux-gnu-objdump}"
 
 mkdir -p "$OUT_DIR"
+
+check_public_abi() {
+    local src="$OUT_DIR/kli1_public_abi.c"
+    local bin="$OUT_DIR/kli1_public_abi"
+
+    cat > "$src" <<'SRC'
+#include <stddef.h>
+#include <stdint.h>
+
+#include <armonios/abi/kli.h>
+
+_Static_assert(ARM_KLI1_MAGIC == 0x31494c4bU, "KLI1 magic");
+_Static_assert(ARM_KLI1_HEADER_SIZE == 80U, "KLI1 header size");
+_Static_assert(ARM_KLI1_MAX_ENTRIES == 8U, "KLI1 entry capacity");
+_Static_assert(sizeof(arm_kli1_header_t) == 80U, "KLI1 wire size");
+_Static_assert(offsetof(arm_kli1_header_t, magic) == 0U, "KLI1 magic offset");
+_Static_assert(offsetof(arm_kli1_header_t, header_size) == 4U,
+               "KLI1 header_size offset");
+_Static_assert(offsetof(arm_kli1_header_t, entry_count) == 6U,
+               "KLI1 entry_count offset");
+_Static_assert(offsetof(arm_kli1_header_t, image_size) == 8U,
+               "KLI1 image_size offset");
+_Static_assert(offsetof(arm_kli1_header_t, entry_offsets) == 16U,
+               "KLI1 entry_offsets offset");
+
+int main(void) {
+    arm_kli1_header_t header = {0};
+
+    header.magic = ARM_KLI1_MAGIC;
+    header.header_size = ARM_KLI1_HEADER_SIZE;
+    header.entry_count = 1U;
+    header.image_size = ARM_KLI1_HEADER_SIZE + 4U;
+    header.entry_offsets[0] = ARM_KLI1_HEADER_SIZE;
+
+    return header.magic == 0x31494c4bU &&
+                   header.entry_offsets[0] < header.image_size
+               ? 0
+               : 1;
+}
+SRC
+
+    "$HOST_CC" -std=c11 -Wall -Wextra -Werror \
+        -I"$ROOT_DIR/include" "$src" -o "$bin"
+    "$bin"
+}
 
 check_elf_clean() {
     local elf="$1"
@@ -65,6 +112,14 @@ assert_negative_case() {
 
 passed=0
 failed=0
+
+if check_public_abi; then
+    printf 'PASS: public KLI1 header is standalone and layout-stable\n'
+    passed=$((passed + 1))
+else
+    printf 'FAIL: public KLI1 header contract\n'
+    failed=$((failed + 1))
+fi
 
 apps=(clock editor files monitor shell panel control)
 
