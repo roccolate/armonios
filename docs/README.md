@@ -14,6 +14,7 @@ type of question instead of accumulating patches for another document's role.
 | What should be built next? | [`ROADMAP.md`](ROADMAP.md) |
 | What technical risks remain open? | [`TECHNICAL_RISKS.md`](TECHNICAL_RISKS.md) |
 | How should I work in this repository? | [`DEVELOPMENT_GUIDE.md`](DEVELOPMENT_GUIDE.md) |
+| How should I contribute a change? | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | How are documentation claims governed? | [`DOCUMENTATION_POLICY.md`](DOCUMENTATION_POLICY.md) |
 
 ## Current reference contracts
@@ -22,13 +23,15 @@ type of question instead of accumulating patches for another document's role.
 |---|---|
 | Public syscall surface | [`SYSCALLS.md`](SYSCALLS.md) |
 | Public ABI ownership and compatibility | [`PUBLIC_ABI.md`](PUBLIC_ABI.md) |
+| Structured VFS metadata | [`VFS_METADATA_ABI.md`](VFS_METADATA_ABI.md) |
+| Filesystem status and capability reporting | [`VFS_FSINFO_ABI.md`](VFS_FSINFO_ABI.md) |
 | Userland runtime | [`LIBKARM.md`](LIBKARM.md) |
 | Desktop userland layer | [`LIBARMDESK.md`](LIBARMDESK.md) |
+| GUI ownership and event rules | [`GUI_ABI_NOTES.md`](GUI_ABI_NOTES.md) |
 | Deferred runtime service | [`RUNTIME_SERVICE.md`](RUNTIME_SERVICE.md) |
+| Memory map and page ownership | [`MEMORY_MAP.md`](MEMORY_MAP.md) |
 | Kernel image budget | [`SIZE_POLICY.md`](SIZE_POLICY.md) |
 | v0.3 storage/VFS checkpoint | [`V03_IMPLEMENTATION_STATUS.md`](V03_IMPLEMENTATION_STATUS.md) |
-| Memory layout and mapping | [`MEMORY_MAP.md`](MEMORY_MAP.md) |
-| GUI ABI details | [`GUI_ABI_NOTES.md`](GUI_ABI_NOTES.md) |
 | Porting and board boundaries | [`PORTING.md`](PORTING.md) |
 
 ## Historical evidence
@@ -133,7 +136,7 @@ Every behavior-changing change should consider:
 - `CURRENT_STATE.md` when user-visible capability or a major limit changes;
 - `ROADMAP.md` when planned work lands or ordering changes;
 - `TECHNICAL_RISKS.md` when a risk opens, closes, or changes boundary;
-- `DEVELOPMENT_GUIDE.md` when operating rules change;
+- `DEVELOPMENT_GUIDE.md` and `AGENTS.md` when operating rules change;
 - repository README last.
 
 Documentation-only changes must not upgrade implementation or verification
