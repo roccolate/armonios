@@ -1,25 +1,46 @@
 #!/usr/bin/env bash
 
-# Build a dedicated test kernel whose first EL0 image is loaded from
-# /fat/HELLO.KLI. That external parent then invokes SYS_SPAWN on the same VFS
-# path, waits for the child, and exits. Production builds compile neither test
-# mode.
+# Build a dedicated external parent KLI, place it in FAT32, and boot a dedicated
+# test kernel whose first EL0 image comes from /fat/HELLO.KLI. The parent then
+# invokes SYS_SPAWN on the same VFS path, waits for the child, and exits.
+# Production builds compile neither test mode.
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="$ROOT_DIR/build/tests/external-kli-runtime"
 TEST_BUILD="$ROOT_DIR/build-external-kli-runtime"
+SDK_DIR="$ROOT_DIR/build/sdk"
+SDK_EXAMPLE="$SDK_DIR/examples/hello-console"
+HELLO_KLI="$SDK_EXAMPLE/build/HELLO.KLI"
+SHELL_KLI="$ROOT_DIR/build/programs/apps/shell.bin"
 FAT_IMAGE="$OUT_DIR/external-kli.img"
+MKFAT="$OUT_DIR/mkfat32_image"
 SERIAL_LOG="$OUT_DIR/serial.log"
+HOST_CC="${HOST_CC:-cc}"
 TIMEOUT="${QEMU_EXTERNAL_KLI_TIMEOUT:-25s}"
 
 rm -rf "$OUT_DIR" "$TEST_BUILD"
 mkdir -p "$OUT_DIR"
 
-make -C "$ROOT_DIR" external-kli-image \
-    EXTERNAL_KLI_IMG="$FAT_IMAGE" \
-    SDK_HELLO_EXTRA_CFLAGS=-DARMONIOS_EXTERNAL_KLI_SPAWN_TEST=1
+# Build the normal QEMU tree and assemble a fresh SDK copy. Then explicitly
+# clean and rebuild the external example with the spawn-test macro so no stale
+# HELLO.KLI can satisfy the target through timestamps.
+make -C "$ROOT_DIR" BOARD=qemu_virt
+make -C "$ROOT_DIR" sdk
+make -C "$SDK_EXAMPLE" clean all \
+    SDK="$SDK_DIR" \
+    EXTRA_CFLAGS=-DARMONIOS_EXTERNAL_KLI_SPAWN_TEST=1
+
+if [[ ! -f "$SHELL_KLI" || ! -f "$HELLO_KLI" ]]; then
+    echo 'FAIL: Shell or spawn-test HELLO.KLI artifact is missing' >&2
+    exit 1
+fi
+
+"$HOST_CC" -std=c11 -Wall -Wextra -Werror -O2 \
+    "$ROOT_DIR/tools/mkfat32_image.c" -o "$MKFAT"
+"$MKFAT" "$FAT_IMAGE" "$SHELL_KLI" "$HELLO_KLI"
+
 make -C "$ROOT_DIR" BOARD=qemu_virt BUILD_DIR="$TEST_BUILD" \
     BOARD_CFLAGS=-DARMONIOS_EXTERNAL_KLI_BOOT_TEST=1
 
