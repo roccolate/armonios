@@ -1,77 +1,71 @@
 # Roadmap
 
-> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, #93, and #95. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
+This roadmap describes future ordering and exit criteria. It does not duplicate
+current implementation detail or historical workflow evidence.
 
-This roadmap starts from the verified v0.1 QEMU desktop baseline and targets a
-small, usable v1.0 QEMU desktop operating system.
-
-It describes ordering and exit criteria, not current implementation evidence.
-
-- Current verified behavior: `CURRENT_STATE.md`
-- Active defects and residuals: `TECHNICAL_RISKS.md`
-- Implemented architecture: `ARCHITECTURE.md`
-- Practical work slicing: `DEVELOPMENT_GUIDE.md`
+- Current implementation: `CURRENT_STATE.md`
+- Implemented design: `ARCHITECTURE.md`
+- Active technical risks: `TECHNICAL_RISKS.md`
+- Practical contribution workflow: `DEVELOPMENT_GUIDE.md`
 
 ## Product target
 
 ArmoniOS v1.0 should let one user:
 
-- boot reliably to a graphical desktop;
+- boot reliably into a graphical QEMU desktop;
 - browse multiple mounted filesystems;
 - create directories and use long file names;
-- edit multi-line text with scrolling and safe truncating saves;
-- copy, move, rename, and delete files;
-- use a useful path-aware shell;
+- create, edit, truncate, copy, move, rename, and delete files;
+- close, reopen, and reboot without losing committed content;
+- use a path-aware shell;
 - inspect and terminate processes;
 - inspect memory and storage state;
-- change persistent settings;
-- reboot and confirm files and settings survived.
+- change persistent desktop settings;
+- use a coherent set of small but practical applications.
 
-Chosen release defaults:
+Chosen v1 boundaries:
 
-- primary runtime: QEMU `virt`;
-- shape: compact personal desktop OS;
-- kernel: monolithic, explicit, freestanding C11 with narrow AArch64 assembly;
-- compatibility: internal interfaces may change before v1;
-- public ABI: append-only unless an incompatibility is explicitly approved and
-  documented;
-- writable v1 filesystem: FAT with directories and long names;
-- secondary v1 filesystem: ext2, at least read-only;
-- Raspberry Pi: separate hardware track, not a v1 QEMU dependency.
+- primary verified runtime: QEMU `virt`;
+- product shape: compact personal desktop OS;
+- kernel: monolithic, freestanding C11 with narrow AArch64 assembly;
+- public ABI: native and append-only unless an incompatibility is explicitly
+  approved and versioned;
+- writable filesystem: FAT with directories and long names;
+- secondary filesystem: ext2, at least read-only;
+- Raspberry Pi: separate hardware track, not a dependency of the QEMU v1 release.
 
 ## Phase summary
 
-| Phase | State | Promotion blocker |
+| Phase | State | Remaining promotion boundary |
 |---|---|---|
-| v0.1 baseline | COMPLETE | None for the recorded QEMU baseline |
-| v0.2 cleanup/hardening | MANUAL PROMOTION PENDING | Issue #76: final dated visible pass, documentation record, tag, and release notes |
-| v0.3 storage/VFS platform | IN PROGRESS | Block/path/mount, nested traversal, native structured metadata, and the first Files consumer landed; errors, fsinfo, mutation, and durability remain |
-| v0.4 real FAT | EARLY PARTIAL | Nested 8.3 read traversal exists; long names and mutation-safe directories depend on remaining v0.3 contracts |
-| v0.5 userland runtime/widgets | PLANNED | Depends on stable storage and ABI shapes |
-| v0.6 useful applications | PARTIAL DEMOS ONLY | Depends on v0.3-v0.5 |
-| v0.7 ext2 read-only | PLANNED | Depends on v0.3 filesystem interface |
-| v0.8 desktop polish | EARLY PARTIAL | Depends on useful applications and stable persistence |
-| v0.9 beta stabilization | NOT STARTED | Depends on all QEMU P0 risks closed and every P1 closed or accepted |
-| v1.0 | NOT READY | Complete user workflow and release evidence remain incomplete |
+| v0.1 verified baseline | COMPLETE | None for the recorded QEMU baseline |
+| v0.2 cleanup/runtime hardening | IMPLEMENTATION COMPLETE; RELEASE RECORD PENDING | Issue #76 visible validation, exact tag, and release notes |
+| v0.3 storage/VFS platform | IN PROGRESS | Seek, truncate, mkdir/rmdir, nested mutation, and durability |
+| v0.4 real FAT | EARLY PARTIAL | VFAT long names and complete mutation/persistence workflow |
+| v0.5 userland runtime/widgets | EARLY PARTIAL | General runtime gaps and promoted reusable widget models |
+| v0.6 useful applications | PARTIAL DEMOS | Complete daily workflows on v0.3-v0.5 foundations |
+| v0.7 ext2 read-only | PLANNED | Generic read-only driver and interoperability gates |
+| v0.8 desktop polish | EARLY PARTIAL | Coherent interaction, visuals, diagnostics, and long-session evidence |
+| v0.9 beta stabilization | NOT STARTED | ABI/release freeze, fuzzing, persistence, and accepted residuals |
+| v1.0 | NOT READY | Complete verified workflow and release record |
 
 ## Sequencing rules
 
-1. Do not add broad product features while a release-blocking kernel P1 remains
-   open without an explicit accepted-risk decision.
-2. Build generic block, path, mount, and metadata contracts before general FAT or
-   application rewrites.
-3. Keep FAT-specific behavior out of generic VFS code.
-4. Add syscall numbers only with kernel implementation, user wrappers, host tests,
-   QEMU evidence where applicable, and ABI documentation in the same cut.
+1. Preserve the verified QEMU baseline while replacing foundations.
+2. Complete generic contracts before adding filesystem-specific product features.
+3. Keep FAT-specific behavior outside generic VFS policy.
+4. Land every public ABI addition with implementation, wrappers, tests,
+   documentation, and at least one real consumer.
 5. Keep Raspberry Pi work isolated from the QEMU release line.
-6. Every milestone needs deterministic automated gates and dated visible/manual
-   evidence where user-visible behavior is claimed.
-7. Preserve the 108000-byte production kernel ceiling unless a deliberate release
-   decision defines and justifies a replacement budget. Compact or redesign first.
-8. Do not call application usefulness or polish “v1.1” before v1.0 exists.
-9. Prefer small, independently testable PRs over phase-sized rewrites.
-10. Preserve the v0.1 workflow while migrating foundations unless an explicit
-    compatibility break is approved.
+6. Require deterministic automated gates and dated visible evidence for promoted
+   user-visible behavior.
+7. Preserve the 128 KiB production-image ceiling unless an explicit project
+   decision replaces it.
+8. Prefer small independently testable cuts over phase-sized rewrites.
+9. Add shared runtime or UI components only when a concrete consumer exists and
+   binary/stack deltas are measured.
+10. Do not call a later phase complete merely because one supporting primitive
+    landed early.
 
 ## v0.1 — verified QEMU baseline
 
@@ -79,357 +73,311 @@ Chosen release defaults:
 
 Delivered:
 
-- AArch64 QEMU boot and graphical desktop;
-- preemptive EL0 processes, syscalls, IPC, anonymous memory, and process lifecycle;
-- kernel W^X;
-- process-local VFS descriptors;
-- permission-aware user-pointer validation;
-- kernel-owned syscall payloads;
-- KLI1 mutable-storage contract;
-- kernel compositor and seven applications;
-- writable root-only FAT32 8.3 workflow;
-- deterministic framebuffer, USB, network, user-copy, focus, and FAT gates;
-- hosted CI evidence;
-- dated visible create/edit/save/rename/reopen/delete evidence;
-- RPi4 build contract with unsupported normal capabilities failing closed.
+- AArch64 boot and graphical desktop;
+- preemptive EL0 processes and native syscalls;
+- memory, process, user-copy, descriptor, GUI, input, USB, network, and FAT gates;
+- seven KLI1 applications;
+- writable root-level FAT32 8.3 workflow;
+- deterministic hosted CI and dated visible evidence;
+- Raspberry Pi build contract with unsupported normal capabilities failing closed.
 
 The v0.1 claim excludes production hardening, general FAT, ext2, complete daily
-applications, and Raspberry Pi hardware support.
+applications, and physical Raspberry Pi support.
 
 ## v0.2 — cleanup and runtime hardening
 
-**State: PROMOTION CANDIDATE**
+**State: IMPLEMENTATION COMPLETE; RELEASE RECORD PENDING**
 
-### Landed implementation
+Landed:
 
-- lower subsystems receive kernel-owned syscall buffers;
-- output pages are permission-checked before copying;
-- generic VFS mount callbacks replace FAT-specific dispatch in the facade;
-- dynamic FAT nodes are invalidated after rename/delete;
-- process-owned descriptors and parent/wait lifecycle are verified;
-- Raspberry Pi normal optional capabilities remain fail closed;
-- timer hard-IRQ work is limited to fixed accounting, rearm, readiness publication,
-  and scheduler counters;
-- GUI, input, USB, and network work runs in the measured post-EOI service;
-- per-class and aggregate telemetry exists;
-- input producers, shared input, partial redraw, and network RX are count-bounded;
-- one service-wide generic-counter deadline is enforced at safe checkpoints;
-- deadline expiry republishes original readiness and skips later optional work;
-- network polling and receive are suppressed outside the active NETWORK phase.
+- kernel-owned syscall payload boundaries;
+- permission-aware output validation;
+- generic VFS mount dispatch;
+- process-owned descriptors and parent/wait lifecycle;
+- fail-closed optional board capabilities;
+- fixed timer hard-IRQ work;
+- bounded post-EOI input, USB, redraw, and network work;
+- service-wide cooperative deadline and continuation;
+- strict network-phase routing;
+- sustained-load EL0 progress evidence;
+- IRQ-origin gating that prevents EL1 frames entering process preemption;
+- repeated production FAT32 VMM soak coverage;
+- 128 KiB image-budget policy;
+- initial `libarmdesk` and public ABI boundaries.
 
-### Landed automated evidence
+Remaining release steps:
 
-Forced-expiry stress proves repeated EL0 progress while actual republish logic,
-input, redraw, DHCP, and network activity occur.
+1. update a local checkout to the exact final `main` tree;
+2. run the complete automated gate;
+3. run and record the visible desktop/FAT workflow from issue #76;
+4. record tester, date, host setup, exact commit, result, and limitations;
+5. create the annotated `v0.2` tag;
+6. publish concise release notes.
 
-Natural-deadline RX saturation proves:
-
-```text
-EL0 yields:                       38,912
-input events consumed:                 16
-redraw submissions:                   738
-virtio-net frames consumed:        29,234
-maximum frames/pass:                   16
-network cap exhaustions:             1,827
-runtime requeues:                    1,827
-natural deadline overruns:               0
-maximum duration:                  385,763 / 625,000 ticks (61.7%)
-observable input overflow:               0
-panic markers:                           0
-```
-
-Evidence provenance:
-
-- original GitHub PR #62 merge metadata:
-  `7ea3d309047659c8bbe9c601c3d98217bcaafb02`;
-- current-main runtime replay commit:
-  `d5c104a0badc3a2d553516159b2b745737dd252f`;
-- final PR #62 head:
-  `04f65776d1bbe07545113652342c32f2448bfc7b`;
-- original final PR validation:
-  - `Verify ArmoniOS` `29896952424` (#295): success;
-  - `CI - Tests` `29896952435` (#435): success;
-- production kernel 107918 / 108000 bytes;
-- existing host, QEMU, RPi4, ABI, stack, `.data`, and size gates retained.
-
-The current audited main tree and current-tree workflows are recorded in
-`CURRENT_STATE.md`.
-
-### Promotion checklist
-
-1. Complete issue #76 on the exact validated `main` tree.
-2. Run the dated visible QEMU workflow recorded by that issue.
-3. Record the exact automated runs, tester, setup, steps, result, and limitations.
-4. Create the v0.2 tag and release record with exact artifact identities.
-
-A later scheduler may move the bounded bottom half into a wakeable EL1 service.
-That redesign is not required for the current cooperative v0.2 contract.
+No additional kernel feature is required to perform this release record.
 
 ## v0.3 — storage and VFS platform
 
 **State: IN PROGRESS**
 
-Goal: replace fixed demo plumbing with coherent generic storage, path, mount, and
-metadata foundations before adding general FAT or rewriting applications.
+Goal: provide coherent generic storage, paths, mounts, metadata, mutation, and
+durability contracts before general FAT and application expansion.
 
-### Cut 1 — block-device descriptor — LANDED
+### Landed foundations
 
-Define a generic descriptor containing:
+- generic block-device capacity, block-size, read-only, read/write, flush, and
+  bounded-view contract;
+- QEMU virtio-blk and Raspberry Pi diagnostic adapters;
+- whole-device and primary-MBR FAT32 discovery;
+- canonical absolute paths;
+- longest-prefix mount resolution;
+- nested read traversal of existing FAT32 8.3 directory trees;
+- filesystem-neutral native metadata and directory entries;
+- public `STAT_V2`, `READDIR_V2`, and `FSINFO` contracts;
+- native filesystem-specific error values;
+- Files as a real structured-metadata and filesystem-information consumer.
 
-- logical sector size;
-- total sector/byte capacity with overflow-safe conversion;
-- stable device identity/type;
-- read-only state;
-- bounded read operation;
-- bounded write operation;
-- flush operation and explicit unsupported behavior.
+### Cut 1 — complete seek semantics
 
-Required evidence:
+Required:
 
-- invalid sector sizes and capacities rejected;
-- range arithmetic and end-of-device access tested;
-- read-only writes fail predictably;
-- absent flush support is explicit rather than silently successful;
-- virtio block, bounded block views, and RPi4 diagnostic adapters preserve current
-  behavior.
+- consistent `SEEK_SET`, `SEEK_CUR`, and `SEEK_END` behavior;
+- overflow-safe signed offset arithmetic;
+- explicit directory and unsupported-backend behavior;
+- unchanged descriptor offset after failure;
+- host tests plus a real userland consumer.
 
-### Cut 2 — path normalizer — LANDED
+### Cut 2 — truncate
 
-Implement one pure, host-testable absolute-path normalizer with explicit policy
-for:
+Required:
 
-- required leading slash;
-- repeated slashes;
-- empty components;
-- `.`;
-- `..` and root escape;
-- component and complete-path limits;
-- trailing slash behavior;
-- overflow-safe output sizing.
+- descriptor and/or path contract chosen explicitly;
+- regular-file-only enforcement;
+- safe grow and shrink behavior;
+- FAT cluster-chain release and allocation rollback;
+- zero-fill policy for growth;
+- unchanged file and descriptor state on failure;
+- exact error propagation;
+- public ABI, wrapper, tests, and consumer in the same cut.
 
-Do not tie this helper to FAT semantics.
+### Cut 3 — mkdir and rmdir
 
-### Cut 3 — mount resolver — LANDED
+Required:
 
-Implement deterministic mount selection with:
+- explicit parent-directory validation;
+- `EXIST`, `NOTDIR`, `NOTEMPTY`, `ROFS`, `NOSPC`, and `NOTSUP` semantics;
+- `.` and `..` handling;
+- rollback for partially updated directory/FAT state;
+- root and nested tests;
+- malformed and full-directory fixtures.
 
-- exact component-boundary matching;
-- longest valid mount-prefix resolution;
-- root mount behavior;
-- relative path passed to the selected filesystem;
-- read-only mount enforcement;
-- tests for `/`, `/fat`, `/tmp`, `/armonios`, and future `/ext`;
-- no accidental `/fatx` match for `/fat`.
+### Cut 4 — nested mutation
 
-### Cut 4 — structured kernel filesystem types — LANDED
+Extend create, unlink, rename, and move below the FAT root only after directory
+mutation and rollback rules are stable.
 
-Add kernel-internal structures for:
+Required:
 
-- directory entries;
-- file type;
-- size and basic attributes;
-- filesystem/device information;
-- iterator or bounded readdir state;
-- explicit ownership and lifetime rules.
+- canonical source and destination resolution;
+- cross-mount rejection;
+- directory-cycle prevention;
+- source/destination rollback;
+- dynamic-node invalidation;
+- open-descriptor behavior documented and tested.
 
-PR #95 landed filesystem-neutral internal metadata/dirent records, native FAT32
-callbacks, compatibility fallback for older mounts, and the public 49/50 adapters.
+### Cut 5 — durability
 
-### Cut 5 — filesystem operations
+Required:
 
-Extend the generic filesystem interface deliberately:
+- explicit flush/fsync contract;
+- truthful capability reporting;
+- transport flush propagation;
+- defined ordering for FAT and directory updates;
+- reboot-persistence QEMU fixture;
+- documented behavior when the transport cannot flush.
 
-- probe and mount;
-- open and close;
-- read and write;
-- create and unlink;
-- rename;
-- mkdir;
-- truncate;
-- stat;
-- readdir;
-- filesystem information;
-- flush where applicable.
+### v0.3 exit criteria
 
-Each operation must specify read-only behavior, partial progress, rollback,
-capacity limits, and errors.
-
-### Cut 6 — append-only public ABI — PARTLY LANDED
-
-Only after kernel implementation and tests exist, add the required user ABI in
-small cuts. Candidate calls include:
-
-Landed in PR #95 while the global ABI remains 1.0:
-
-- `SYS_STAT_V2 = 49`;
-- `SYS_READDIR_V2 = 50`.
-
-Remaining candidates include:
-
-- `SYS_MKDIR`;
-- `SYS_RMDIR`;
-- `SYS_TRUNCATE`;
-- `SYS_FSINFO`;
-- an explicit flush/fsync call when durable behavior exists.
-
-Every call must land with:
-
-- append-only number;
-- kernel dispatcher and implementation;
-- kernel-owned input/output handling;
-- `libkarm` wrapper;
-- public structure layout assertions;
-- host ABI tests;
-- at least one real userland consumer;
-- `SYSCALLS.md` update.
-
-### Cut 7 — compatibility migration — PARTLY LANDED
-
-Route the existing bootfs, tmpfs, and root-only FAT32 workflow through the new
-path and mount contracts without changing the v0.1 user workflow.
-
-Exit criteria for v0.3:
-
-- Shell lists `/`, `/fat`, `/tmp`, and `/armonios` through the common resolver;
-- normalization, traversal, mount-boundary, multiple-mount, and read-only tests
-  pass;
-- existing v0.1 applications and FAT workflow remain functional;
 - generic VFS contains no FAT-specific path policy;
-- new ABI is fully documented and tested;
-- full automated gate and a dated visible filesystem-navigation workflow pass.
+- seek, truncate, mkdir/rmdir, and nested mutation contracts pass host and QEMU
+  coverage;
+- the root-level v0.1 workflow remains compatible;
+- durability capability is explicit rather than assumed;
+- a dated visible nested-directory workflow passes on the exact promotion tree;
+- `SYSCALLS.md`, architecture, current state, and public headers agree.
 
 ## v0.4 — real FAT
 
-**State: PLANNED**
+**State: EARLY PARTIAL**
 
-Build on v0.3 rather than expanding the compatibility bridge in place.
+Build on v0.3 rather than expanding the compatibility policy in place.
 
 Required scope:
 
-- FAT12/16/32 probe and mount where practical;
 - VFAT long file names;
-- subdirectories;
-- create, read, write, list, stat, truncate, mkdir, rename, move, and delete;
-- file growth and shrink;
-- MBR-backed QEMU images;
-- safe rejection of unsupported/corrupt geometry;
-- malformed-image and interoperability fixtures;
+- interoperable directory creation and removal;
+- complete create/read/write/list/stat/truncate/rename/move/delete workflows;
+- safe file growth and shrink;
+- malformed-image rejection;
+- external FAT interoperability fixtures;
 - reboot-persistence gates;
-- removal or isolation of root-only compatibility policy.
+- removal or isolation of root-only compatibility behavior.
+
+Optional only after FAT32 is stable:
+
+- FAT12/FAT16 support where practical;
+- broader partition-table support.
 
 Exit workflow:
 
 1. create nested directories;
 2. create and edit a long-name file;
 3. close and reopen it;
-4. rename and move it;
-5. reboot;
-6. verify content and hierarchy;
-7. remove the file and directories safely.
+4. truncate it shorter and grow it again;
+5. rename and move it;
+6. reboot;
+7. verify content and hierarchy;
+8. delete the file and directories safely.
 
 ## v0.5 — userland runtime and widgets
 
-**State: PLANNED**
+**State: EARLY PARTIAL**
 
-- small heap backed by `SYS_MMAP`;
-- dynamic byte/string buffers;
-- bounded vectors and ownership helpers;
-- path, argv, formatting, and error helpers;
-- reusable labels, buttons, text fields, list views, scrolling, and dialogs;
-- no mutable static `.data` or `.bss` in shipping images;
-- unchanged KLI1 and stack gates;
-- versioned diagnostic interfaces before Monitor consumes kernel internals.
+### Runtime foundation already landed
 
-Exit criteria:
+- public ABI headers independent from kernel-private implementation;
+- typed syscall wrappers;
+- `crt0.o` plus `libkarm.a` static-library build shape;
+- monotonic caller-owned arenas;
+- growable binary buffers;
+- dynamic null-terminated strings;
+- complete descriptor writes;
+- rollback-safe complete binary/text file reads.
 
-- at least two applications use each promoted shared component;
-- ownership and failure behavior are tested;
-- total embedded application size remains controlled;
-- no hidden libc/POSIX assumption enters userland.
+### Remaining runtime work
+
+Promote only as required by real consumers:
+
+- safe formatted output;
+- line-oriented input and parsing helpers;
+- bounded vectors or other ownership helpers;
+- path and argv utilities not already covered by the VFS/public ABI;
+- safe path-level replace/write after truncate or atomic replacement exists;
+- optional reusable heap only if arena lifetimes cannot express the consumer.
+
+A global hidden allocator is not the default design. Caller-owned lifetime and
+explicit failure behavior remain preferred.
+
+### Desktop toolkit work
+
+The canonical layer is `programs/libarmdesk/`. The current foundation contains
+GUI wrappers, rectangle/clipping helpers, and semantic theme tokens.
+
+Remaining promoted components may include:
+
+- labels and buttons;
+- bounded row/column layouts;
+- text fields and editing models;
+- list views and scrolling;
+- dialogs and notifications;
+- icon masks and bitmap drawing;
+- logical event adapters and replay fixtures.
+
+The closed Control-widget draft is not part of `main`; any new widget cut must be
+rebuilt from current main and justified by at least one real consumer.
+
+### v0.5 exit criteria
+
+- every shared component has explicit ownership and failure semantics;
+- pure models are host-testable without syscalls;
+- platform drawing/adapters are separate from neutral state;
+- at least two applications use each broadly promoted component, unless a narrow
+  one-consumer abstraction has a documented reason;
+- per-application binary and stack deltas remain measured;
+- no hidden libc/POSIX or mutable-global dependency enters userland;
+- compatibility `programs/libkarmdesk/` is removed only after all consumers move.
 
 ## v0.6 — useful applications
 
-**State: PARTIAL DEMOS ONLY**  
-**Tracking:** issue #2
+**State: PARTIAL DEMOS**
 
-Depends on v0.3-v0.5.
+Target applications:
 
-Required integrated workflow:
+- **Files:** multiple mounts, nested navigation, long names, copy/move, details,
+  confirmations, and useful errors;
+- **Editor:** dynamic multi-line text, scrolling, selection, safe save/replace,
+  and dirty-state prompts;
+- **Shell:** canonical paths, useful pipelines of built-in operations, complete
+  filesystem workflow, and clear status output;
+- **Panel:** scalable launcher/task model and coherent window state;
+- **Monitor:** versioned process/memory/storage diagnostics and process control;
+- **Control:** persistent settings with validation and rollback;
+- **Clock:** stable time/date presentation through public system information.
 
-- navigate directories and mount roots in Files;
-- create folders and long-name files;
-- edit multi-line text with scrolling and safe truncate/save;
-- copy, move, rename, and delete;
-- use path-aware shell commands;
-- inspect and terminate a process;
-- inspect memory and storage;
-- persist at least three observable settings;
-- reboot and confirm files and settings survived.
+Exit criteria:
 
-Applications should share runtime and widget foundations rather than duplicating
-new fixed-size local solutions.
+- the v1 product workflow can be completed without test-only tools;
+- all application persistence survives reboot where promised;
+- failures are visible and recoverable;
+- applications use shared runtime/toolkit components instead of duplicating
+  unsafe local logic;
+- a dated visible multi-application workflow is recorded.
 
 ## v0.7 — ext2 read-only
 
 **State: PLANNED**
 
-- validate superblock and feature bits;
-- read block groups, inodes, directories, regular files, and supported indirect
-  blocks;
-- define symlink policy;
-- reject unsupported incompat features;
-- mount `/ext` read-only through the v0.3 interface;
-- test valid fixtures, malformed/corrupt images, mount boundaries, and QEMU access.
+Required:
 
-Ext2 writes are outside v1 unless read-only support is already stable and a
-separate write-safety plan is approved.
+- mount through the generic block/mount interface;
+- superblock and feature validation;
+- inode, direct/indirect block, directory, stat, and file-read support;
+- explicit rejection of unsupported features and all mutation;
+- malformed-image and interoperability fixtures;
+- one real userland navigation/read workflow.
 
 ## v0.8 — desktop polish
 
 **State: EARLY PARTIAL**
 
-- reliable launcher/taskbar/focus/minimize/restore behavior;
-- duplicate-launch policy;
-- consistent titles, status, errors, and confirmations;
-- keyboard navigation and visible focus;
-- scrolling and cursor regions;
-- resizing and damage repaint evidence;
-- reduced hardcoded geometry where it blocks use;
-- deliberate storage/runtime diagnostics;
-- stable settings and recovery UX.
+Required:
 
-Exit criteria include a documented 30-minute visible QEMU session without panic,
-scheduler stall, blank compositor, stuck input, or data loss.
+- consistent semantic theme use;
+- coherent controls, focus, keyboard navigation, and pointer behavior;
+- improved panel and window interactions;
+- useful icons/bitmap path without kernel policy leakage;
+- diagnostic surfaces based on versioned public interfaces;
+- long visible-session evidence without freeze, corruption, or unbounded growth.
 
 ## v0.9 — beta stabilization
 
 **State: NOT STARTED**
 
-- freeze syscall and KLI1 ABI for v1;
-- fuzz path, filesystem, image, and syscall inputs;
-- run sustained process, mapping, window, storage, input, and network stress;
-- automate reboot persistence;
-- investigate every fatal EL1 observation;
-- complete install/run/recovery documentation;
-- close all QEMU P0 risks;
-- close or explicitly accept every QEMU P1 risk with rationale;
-- record a beta image hash and complete evidence matrix.
+Required:
 
-## v1.0 — usable QEMU mini desktop
+- freeze the intended v1 public ABI surface;
+- preserve old-SDK/binary fixtures;
+- fuzz parsers, paths, metadata, and filesystem images;
+- stress process, GUI, input, storage, and persistence lifecycles;
+- close every QEMU P0 and close or explicitly accept each relevant P1;
+- record a release-quality verification matrix and known-limit list;
+- remove stale compatibility and diagnostic-only code.
+
+## v1.0 — compact QEMU desktop
 
 **State: NOT READY**
 
-Final acceptance requires:
+Release only when:
 
-- reliable graphical boot and daily desktop workflow;
-- writable FAT with directories and long names;
-- read-only ext2;
-- useful Files, Editor, Shell, Control/Settings, Monitor, Panel, and Clock;
-- reboot persistence for files and settings;
-- bounded runtime execution with sustained-load evidence;
-- fault behavior and recovery documented;
-- zero open QEMU P0 risks;
-- every P1 closed or explicitly accepted;
-- full automated gate on the release tree;
-- dated visible acceptance workflow;
-- tagged release with exact artifact hashes and evidence.
+- the complete product workflow passes automated and visible verification;
+- storage survives the promised reboot workflow;
+- applications are practical within their documented scope;
+- the public ABI and SDK boundary are documented and tested;
+- ext2 read-only is available or explicitly removed from v1 scope by a recorded
+  project decision;
+- QEMU risks are closed or accepted with rationale;
+- exact source, artifacts, runs, tester, date, limitations, tag, and release notes
+  are published.
+
+Physical Raspberry Pi support remains a separate release line until it has its
+own controlled hardware evidence.
