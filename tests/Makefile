@@ -75,8 +75,14 @@ LIBKARM_BUFFER_SRCS=unity/unity.c test_libkarm_buffer.c \
                     ../programs/libkarm/arena.c \
                     ../programs/libkarm/buffer.c \
                     ../programs/libkarm/string.c
+LIBKARM_STRING_TARGET=run_libkarm_dynamic_string_tests
+LIBKARM_STRING_SRCS=unity/unity.c test_libkarm_dynamic_string.c \
+                    ../programs/libkarm/arena.c \
+                    ../programs/libkarm/buffer.c \
+                    ../programs/libkarm/string.c
 
-all: $(TARGET) $(LIBKARM_ARENA_TARGET) $(LIBKARM_BUFFER_TARGET)
+all: $(TARGET) $(LIBKARM_ARENA_TARGET) $(LIBKARM_BUFFER_TARGET) \
+     $(LIBKARM_STRING_TARGET)
 
 $(TARGET): $(SRCS) $(APP_BLOB_OBJS)
 	$(CC) $(CFLAGS) $(SRCS) -o $@
@@ -86,6 +92,9 @@ $(LIBKARM_ARENA_TARGET): $(LIBKARM_ARENA_SRCS)
 
 $(LIBKARM_BUFFER_TARGET): $(LIBKARM_BUFFER_SRCS)
 	$(CC) $(CFLAGS) $(LIBKARM_BUFFER_SRCS) -o $@
+
+$(LIBKARM_STRING_TARGET): $(LIBKARM_STRING_SRCS)
+	$(CC) $(CFLAGS) $(LIBKARM_STRING_SRCS) -o $@
 
 %.host_blob.o: %.bin
 	$(OBJCOPY) -I binary -O elf64-x86-64 -B i386:x86-64 \
@@ -100,8 +109,10 @@ test: all
 	./$(TARGET)
 	./$(LIBKARM_ARENA_TARGET)
 	./$(LIBKARM_BUFFER_TARGET)
+	./$(LIBKARM_STRING_TARGET)
 
 .PHONY: clean
 
 clean:
-	rm -f $(TARGET) $(LIBKARM_ARENA_TARGET) $(LIBKARM_BUFFER_TARGET) *.o
+	rm -f $(TARGET) $(LIBKARM_ARENA_TARGET) $(LIBKARM_BUFFER_TARGET) \
+	      $(LIBKARM_STRING_TARGET) *.o
