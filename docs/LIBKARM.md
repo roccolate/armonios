@@ -44,6 +44,7 @@ string.o
 arena.o
 arena_map.o
 buffer.o
+file.o
 ```
 
 Applications link against the archive instead of selecting those objects by
@@ -173,6 +174,54 @@ The dynamic string implementation shares `buffer.o` with the binary-buffer
 layer. Function sections and `--gc-sections` keep unused string operations out
 of applications that only need raw buffers.
 
+## Complete file transfers
+
+`file.o` adds higher-level transfer helpers over the existing VFS syscalls:
+
+```c
+kli_buffer_t bytes;
+kli_string_t text;
+
+if (kli_file_read_all("/fat/data.bin", &arena, &bytes) < 0) {
+    return 1;
+}
+
+if (kli_file_read_text("/fat/config.ini", &arena, &text) < 0) {
+    return 1;
+}
+
+(void)kli_fd_write_all(ARM_FD_STDOUT, bytes.data, bytes.length);
+```
+
+`kli_fd_write_all` loops until every requested byte is written. Partial writes
+are normal. A negative syscall status is propagated, zero progress returns
+`KLI_AGAIN`, and a kernel result larger than the remaining request is rejected
+as `KLI_INVAL`.
+
+The path helpers first query `SYS_STAT_V2`, require a regular file, and reserve
+from the reported size. They still read until EOF, so a file that grows after
+`stat` is handled through normal buffer/string growth.
+
+Read ownership and failure rules:
+
+- the caller supplies the arena and destination object;
+- the destination is replaced and valid only when the helper returns success;
+- on any stat, allocation, open, read, append, close, or protocol error, the
+  destination is cleared and the arena offset is restored exactly;
+- descriptors are closed after both successful and failed reads;
+- binary reads preserve arbitrary bytes;
+- text reads reject embedded NUL through `kli_string_append_n` and always return
+  a terminated string;
+- the helpers use a fixed 256-byte stack transfer block;
+- no hidden heap or mutable global state is introduced.
+
+There is deliberately no `kli_file_write(path, ...)` or replace-file helper yet.
+The current open flags do not provide truncate semantics, so overwriting a
+shorter payload could leave an old tail on disk. Callers may use
+`kli_fd_write_all` with a descriptor whose lifecycle and file-size semantics are
+already known; a safe path-level replace API waits for explicit truncate or an
+atomic replacement workflow.
+
 ## In-tree application link
 
 The effective link order is:
@@ -225,6 +274,7 @@ the supported application linker script.
 
 `libkarm` is not yet a complete libc. It currently provides syscall wrappers,
 minimal output, memory/string helpers, integer conversion, monotonic arenas,
-growable binary buffers, and arena-backed dynamic strings. A reusable free-list
-heap, formatted output, and higher-level file helpers are future runtime cuts
-built on this foundation.
+growable binary buffers, arena-backed dynamic strings, complete descriptor
+writes, and rollback-safe file reads. A reusable free-list heap, formatted
+output, line-oriented input, and safe truncate/replace helpers are future
+runtime cuts built on this foundation.
