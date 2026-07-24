@@ -436,6 +436,7 @@ int fat32_mount(fat32_fs_t *fs, fat32_read_sector_fn_t read_sector_cb,
     fs->write_sector = 0;
     fs->context = context;
     fs->mounted = 0;
+    fs->flush_supported = 0;
 
     if (read_sector(fs, 0) != 0) {
         return -1;

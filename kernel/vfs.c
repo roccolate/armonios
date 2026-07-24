@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "include/armonios/abi/errors.h"
 #include "kernel/kstring.h"
 #include "kernel/process.h"
 
@@ -115,6 +116,7 @@ static void vfs_clear_mount(vfs_mount_t *mount) {
     mount->ops.list_path = 0;
     mount->ops.metadata_path = 0;
     mount->ops.readdir_path = 0;
+    mount->ops.fsinfo = 0;
     mount->ops.unlink = 0;
     mount->ops.rename = 0;
     mount->context = 0;
@@ -511,7 +513,8 @@ int vfs_mount(const char *path, const vfs_mount_ops_t *ops, void *context) {
     if (vfs_normalize_path(path, canonical) != 0 || ops == 0 ||
         (ops->open == 0 && ops->list == 0 && ops->stat_path == 0 &&
          ops->list_path == 0 && ops->metadata_path == 0 &&
-         ops->readdir_path == 0 && ops->unlink == 0 && ops->rename == 0) ||
+         ops->readdir_path == 0 && ops->fsinfo == 0 &&
+         ops->unlink == 0 && ops->rename == 0) ||
         vfs_find_mount_exact(canonical) != 0) {
         return -1;
     }
@@ -978,6 +981,82 @@ int vfs_readdir(const char *path, uint64_t start_index,
     }
 
     return -1;
+}
+
+
+static void vfs_fsinfo_clear(vfs_fsinfo_t *info) {
+    info->total_bytes = 0;
+    info->free_bytes = 0;
+    info->block_size = 0;
+    info->max_name_length = 0;
+    info->max_path_length = 0;
+    info->flags = 0;
+    for (uint32_t i = 0; i < VFS_FILESYSTEM_NAME_MAX; i++) {
+        info->filesystem[i] = '\0';
+    }
+}
+
+static int vfs_fsinfo_name_valid(
+    const char filesystem[VFS_FILESYSTEM_NAME_MAX]) {
+    if (filesystem == 0 || filesystem[0] == '\0') {
+        return 0;
+    }
+    for (uint32_t i = 0; i < VFS_FILESYSTEM_NAME_MAX; i++) {
+        if (filesystem[i] == '\0') {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int vfs_fsinfo(const char *path, vfs_fsinfo_t *info) {
+    static const uint32_t allowed_flags =
+        VFS_FS_FLAG_READ_ONLY |
+        VFS_FS_FLAG_DIRECTORIES |
+        VFS_FS_FLAG_LONG_NAMES |
+        VFS_FS_FLAG_FLUSH |
+        VFS_FS_FLAG_TRUNCATE |
+        VFS_FS_FLAG_FREE_BYTES_VALID;
+    char canonical[VFS_MAX_PATH];
+    vfs_mount_t *mount;
+    int status;
+
+    if (info == 0 || vfs_normalize_path(path, canonical) != 0) {
+        return ARMONIOS_ERR_INVAL;
+    }
+    vfs_fsinfo_clear(info);
+
+    mount = vfs_find_mount_exact(canonical);
+    if (mount == 0) {
+        mount = vfs_find_mount_for_path(canonical);
+    }
+    if (mount == 0) {
+        return ARMONIOS_ERR_NOENT;
+    }
+    if (mount->ops.fsinfo == 0) {
+        return ARMONIOS_ERR_NOTSUP;
+    }
+
+    status = mount->ops.fsinfo(mount->context, canonical, info);
+    if (status != 0) {
+        vfs_fsinfo_clear(info);
+        return status;
+    }
+
+    if (!vfs_fsinfo_name_valid(info->filesystem) ||
+        info->total_bytes == 0 || info->block_size == 0 ||
+        info->max_name_length == 0 ||
+        info->max_name_length >= VFS_NAME_MAX ||
+        info->max_path_length == 0 ||
+        info->max_path_length >= VFS_MAX_PATH ||
+        (info->flags & ~allowed_flags) != 0U ||
+        ((info->flags & VFS_FS_FLAG_FREE_BYTES_VALID) != 0U &&
+         info->free_bytes > info->total_bytes)) {
+        vfs_fsinfo_clear(info);
+        return ARMONIOS_ERR_RANGE;
+    }
+
+    return 0;
 }
 
 int vfs_open_flags(const char *path, uint32_t flags) {

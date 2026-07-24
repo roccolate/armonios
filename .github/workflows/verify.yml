@@ -66,6 +66,9 @@ jobs:
       - name: Test structured VFS metadata ABI
         run: bash tests/run_vfs_metadata_abi_test.sh
 
+      - name: Test filesystem information ABI
+        run: bash tests/run_vfs_fsinfo_test.sh
+
       - name: Upload RPi4 EMMC2 probe package
         uses: actions/upload-artifact@v4
         with:

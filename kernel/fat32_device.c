@@ -34,6 +34,7 @@ int fat32_mount_device(fat32_fs_t *fs, const block_device_t *device) {
         return -1;
     }
 
+    fs->flush_supported = device->flush != 0 ? 1U : 0U;
     if (!block_device_is_read_only(device)) {
         fat32_set_write_sector(fs, fat32_device_write_sector);
     }

@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "include/armonios/abi/errors.h"
 #include "kernel/vfs.h"
 
 #define FAT32_MAX_VFS_FILES 8U
@@ -249,6 +250,40 @@ static int fat32_vfs_list_path(void *context, const char *path,
                               bytes_written);
 }
 
+
+static int fat32_vfs_fsinfo(void *context, const char *path,
+                             vfs_fsinfo_t *info) {
+    char relative[VFS_MAX_PATH];
+    fat32_fs_t *fs = fat32_vfs_fs(context);
+    static const char name[] = "fat32";
+
+    if (fs == 0 || info == 0 ||
+        fat32_vfs_relative_path(path, relative) != 0 ||
+        fs->total_sectors == 0) {
+        return ARMONIOS_ERR_INVAL;
+    }
+
+    info->total_bytes = (uint64_t)fs->total_sectors * FAT32_SECTOR_SIZE;
+    info->free_bytes = 0;
+    info->block_size = FAT32_SECTOR_SIZE;
+    info->max_name_length = FAT32_SHORT_NAME_MAX - 1U;
+    info->max_path_length = VFS_MAX_PATH - 1U;
+    info->flags = VFS_FS_FLAG_DIRECTORIES;
+    if (fs->write_sector == 0) {
+        info->flags |= VFS_FS_FLAG_READ_ONLY;
+    }
+    if (fs->flush_supported != 0U) {
+        info->flags |= VFS_FS_FLAG_FLUSH;
+    }
+    for (uint32_t i = 0; i < VFS_FILESYSTEM_NAME_MAX; i++) {
+        info->filesystem[i] = '\0';
+    }
+    for (uint32_t i = 0; name[i] != '\0'; i++) {
+        info->filesystem[i] = name[i];
+    }
+    return 0;
+}
+
 static int fat32_vfs_list_root(void *context, uint64_t offset,
                                uint8_t *buffer, uint64_t capacity,
                                uint64_t *bytes_written) {
@@ -315,6 +350,7 @@ static const vfs_mount_ops_t g_fat32_vfs_ops = {
     .list_path = fat32_vfs_list_path,
     .metadata_path = fat32_vfs_metadata_path,
     .readdir_path = fat32_vfs_readdir_path,
+    .fsinfo = fat32_vfs_fsinfo,
     .unlink = fat32_vfs_unlink_path,
     .rename = fat32_vfs_rename_path,
 };
