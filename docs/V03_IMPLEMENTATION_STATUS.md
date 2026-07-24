@@ -2,21 +2,22 @@
 
 > Live implementation checkpoint for the v0.3 storage/VFS work.
 >
-> This document records code already merged after the older documentation audit.
-> Release evidence and manual promotion status remain governed by
-> `CURRENT_STATE.md`, `TECHNICAL_RISKS.md`, and issue #76.
+> This document records code already merged into `main`. Release evidence and
+> manual promotion status remain governed by `CURRENT_STATE.md`,
+> `TECHNICAL_RISKS.md`, and issue #76.
 
 ## Identity
 
-- checkpoint date: 2026-07-23;
-- audited `main`: `a078c995f485bab84135233c149e28ba081b11b0`;
+- checkpoint date: 2026-07-24;
+- audited `main`: `9a697eb1bae909eed3f17a3da6928bc66192dac3`;
+- latest storage/VFS cut: PR #97, filesystem errors and information ABI;
 - v0.2 kernel/runtime defect issue #63: closed after the EL1/EL0 IRQ-origin fix;
 - remaining v0.2 task: issue #76, the dated visible QEMU validation and release record;
 - global public ABI remains `1.0` until the first official ArmoniOS release.
 
 ## Landed foundations
 
-The following v0.3 foundations are already merged:
+The following v0.3 foundations are merged:
 
 1. **Generic block-device contract** — PR #80
    - bounded read/write ranges;
@@ -56,22 +57,30 @@ The following v0.3 foundations are already merged:
    - native FAT32 type, size, and attribute mapping;
    - `SYS_STAT_V2 = 49` and `SYS_READDIR_V2 = 50`;
    - fixed versioned public records with the global ABI still at 1.0;
-   - typed `libkarm` wrappers;
+   - typed libkarm wrappers;
    - Files as the first EL0 consumer with a legacy fallback;
-   - legacy calls 45 and 46 remain unchanged;
-   - final validation: Export FAT32 #157, Verify ArmoniOS #496, and CI - Tests #630 succeeded.
+   - legacy calls 45 and 46 remain unchanged.
+
+7. **Filesystem errors and information ABI** — PR #97
+   - squash merge `9a697eb1bae909eed3f17a3da6928bc66192dac3`;
+   - public `EXIST`, `NOTDIR`, `ISDIR`, `NOTEMPTY`, `NOSPC`, `ROFS`, `NOTSUP`, and `RANGE` status values;
+   - kernel and libkarm compatibility aliases from one public source of truth;
+   - `SYS_FSINFO = 51` and fixed 64-byte versioned `arm_fsinfo_t`;
+   - canonical owning-mount resolution with distinct `NOENT`, `NOTSUP`, and `RANGE` results;
+   - FAT32 provider for identity, capacity, block size, name/path limits, directory support, read-only state, and real flush capability;
+   - Files as the first EL0 consumer;
+   - exact free-byte accounting, long names, and truncate remain explicitly unadvertised;
+   - final validation: Export FAT32 #188, Verify ArmoniOS #530, and CI - Tests #664 succeeded.
 
 ## Remaining v0.3 work
 
-After structured metadata, the correct order is:
+After filesystem information, the correct order is:
 
-1. filesystem-specific error codes;
-2. filesystem information/capability reporting;
-3. complete seek semantics;
-4. truncate and safe cluster shrink/grow;
-5. mkdir and rmdir with explicit rollback rules;
-6. nested create/unlink/rename/move;
-7. explicit flush/fsync and reboot-persistence evidence.
+1. complete seek semantics;
+2. truncate and safe cluster shrink/grow;
+3. mkdir and rmdir with explicit rollback rules;
+4. nested create/unlink/rename/move;
+5. explicit flush/fsync and reboot-persistence evidence.
 
 Long file names belong to the following real-FAT phase, after the generic mutation
 and durability contracts are established.
@@ -81,6 +90,7 @@ and durability contracts are established.
 ArmoniOS still does **not** claim:
 
 - a completed or tagged v0.2 release until issue #76 is completed;
+- exact FAT32 free-space accounting;
 - long FAT names;
 - directory creation or removal;
 - nested mutation transactions;

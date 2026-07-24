@@ -1,6 +1,6 @@
 # Syscall Reference
 
-> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, #93, and #95. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
+> **Implementation update — 2026-07-24:** This document reflects merged v0.3 foundations through structured metadata plus the filesystem-error and `SYS_FSINFO` cut. Use `V03_IMPLEMENTATION_STATUS.md` for the broader storage/VFS checkpoint. Issue #76 remains the manual v0.2 validation and release-record task.
 
 ArmoniOS defines a small non-POSIX syscall ABI for freestanding AArch64 applications.
 
@@ -106,6 +106,7 @@ Current limitations:
 | 48 | `sys_rename` | `x0=old_path, x1=new_path` | 0/error | Rename a FAT32 root file when the destination does not exist. |
 | 49 | `sys_stat_v2` | `x0=path, x1=stat_ptr` | 0/error | Validate a versioned 32-byte output record and return type, size, and generic attributes. |
 | 50 | `sys_readdir_v2` | `x0=path, x1=start_index, x2=entries, x3=max_entries` | entry count/error | Return up to eight complete 96-byte versioned directory records, paged by logical index. |
+| 51 | `sys_fsinfo` | `x0=path, x1=info_ptr` | 0/error | Return a versioned 64-byte filesystem report for the mount owning the canonical path. |
 
 Descriptor numbers:
 
@@ -132,20 +133,19 @@ FAT32 syscall scope on current `main`:
 - existing nested short-8.3 directory trees can be normalized, traversed, listed, statted, opened, and read;
 - create, write, unlink, and rename remain limited to root entries;
 - long names, mkdir/rmdir, truncate, nested mutation, ext2, and durable reboot semantics remain absent;
-- structured stat and readdir calls 49/50 are implemented while the global ABI identifier remains 1.0; see `VFS_METADATA_ABI.md`.
+- calls 49/50 expose structured metadata and directory entries;
+- call 51 reports FAT32 identity, capacity, 512-byte blocks, current name/path limits, directory support, read-only state, and real flush capability; exact free bytes remain unavailable;
+- the global ABI identifier remains 1.0; see `VFS_METADATA_ABI.md` and `VFS_FSINFO_ABI.md`.
 
 ## Planned filesystem ABI extensions
 
-Structured metadata calls 49/50 are implemented. Assign every remaining number
-only when kernel code, wrappers, tests, a real userland consumer, and documentation
-land together. Append numbers; never reuse an existing slot.
+Structured metadata calls 49/50 and filesystem information call 51 are implemented. Assign every remaining number only when kernel code, wrappers, tests, a real userland consumer, and documentation land together. Append numbers; never reuse an existing slot.
 
 | Planned name | Intended purpose |
 |---|---|
 | `SYS_MKDIR` | Create a directory on filesystems that support directories. |
 | `SYS_RMDIR` | Remove an empty directory with filesystem-specific safety checks. |
 | `SYS_TRUNCATE` | Resize a file without rewriting it through root-only FAT behavior. |
-| `SYS_FSINFO` | Report filesystem type, read-only state, limits, and capacity when available. |
 | `SYS_FSYNC` | Request durable flush only after transport/filesystem semantics are defined. |
 
 ## IPC syscalls
@@ -237,16 +237,26 @@ These calls assemble results in kernel temporaries. `sys_proclist` validates the
 
 ## Error codes
 
-| Value | Name | Meaning |
-|---:|---|---|
-| -2 | `USER_VM_ERR_NOMEM` | Out of memory |
-| -3 | `ERR_NOENT` | File or resource not found |
-| -5 | `ERR_BADF` | Bad descriptor or disallowed descriptor operation |
-| -7 | `ERR_INVAL` | Invalid argument or invalid user range |
-| -11 | `ERR_AGAIN` | Non-blocking operation cannot complete yet |
-| -13 | `ERR_PERM` | Ownership or permission denied |
+The public names below are ArmoniOS-native status values. Kernel-private `ERR_*` aliases and libkarm `KLI_*` aliases resolve to the same numbers.
 
-Error meanings are still coarse. Several filesystem failures collapse to `ERR_NOENT` or `ERR_BADF`.
+| Value | Public name | Meaning |
+|---:|---|---|
+| -2 | `ARMONIOS_ERR_NOMEM` | Out of memory |
+| -3 | `ARMONIOS_ERR_NOENT` | File, mount, or resource not found |
+| -5 | `ARMONIOS_ERR_BADF` | Bad descriptor or disallowed descriptor operation |
+| -7 | `ARMONIOS_ERR_INVAL` | Invalid argument, layout, path, or user range |
+| -11 | `ARMONIOS_ERR_AGAIN` | Non-blocking operation cannot complete yet |
+| -13 | `ARMONIOS_ERR_PERM` | Ownership or permission denied |
+| -14 | `ARMONIOS_ERR_EXIST` | Destination or resource already exists |
+| -15 | `ARMONIOS_ERR_NOTDIR` | A required path component is not a directory |
+| -16 | `ARMONIOS_ERR_ISDIR` | A regular-file operation received a directory |
+| -17 | `ARMONIOS_ERR_NOTEMPTY` | A directory cannot be removed because it contains entries |
+| -18 | `ARMONIOS_ERR_NOSPC` | The filesystem or fixed-capacity object has no remaining space |
+| -19 | `ARMONIOS_ERR_ROFS` | The selected filesystem is read-only for the requested mutation |
+| -20 | `ARMONIOS_ERR_NOTSUP` | The selected mount does not implement the requested operation |
+| -21 | `ARMONIOS_ERR_RANGE` | A value or filesystem report cannot be represented safely |
+
+`SYS_FSINFO` already preserves `NOENT`, `NOTSUP`, and `RANGE` from the VFS. Some older open/read/write/mutation paths still collapse filesystem failures to broader legacy errors; later cuts should narrow those results only when the backend can prove the specific condition.
 
 ## ABI change requirements
 
