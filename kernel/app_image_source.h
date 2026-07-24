@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "kernel/vfs.h"
+
 #define APP_IMAGE_NAME_MAX 32U
 
 typedef enum {
@@ -13,11 +15,12 @@ typedef enum {
 typedef struct {
     app_image_source_kind_t kind;
     const char *path;
+    char path_storage[VFS_MAX_PATH];
     char name[APP_IMAGE_NAME_MAX];
 } app_image_source_t;
 
 /*
- * Resolve one canonical spawn path into its image backend and process name.
+ * Resolve one spawn path into its canonical image backend and process name.
  * `/armonios/<name>` selects the embedded bootfs registry. Every other valid
  * absolute file path selects the VFS backend and uses its final component as
  * the process name.
