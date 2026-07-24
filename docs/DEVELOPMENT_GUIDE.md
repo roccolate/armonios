@@ -1,279 +1,338 @@
 # ArmoniOS Development Guide
 
-> **Implementation update — 2026-07-23:** The older audit sections in this document predate merged v0.3 PRs #80, #81, #82, #90, #93, and #95. Use `V03_IMPLEMENTATION_STATUS.md` for the current storage/VFS checkpoint. Issue #63 is closed; issue #76 remains the manual v0.2 validation and release-record task.
+This is the practical guide for changing ArmoniOS without violating its current
+contracts. It is not a second status document.
 
-This guide is the practical entry point for continuing development. It explains
-how to navigate the repository, choose the correct work sequence, preserve the
-kernel's contracts, and produce evidence that can be promoted into the canonical
-documents.
+Read first:
 
-It is intentionally not a second status document.
+- current implementation: `CURRENT_STATE.md`;
+- implemented design: `ARCHITECTURE.md`;
+- future ordering: `ROADMAP.md`;
+- active risks: `TECHNICAL_RISKS.md`;
+- documentation ownership: `README.md`;
+- exact runtime contract: `RUNTIME_SERVICE.md`;
+- public syscalls: `SYSCALLS.md`.
 
-- Current verified behavior: `CURRENT_STATE.md`
-- Open defects and accepted boundaries: `TECHNICAL_RISKS.md`
-- Milestone ordering: `ROADMAP.md`
-- Implemented design: `ARCHITECTURE.md`
-- Exact post-EOI contract: `RUNTIME_SERVICE.md`
-- Evidence and claim rules: `DOCUMENTATION_POLICY.md`
+## 1. Start every work session from current main
 
-## 1. Start every work session here
+```sh
+git switch main
+git fetch origin --prune
+git pull --ff-only origin main
+git status
+```
 
 Before changing code:
 
-1. Read `CURRENT_STATE.md` and identify the audited main tree.
-2. Read the open risks that affect the subsystem.
-3. Confirm the work belongs to the current milestone in `ROADMAP.md`.
-4. Read the subsystem contract, not only the implementation file.
-5. Identify the smallest focused test that can fail before the fix.
-6. Check whether the change affects kernel size, stack, ABI, `.data == 0`, or a
-   QEMU/manual claim.
+1. identify the current capability or limitation in `CURRENT_STATE.md`;
+2. read the architecture and focused reference for the subsystem;
+3. check whether an active risk constrains the work;
+4. confirm the cut belongs to the current roadmap order;
+5. identify the smallest focused test that can fail before the change;
+6. list the invariants affected: ABI, ownership, rollback, image size, stack,
+   `.data`, QEMU behavior, or hardware claim;
+7. keep the change small enough to explain and validate independently.
 
-Do not begin broad feature work from an issue title or chat summary alone. Issues
-and pull requests are working context; canonical documents define the current
-contract.
+Do not begin from a stale branch, an old PR description, or a chat summary alone.
+Code and permanent tests are the first source of truth; canonical documentation
+explains the intended current contract.
 
 ## 2. Current development boundary
 
-ArmoniOS has a verified v0.1 QEMU desktop baseline. The v0.2 runtime-hardening
-implementation and automated stress evidence have landed, but formal v0.2
-promotion remains blocked by the explicit residual-risk and release-evidence work
-listed in `CURRENT_STATE.md`.
+The v0.2 implementation is complete. Issue #76 remains a manual visible
+validation and release-record task, not missing kernel implementation.
 
-Until v0.2 is promoted:
+The main implementation sequence is now:
 
-- keep issue #63 / `RISK-018` isolated from unrelated feature work;
-- do not weaken or remove the runtime count, routing, deadline, stress, size, ABI,
-  stack, storage, or board gates;
-- do not call the tree a release candidate while required P1 dispositions and the
-  final visible pass are missing;
-- avoid broad v0.3 implementation on `main` unless the remaining v0.2 risk is
-  explicitly accepted and documented.
+1. complete seek and truncate;
+2. add mkdir/rmdir and nested mutation rollback;
+3. add explicit durability and reboot-persistence evidence;
+4. add VFAT long names;
+5. continue consumer-driven `libkarm` and `libarmdesk` work;
+6. expand applications into the v1 workflow;
+7. add ext2 read-only;
+8. stabilize for beta.
 
-After v0.2 promotion, the next architecture milestone is v0.3: block-device
-metadata, path normalization, mount resolution, and structured filesystem
-interfaces. Application polish follows those foundations; it does not precede
-them.
+Do not regress the v0.2 runtime, IRQ-origin, VMM-soak, size, ABI, stack, storage,
+or board gates while working on later phases.
 
 ## 3. Repository map
 
-### Boot and board entry
+### Boot and boards
 
-| Area | Primary files | Responsibility |
+| Area | Primary paths | Responsibility |
 |---|---|---|
-| AArch64 entry | `boot/start.S` | Exception-level entry, early stack, vector setup, BSS clear, C handoff |
-| Kernel orchestration | `kernel/kernel.c` | Ordered subsystem initialization and top-level runtime entry |
-| Board contract | `drivers/board.h` | Generic board capabilities and operations |
-| QEMU backend | `drivers/boards/qemu_virt/` | Verified GIC, timer, virtio, framebuffer, storage, input, and network wiring |
-| Raspberry Pi backend | `drivers/boards/rpi4/` | Build/host-verified fail-closed hardware scaffolding |
+| AArch64 entry | `boot/start.S` | Early stack, vectors, BSS clear, C handoff |
+| Kernel orchestration | `kernel/kernel.c` | Ordered subsystem initialization |
+| Generic board contract | `drivers/board.h` | Optional capabilities and board operations |
+| QEMU backend | `drivers/boards/qemu_virt/` | Verified runtime wiring |
+| Raspberry Pi backend | `drivers/boards/rpi4/` | Build/diagnostic fail-closed scaffolding |
 
-Generic kernel code must not contain board physical addresses. Optional board
-features must either satisfy the generic contract or fail explicitly.
+Generic code must not embed board physical addresses. An optional board feature
+must satisfy the generic contract or return explicit unsupported/failure state.
 
-### Memory and process ownership
+### Memory and processes
 
-| Area | Primary files | Responsibility |
+| Area | Primary paths | Responsibility |
 |---|---|---|
-| Physical pages | `kernel/mm/pmm.c` | Fixed 128 MiB bitmap allocator and reservation accounting |
-| Page tables | `kernel/mm/vmm.c` | AArch64 4 KiB stage-1 tables, mappings, unmaps, and table ownership |
+| Physical pages | `kernel/mm/pmm.c` | Fixed bitmap allocator and reservations |
+| Page tables | `kernel/mm/vmm.c` | AArch64 mappings and page-table ownership |
 | MMU activation | `kernel/mm/mmu.c` | Translation configuration and TTBR activation |
-| Kernel heap | `kernel/mm/kheap.c` | Kernel dynamic allocation |
-| Process table | `kernel/process.c` | Fixed process slots, context, parent/zombie lifecycle, user regions, cleanup |
-| User mappings | `kernel/user_vm.c` | Anonymous and fixed physical mappings owned by a process |
+| Kernel allocation | `kernel/mm/kheap.c` | Explicit kernel dynamic allocation |
+| Processes | `kernel/process.c` | Slots, context, parent/wait, zombies, cleanup |
+| User mappings | `kernel/user_vm.c` | Process-owned anonymous/fixed mappings |
 
-Ownership rule: mapped leaf pages and page-table pages have different owners.
-Process cleanup must release each exactly once. Any VMM, PMM, process-exit, mmap,
-or loader change must preserve that distinction and add evidence for rollback and
-reclamation paths.
+Mapped leaf pages and page-table pages have different owners. Any change to
+process exit, VMM, PMM, mmap, loader, or rollback paths must prove each resource
+is released exactly once.
 
-### Exceptions, scheduling, and runtime work
+### Exceptions and runtime work
 
-| Area | Primary files | Responsibility |
+| Area | Primary paths | Responsibility |
 |---|---|---|
-| Exception vectors | `kernel/exception_vectors.S`, `kernel/irq_asm.S` | Trap-frame layout and entry/return assembly |
-| EL1/EL0 faults | `kernel/exceptions.c` | Fatal EL1 diagnostics and lower-EL fault handling |
-| IRQ dispatch | `kernel/irq.c` | Handler dispatch and the post-EOI runtime service |
-| Timer | `kernel/timer/timer.c` | Fixed accounting, rearm, readiness publication, scheduler counters |
-| EL0 dispatch | `kernel/process.c` | Save/restore and round-robin process selection |
-| EL1 helpers | `kernel/sched/` | Cooperative kernel helper threads |
+| Exception vectors | `kernel/exception_vectors.S`, `kernel/irq_asm.S` | Frame layout, origin gate, entry/return |
+| Fault handling | `kernel/exceptions.c` | EL1 diagnostics and lower-EL faults |
+| IRQ/runtime dispatch | `kernel/irq.c` | Handler routing and post-EOI service |
+| Timer | `kernel/timer/` | Fixed callback, rearm, readiness, counters |
+| EL0 scheduling | `kernel/process.c` | Context save/restore and selection |
+| EL1 helpers | `kernel/sched/` | Cooperative helper execution |
 
-The runtime model is:
+Runtime model:
 
 ```text
 preemptive EL0
-  -> IRQ entry
-  -> bounded hard callback
+  -> IRQ vector
+  -> classify saved PSTATE origin
+  -> fixed hard callback
   -> EOI
-  -> count- and time-bounded post-EOI EL1 pass
-  -> process selection
+  -> count- and time-bounded post-EOI EL1 service
+  -> process selection only for a valid EL0 frame
   -> eret
-
-plus separate cooperative EL1 helper threads
 ```
 
-EOI is not exception return. During the post-EOI pass, EL0 is paused, the
-exception frame remains on the EL1 stack, and normal IRQs remain masked by the
-entry state. See `RUNTIME_SERVICE.md` before modifying this path.
+An IRQ that interrupted EL1 must never enter process save/preemption or switch
+TTBR0. EOI is not exception return; EL0 remains paused during the service pass.
+Read `RUNTIME_SERVICE.md` before modifying this path.
 
-### Syscalls and ABI
+### Public ABI and syscalls
 
-| Area | Primary files | Responsibility |
+| Area | Primary paths | Responsibility |
 |---|---|---|
-| Numbers | `kernel/syscall_numbers.h` | Append-only syscall numbering |
-| Dispatch | `kernel/syscall.c` | Register ABI and syscall routing |
-| Safe copies | `kernel/syscall_helpers.c` | User-range, page-permission, string, argv, input, and output handling |
-| Domains | `kernel/syscall_*.c` | Process, GUI, IPC, information, and VFS operations |
-| User wrappers | `programs/libkarm/` | Freestanding syscall trampolines and small runtime helpers |
-| GUI wrappers | `programs/libkarmdesk/` | Typed userland GUI interface |
+| Public ABI | `include/armonios/abi/` | Shared numbers, errors, flags, and layouts |
+| Compatibility headers | `kernel/syscall_numbers.h`, older aliases | Temporary in-tree compatibility |
+| Dispatcher | `kernel/syscall.c` | Register ABI and routing |
+| Copy helpers | `kernel/syscall_helpers.c` | Range, permission, string, argv, input/output checks |
+| Domain handlers | `kernel/syscall_*.c` | Process, VFS, GUI, IPC, and information services |
+| User wrappers | `programs/libkarm/` | Typed freestanding ABI access |
+| Desktop wrappers | `programs/libarmdesk/` | Canonical GUI-facing layer |
 
-Do not pass raw user pointers into lower subsystems. Import input into
-kernel-owned storage and build output in kernel-owned buffers before copying.
-Validate the complete destination before consuming queued state.
+Rules:
+
+- userland must not include kernel-private headers for public values;
+- lower subsystems must not receive raw EL0 pointers;
+- import input into kernel-owned storage;
+- assemble output in kernel-owned storage;
+- validate the complete destination before consuming state or invoking a provider;
+- never renumber or reuse an existing syscall or public error value;
+- add implementation, wrapper, tests, consumer, and documentation together.
 
 ### Storage and VFS
 
-| Area | Primary files | Responsibility |
+| Area | Primary paths | Responsibility |
 |---|---|---|
-| Generic VFS | `kernel/vfs.c` | Mount selection, process-local descriptors, offsets, and ownership |
-| Embedded apps | `kernel/bootfs.c`, `kernel/boot_program.c` | `/armonios` KLI1 images |
-| In-memory FS | `kernel/tmpfs.c` | Fixed-capacity test and temporary storage |
-| FAT implementation | `kernel/fat32.c`, `kernel/fat32_directory.c`, `kernel/fat32_vfs.c` | Nested 8.3 read traversal plus root-only mutation compatibility |
-| Block devices | `drivers/storage/` | Virtio block, EMMC2 scaffolding, MBR, and bounded views |
+| Generic VFS | `kernel/vfs.c` and focused VFS modules | Canonical paths, mounts, descriptors, offsets |
+| bootfs | `kernel/bootfs.c`, `kernel/boot_program.c` | Embedded `/armonios` application images |
+| tmpfs | `kernel/tmpfs.c` | Fixed-capacity temporary storage |
+| FAT32 | `kernel/fat32*.c` | Geometry, directories, root mutation, VFS adapter |
+| Block layer | `drivers/storage/` | Devices, MBR, views, QEMU/RPi adapters |
+| Metadata/fsinfo | VFS metadata and fsinfo modules | Native records and public adapters |
 
-The current FAT implementation is a compatibility bridge, not the v0.4 general
-FAT design. v0.3 must first establish generic block metadata, normalized paths,
-mount-boundary behavior, and structured metadata/directory interfaces.
+The current FAT boundary is nested read traversal with root-only mutation. Do not
+call it general FAT. Keep canonical path, mount selection, and generic error
+policy outside FAT-specific code.
+
+The next storage cuts must define rollback before implementation. Truncate,
+mkdir/rmdir, rename/move, directory allocation, and flush ordering can corrupt
+persistent state if partial progress is not explicit.
 
 ### GUI, input, and applications
 
-| Area | Primary files | Responsibility |
+| Area | Primary paths | Responsibility |
 |---|---|---|
-| Window lifecycle | `kernel/gui_pool.c` | Fixed window pool, ownership, z-order, focus |
-| Input routing | `kernel/gui_input.c`, `kernel/gui_events.c` | Hit testing and per-window event queues |
-| Backing storage | `kernel/gui_backing.c` | Lazily allocated window content buffers |
-| Damage/compositor | `kernel/gui_damage.c`, `kernel/gui_compositor.c` | Ordered damage, partial batches, full redraw, submission |
-| Device input | `drivers/input/`, `drivers/usb/` | UART, virtio-input, xHCI, keyboard, and mouse producers |
+| Window lifecycle | `kernel/gui_pool.c` | Fixed pool, ownership, z-order, focus |
+| Input routing | `kernel/gui_input.c`, `kernel/gui_events.c` | Hit testing and event queues |
+| Backing storage | `kernel/gui_backing.c` | Window content buffers |
+| Damage/compositor | `kernel/gui_damage.c`, `kernel/gui_compositor.c` | Ordered damage and GPU submission |
+| Device input | `drivers/input/`, `drivers/usb/` | UART, virtio, xHCI, keyboard, mouse |
 | Applications | `programs/apps/` | Panel, Shell, Editor, Files, Monitor, Control, Clock |
+| Desktop layer | `programs/libarmdesk/` | Wrappers, geometry, theme, future models |
 
-Shipping KLI1 images may not contain mutable static `.data` or `.bss`. Large
-mutable state belongs in `SYS_MMAP`; userland stack usage remains gated.
+Shared widgets must keep neutral state separate from syscall drawing adapters.
+Prefer caller-owned bounded models with host tests. Measure application binary and
+stack deltas before promoting a component into shipping apps.
+
+### Userland runtime
+
+| Area | Primary paths | Responsibility |
+|---|---|---|
+| Startup | `programs/libkarm/crt0.*` | `_start`, argc/argv, exit |
+| Static archive | `programs/libkarm/` and `Makefile` | Reusable GUI-independent runtime |
+| Arena | arena sources/headers | Monotonic caller-owned allocation |
+| Buffer/string | buffer sources/headers | Growable binary and terminated text storage |
+| File helpers | file sources/headers | Complete writes and rollback-safe reads |
+
+`crt0.o` remains explicit; reusable code belongs in `libkarm.a`. Keep function and
+data sections so unused archive members can be removed by `--gc-sections`.
+
+Do not add hidden mutable runtime globals. Arena reset/destroy invalidates all
+objects backed by that arena. File helpers must preserve descriptor cleanup and
+exact arena rollback on failure.
 
 ### Networking
 
-| Area | Primary files | Responsibility |
+| Area | Primary paths | Responsibility |
 |---|---|---|
-| Virtio RX/TX | `drivers/net/virtio_net.c` | Device queues and bounded frame receive |
-| DHCP | `kernel/net/dhcp.c`, `kernel/net/dhcp_options.c` | Minimal lease acquisition |
-| Runtime routing | `kernel/irq.c`, `kernel/io_service.h` | Strict NETWORK-phase polling and receive |
+| Virtio network | `drivers/net/virtio_net.c` | Device queues and bounded RX/TX |
+| Protocols | `kernel/net/` | Ethernet, ARP, IPv4, UDP, DHCP |
+| Runtime routing | IRQ/runtime-service code | NETWORK-phase-only polling and receive |
 
-The stack currently supports enough Ethernet, ARP, IPv4, UDP, and DHCP for a QEMU
-lease. It does not expose sockets, TCP, DNS, HTTP, or a general user UDP API.
-Consumed-frame counters do not prove absence of device/ring drops.
+The current stack exists to support a QEMU DHCP lease. It does not expose sockets,
+TCP, DNS, HTTP, or a general user UDP API. Do not infer absence of device drops
+from consumed-frame counters.
 
 ## 4. Non-negotiable invariants
 
-Every change must preserve the invariants relevant to its scope:
+Apply the relevant subset to every change:
 
-- freestanding C11 and narrow AArch64 assembly boundaries;
-- `.data == 0` for the production kernel and shipping KLI1 images;
-- kernel W^X mapping policy;
-- 108000-byte production kernel ceiling unless a deliberate replacement budget is
-  approved and documented;
-- 3072-byte userland stack ceiling unless intentionally revised with evidence;
-- append-only syscall numbers and stable KLI1/public structure layouts;
-- process ownership and cleanup for descriptors, pages, windows, IPC, and mappings;
-- fail-closed behavior for unverified Raspberry Pi capabilities;
-- deterministic pass/fail assertions for QEMU gates;
-- exact separation between host, build, QEMU, manual, and hardware evidence.
+- freestanding C11 and narrow AArch64 assembly;
+- QEMU and Raspberry Pi remain separate board products;
+- production loadable `.data` remains empty;
+- kernel W^X remains enforced;
+- production image remains below **128 KiB / 131072 bytes**;
+- userland stack gates remain enforced;
+- public syscall values and layouts do not drift;
+- process ownership and teardown remain exactly-once;
+- raw user pointers do not enter lower subsystems;
+- unsupported optional capabilities fail closed;
+- deterministic tests contain explicit pass/fail assertions;
+- host, build, QEMU, manual, and hardware evidence remain distinct.
 
-Runtime-specific invariants:
+Runtime invariants:
 
-- the physical timer callback performs only fixed accounting, rearm, publication,
-  and scheduler-counter work;
-- virtio-input processes at most one negotiated ring length and no more than 16
-  descriptors per call;
-- USB HID visits at most four fixed device slots per call;
-- shared input consumption is capped at 16 events per active pass;
-- partial redraw consumes at most eight ordered damage rectangles after a
-  successful submission;
-- network polling and receive consume nothing outside the active NETWORK phase;
-- valid network RX is capped at 16 frames per NETWORK pass and requeued at cap;
-- the service-wide deadline is checked at safe boundaries and republishes original
-  readiness on expiry;
-- no documentation may reinterpret cooperative checkpoints as asynchronous
-  preemption.
+- the hard timer callback stays fixed and bounded;
+- EL1-origin IRQs cannot enter process preemption;
+- virtio input is bounded by the ring and a cap of 16;
+- USB HID visits no more than four fixed slots;
+- shared input consumes at most 16 events per active pass;
+- partial redraw consumes at most eight ordered rectangles per successful submit;
+- network work consumes nothing outside NETWORK phase;
+- network RX consumes at most 16 valid frames per NETWORK pass;
+- deadline expiry republishes original work and skips later optional work;
+- cooperative checkpoints are not described as asynchronous preemption.
 
-## 5. Choose the correct change workflow
+Storage invariants:
+
+- all block ranges are overflow-checked and bounded;
+- read-only state propagates through views and mounts;
+- unsupported flush is explicit;
+- generic VFS does not contain FAT path policy;
+- failure leaves descriptor offset and persistent metadata in the documented
+  state;
+- durability is not claimed without reboot evidence.
+
+## 5. Choose the correct workflow
 
 ### Pure host-testable logic
 
-Examples: parsers, range arithmetic, path normalization, metadata conversion,
-small ownership helpers.
+Examples: arithmetic, parsers, path normalization, metadata conversion, rectangle
+models, buffers, strings, and ownership helpers.
 
-1. Add a focused host test.
-2. Run the focused test.
-3. Run `make -C tests test`.
-4. Build QEMU and enforce size if the code enters the kernel image.
-5. Run the full gate before promotion.
+1. write a focused failing host test;
+2. implement the smallest change;
+3. run the focused test;
+4. run the wider host suite;
+5. build QEMU if the code enters production artifacts;
+6. measure image or application delta;
+7. finish with the complete gate.
 
-### Memory, process, or syscall changes
+### Memory, process, exception, or syscall changes
 
-1. Add failure, rollback, ownership, and cleanup tests.
-2. Run the relevant process, user-copy, VFS, or KLI1 focused gates.
-3. Build and inspect kernel size.
-4. Run QEMU user-copy or lifecycle evidence when exception/user mappings change.
-5. Update `MEMORY_MAP.md` or `SYSCALLS.md` when the contract changes.
-6. Update the risk register for any new fatal-EL1 or isolation boundary.
+1. document ownership and rollback before coding;
+2. test invalid inputs, partial initialization, cleanup, and reuse;
+3. run process, user-copy, ABI, or VMM focused gates;
+4. inspect image size and `.data`;
+5. run QEMU exception/lifecycle evidence where relevant;
+6. update `MEMORY_MAP.md`, `SYSCALLS.md`, architecture, or risks as needed;
+7. finish with the complete matrix.
 
-### Runtime, IRQ, GUI, input, USB, or network changes
+### Runtime, GUI, input, USB, or network changes
 
-1. Prove the hard callback remains fixed and bounded.
-2. Add a host regression for stop/continuation semantics.
-3. Preserve explicit metrics for completed work.
-4. Add or update deterministic QEMU evidence.
-5. Add stress evidence for latency, backlog, overflow, or fairness claims.
-6. Run both runtime stress modes when the shared service contract changes.
-7. Record what remains unobservable; do not infer loss absence.
+1. prove hard-IRQ work remains fixed;
+2. identify count, time, queue, and continuation boundaries;
+3. add host regressions for stop/resume semantics;
+4. preserve useful metrics;
+5. add deterministic QEMU evidence;
+6. run stress tests for backlog, overflow, latency, or fairness claims;
+7. state what remains unobservable;
+8. run both runtime stress modes when the shared service changes.
 
 ### Storage or filesystem changes
 
-1. Start with host fixtures, malformed inputs, and bounded arithmetic.
-2. Keep filesystem policy behind mount/filesystem callbacks.
-3. Test read-only, mount-boundary, and rollback behavior.
-4. Run `make qemu-fs-test` and the FAT + GPU wiring gate.
-5. Add a reboot/persistence gate before claiming durable behavior.
-6. Do not upgrade root-only 8.3 evidence into a general FAT claim.
+1. define errors, partial progress, rollback, and read-only behavior first;
+2. add pure host fixtures and malformed/capacity cases;
+3. keep policy behind generic block/mount/filesystem interfaces;
+4. test descriptor offsets and state preservation on failure;
+5. run FAT32 headless and framebuffer wiring gates;
+6. add a real EL0 consumer for new public behavior;
+7. add reboot testing before claiming durability;
+8. update public headers, `SYSCALLS.md`, state, architecture, roadmap, and risks.
 
-### Userland or visible GUI changes
+### libkarm or libarmdesk changes
 
-1. Keep KLI1 and stack gates green.
-2. Test event IDs, ownership, and failure behavior at the ABI boundary.
-3. Run deterministic focus/marker gates where possible.
-4. Run `make qemu-fb-visible` for layout, input, focus, or workflow claims.
-5. Record tester, date, exact commit/image, steps, and limitations.
+1. require a concrete application or SDK consumer;
+2. keep `libkarm` GUI-independent;
+3. keep neutral models separate from platform adapters;
+4. use caller-owned state and explicit failure returns;
+5. test corruption, overflow, allocation failure, and rollback;
+6. preserve archive extraction and section garbage collection;
+7. measure application stack and binary deltas;
+8. do not add a global heap merely for convenience.
+
+### Visible application changes
+
+1. keep KLI1, `.data`, and stack gates green;
+2. add deterministic model/ABI tests where possible;
+3. run focus and marker gates;
+4. run `make qemu-fb-visible` for layout, interaction, and workflow claims;
+5. record tester, local date/time, exact commit, host setup, steps, result, and
+   limitations.
 
 ### Raspberry Pi changes
 
-1. Preserve the generic board contract and fail-closed normal capabilities.
-2. Run the board build, EMMC2 probe package, and host diagnostic tests.
-3. Treat physical evidence as a separate track.
-4. Never infer hardware support from source presence or successful cross-builds.
+1. preserve the generic board contract;
+2. keep normal unsupported capabilities fail closed;
+3. run board build and diagnostic package tests;
+4. treat physical evidence separately;
+5. never infer physical support from source presence or cross-build success;
+6. treat writable media as a separate safety milestone.
 
 ## 6. Verification commands
 
-Start focused, finish with the complete gate.
+Start focused and finish with the complete gate.
 
 ```sh
 make BOARD=qemu_virt
 make BOARD=qemu_virt size
 make -C tests test
+make stack-check
+make qemu-fs-test
 bash tests/run_runtime_service_test.sh
-bash tests/run_input_queue_stats_test.sh
 bash tests/run_process_parent_wait_test.sh
 bash tests/run_vfs_process_fd_test.sh
 bash tests/run_user_copy_permissions_test.sh
 bash tests/run_kli1_contract_test.sh
-make stack-check
-make qemu-fs-test
+bash tests/run_libarmdesk_foundation_test.sh
+bash tests/run_irq_origin_gate_test.sh
 bash tools/qemu_usercopy_test.sh
 bash tools/qemu_focus_test.sh
 bash tools/qemu_marker_test.sh all
@@ -282,95 +341,46 @@ bash tools/qemu_runtime_net_stress_test.sh
 bash tools/qemu_fb_fat_test.sh
 ```
 
-Full automated promotion gate:
+Full automated gate:
 
 ```sh
 bash tools/verify.sh
 ```
 
-Visible evidence, run separately:
+Visible desktop:
 
 ```sh
 make qemu-fb-visible
 ```
 
-The full gate is necessary but not sufficient for a visible or physical claim.
+Use the focused scripts that ship with a new subsystem rather than copying a
+stale list from this guide. `tools/verify.sh` remains the authoritative aggregate.
 
-## 7. Pull-request shape
+## 7. Documentation workflow
 
-Prefer one reviewable contract per PR. A good PR contains:
+When behavior changes:
 
-```text
-Problem:
-- exact defect, missing contract, or milestone slice
+- update focused reference docs in the same change;
+- update `ARCHITECTURE.md` when boundaries or ownership change;
+- update `CURRENT_STATE.md` when capabilities or major limits change;
+- update `ROADMAP.md` when a planned cut lands or ordering changes;
+- update `TECHNICAL_RISKS.md` when a risk opens, closes, or changes boundary;
+- keep historical workflow IDs in the owning issue, PR, or release record;
+- do not add a banner to every stale file instead of correcting it.
 
-Change:
-- implementation and ownership boundaries
+A documentation-only commit cannot promote code, physical hardware support,
+durability, or release status.
 
-Evidence:
-- focused command -> result
-- full command/workflow -> result
-- manual workflow -> tester/date/commit, when applicable
+## 8. Definition of done
 
-Not proved:
-- explicit evidence boundary
+A change is complete when:
 
-Risks and documentation:
-- risk IDs changed
-- canonical documents updated
-```
-
-Use exact SHAs and run IDs only after the final tree is known. A PR-head run proves
-the tree it exercised; it does not automatically prove a later conflict-resolved
-merge tree.
-
-## 8. Documentation update order
-
-For behavior-changing work:
-
-1. implementation and focused tests;
-2. `TECHNICAL_RISKS.md` when risk state changes;
-3. `CURRENT_STATE.md` with exact evidence;
-4. the affected architecture/runtime/memory/ABI/porting contract;
-5. `ROADMAP.md` if sequencing or exit criteria changed;
-6. this guide, `AGENTS.md`, or `CONTRIBUTING.md` if operating rules changed;
-7. README last.
-
-Do not create another current-state, audit, handoff, or latest-status document.
-
-## 9. Recommended v0.3 slicing
-
-After formal v0.2 promotion, avoid one large storage rewrite. Use staged cuts:
-
-1. **Block descriptor contract**
-   - sector size, capacity, identity, read-only state, read/write/flush operations;
-   - host tests for invalid geometry, overflow, read-only behavior, and flush.
-2. **Path normalizer**
-   - absolute paths, repeated slashes, component bounds, `.` and `..` policy;
-   - pure host tests before VFS integration.
-3. **Mount resolver**
-   - longest valid mount-prefix selection and mount-boundary semantics;
-   - tests for `/`, `/fat`, `/tmp`, `/armonios`, and future `/ext`.
-4. **Structured metadata and directory ABI**
-   - kernel-internal types first;
-   - append-only syscall numbers only when implementation, wrappers, tests, and
-     documentation can land together.
-5. **Compatibility migration**
-   - keep the existing v0.1 FAT workflow working through the new resolver;
-   - prevent FAT-specific policy from returning to generic VFS code.
-
-Each cut must remain buildable, testable, and reversible without depending on
-unfinished later slices.
-
-## 10. Definition of done
-
-A change is done only when:
-
-- the implementation and ownership model are coherent;
-- focused tests fail before and pass after the change where practical;
-- relevant size, stack, ABI, and `.data` gates pass;
-- the full automated gate passes on the final tree;
-- visible or hardware claims have separate dated evidence;
-- known limitations remain explicit;
-- risks and canonical documentation match the final tree;
-- the PR states what was not proved.
+- the implementation matches a written contract;
+- ownership, limits, failure, and rollback are explicit;
+- focused permanent tests cover success and failure;
+- the affected production builds pass;
+- ABI, image-size, `.data`, stack, and board contracts remain valid;
+- QEMU or visible evidence exists where the claim requires it;
+- canonical documentation agrees;
+- temporary diagnostics and migration helpers are removed;
+- `bash tools/verify.sh` passes on the final tree.
