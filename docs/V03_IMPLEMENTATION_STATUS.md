@@ -1,100 +1,158 @@
-# v0.3 storage/VFS implementation status
+# v0.3 storage and VFS status
 
-> Live implementation checkpoint for the v0.3 storage/VFS work.
->
-> This document records code already merged into `main`. Release evidence and
-> manual promotion status remain governed by `CURRENT_STATE.md`,
-> `TECHNICAL_RISKS.md`, and issue #76.
+This document is the live implementation checkpoint for the v0.3 storage/VFS
+platform. It describes merged capability, not release evidence or PR history.
 
-## Identity
+For broader context:
 
-- checkpoint date: 2026-07-24;
-- audited `main`: `9a697eb1bae909eed3f17a3da6928bc66192dac3`;
-- latest storage/VFS cut: PR #97, filesystem errors and information ABI;
-- v0.2 kernel/runtime defect issue #63: closed after the EL1/EL0 IRQ-origin fix;
-- remaining v0.2 task: issue #76, the dated visible QEMU validation and release record;
-- global public ABI remains `1.0` until the first official ArmoniOS release.
+- current system status: `CURRENT_STATE.md`;
+- implemented boundaries: `ARCHITECTURE.md`;
+- remaining milestone order: `ROADMAP.md`;
+- syscall layouts: `SYSCALLS.md`;
+- historical provenance: `history/V03_FOUNDATION_PROVENANCE.md`.
 
-## Landed foundations
+## Goal
 
-The following v0.3 foundations are merged:
+v0.3 replaces demo-specific storage plumbing with reusable contracts for block
+devices, paths, mounts, metadata, errors, filesystem information, mutation, and
+durability.
 
-1. **Generic block-device contract** — PR #80
-   - bounded read/write ranges;
-   - block size and block count;
-   - read-only flag;
-   - flush contract;
-   - bounded nested block-device views.
+The phase is **in progress**.
 
-2. **Board storage adapters** — PR #81
-   - writable QEMU virtio-blk descriptor with real capacity;
-   - read-only EMMC diagnostic descriptor with CSD-derived capacity.
+## Implemented foundations
 
-3. **Block device to MBR to FAT32 path** — PR #82
-   - `board_storage_device()` production path;
-   - FAT32 mounting through `block_device_t`;
-   - whole-device and primary-MBR FAT32 discovery;
-   - bounded partition views;
-   - read-only and flush propagation.
+### Block-device contract
 
-4. **Canonical paths and mount resolution** — PR #90
-   - absolute-path normalization;
-   - repeated slash and `.` collapse;
-   - bounded `..` resolution with root-escape rejection;
-   - longest component-prefix mount selection;
-   - canonical identity for nodes and mounts.
+The generic storage descriptor provides:
 
-5. **Nested FAT32 traversal** — PR #93
-   - read-only traversal of existing nested 8.3 directory trees;
-   - open/read regular files below subdirectories;
-   - list and stat nested directories;
-   - path-aware VFS callbacks;
-   - explicit rejection of nested create/unlink/rename until mutation transactions exist.
+- logical block size and block count;
+- overflow-safe range validation;
+- bounded reads and writes;
+- explicit read-only state;
+- explicit flush support or `NOTSUP`;
+- bounded child views over a parent device.
 
-6. **Structured metadata ABI and first consumer** — PR #95
-   - squash merge `a078c995f485bab84135233c149e28ba081b11b0`;
-   - filesystem-neutral `vfs_metadata_t` and `vfs_dirent_t`;
-   - native FAT32 type, size, and attribute mapping;
-   - `SYS_STAT_V2 = 49` and `SYS_READDIR_V2 = 50`;
-   - fixed versioned public records with the global ABI still at 1.0;
-   - typed libkarm wrappers;
-   - Files as the first EL0 consumer with a legacy fallback;
-   - legacy calls 45 and 46 remain unchanged.
+QEMU virtio-blk exposes a writable production descriptor. The Raspberry Pi EMMC2
+path exposes a separate read-only diagnostic descriptor and does not imply normal
+hardware storage support.
 
-7. **Filesystem errors and information ABI** — PR #97
-   - squash merge `9a697eb1bae909eed3f17a3da6928bc66192dac3`;
-   - public `EXIST`, `NOTDIR`, `ISDIR`, `NOTEMPTY`, `NOSPC`, `ROFS`, `NOTSUP`, and `RANGE` status values;
-   - kernel and libkarm compatibility aliases from one public source of truth;
-   - `SYS_FSINFO = 51` and fixed 64-byte versioned `arm_fsinfo_t`;
-   - canonical owning-mount resolution with distinct `NOENT`, `NOTSUP`, and `RANGE` results;
-   - FAT32 provider for identity, capacity, block size, name/path limits, directory support, read-only state, and real flush capability;
-   - Files as the first EL0 consumer;
-   - exact free-byte accounting, long names, and truncate remain explicitly unadvertised;
-   - final validation: Export FAT32 #188, Verify ArmoniOS #530, and CI - Tests #664 succeeded.
+### Device, MBR, and FAT32 mount path
+
+The production storage path is:
+
+```text
+board storage device
+  -> optional bounded MBR partition view
+  -> FAT32 mount
+  -> VFS mount
+```
+
+Whole-device and primary-MBR FAT32 discovery are implemented. Partition views
+preserve parent range, read-only, and flush contracts.
+
+### Canonical paths and mount resolution
+
+The VFS uses one bounded absolute-path policy:
+
+- a leading slash is required;
+- repeated separators collapse;
+- `.` components disappear;
+- `..` is resolved without permitting root escape;
+- root remains `/`;
+- mount selection uses the longest component-aligned prefix;
+- canonical path identity is shared by nodes and mounts.
+
+A mount at `/fat` does not match `/fatx`.
+
+### Structured metadata
+
+Filesystem-neutral internal records describe:
+
+- regular files and directories;
+- byte size;
+- generic attributes;
+- bounded directory entries.
+
+The public append-only interfaces are:
+
+- `SYS_STAT_V2 = 49` with `arm_stat_v2_t`;
+- `SYS_READDIR_V2 = 50` with `arm_dirent_v2_t`.
+
+Legacy calls 45 and 46 remain unchanged. Files is the first graphical consumer of
+the structured interfaces and can retain a compatibility fallback where needed.
+
+### Filesystem errors and information
+
+The public status set includes filesystem-specific values for existing,
+not-a-directory, is-a-directory, not-empty, no-space, read-only, unsupported, and
+range failures.
+
+`SYS_FSINFO = 51` returns `arm_fsinfo_t` for the mount owning a canonical path.
+The FAT32 provider reports:
+
+- filesystem identity;
+- volume capacity;
+- 512-byte block size;
+- current name and path limits;
+- directory traversal support;
+- transport read-only state;
+- whether a real flush callback exists.
+
+It does not advertise long names, truncate, or valid free-byte accounting.
+
+### Nested FAT32 read traversal
+
+Existing nested 8.3 directory trees can be:
+
+- traversed;
+- listed;
+- statted;
+- opened;
+- read.
+
+Mutation remains intentionally narrower: create, write, unlink, and rename are
+still root-entry operations. Rejecting unsupported nested mutation is part of the
+current safety contract.
 
 ## Remaining v0.3 work
 
-After filesystem information, the correct order is:
+The dependency order is:
 
-1. complete seek semantics;
-2. truncate and safe cluster shrink/grow;
-3. mkdir and rmdir with explicit rollback rules;
-4. nested create/unlink/rename/move;
-5. explicit flush/fsync and reboot-persistence evidence.
+1. complete `SEEK_CUR` and `SEEK_END` semantics;
+2. add truncate with safe cluster shrink/grow and rollback behavior;
+3. add mkdir and rmdir with explicit partial-write and cleanup rules;
+4. extend create, unlink, rename, and move to nested directories;
+5. define application-visible flush/fsync semantics;
+6. add reboot-persistence evidence on exact images and workflows.
 
-Long file names belong to the following real-FAT phase, after the generic mutation
-and durability contracts are established.
+Every new operation must define:
 
-## Current scope boundary
+- canonical path behavior;
+- read-only behavior;
+- partial progress;
+- specific status results;
+- rollback or recoverable failure boundary;
+- fixed-capacity limits;
+- host fixtures and QEMU evidence;
+- one real userland consumer.
 
-ArmoniOS still does **not** claim:
+## Boundary with v0.4
 
-- a completed or tagged v0.2 release until issue #76 is completed;
+Long-file-name support belongs to the real-FAT phase after generic mutation and
+durability contracts are established. Adding VFAT parsing before safe directory
+mutation would expand format surface without solving the more important ownership
+and rollback rules.
+
+## Current non-claims
+
+ArmoniOS does not yet claim:
+
 - exact FAT32 free-space accounting;
-- long FAT names;
+- VFAT long names;
 - directory creation or removal;
 - nested mutation transactions;
-- durable writes across reboot;
+- safe path-level replacement of a longer file with a shorter one;
+- durable writes proven across reboot;
 - ext2;
-- a stable frozen post-release ABI;
-- physical Raspberry Pi runtime support.
+- broad FAT interoperability;
+- physical Raspberry Pi storage support.
