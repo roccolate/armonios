@@ -81,6 +81,9 @@ jobs:
       - name: Test application image source policy
         run: bash tests/run_app_image_source_test.sh
 
+      - name: Test external KLI FAT image
+        run: bash tests/run_external_kli_fat_image_test.sh
+
       - name: Test nested FAT32 directories
         run: bash tests/run_fat32_directory_test.sh
 
