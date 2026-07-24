@@ -5,6 +5,7 @@
 
 #include "kernel/boot_program.h"
 #include "kernel/aarch64_state.h"
+#include "kernel/app_image_source.h"
 #include "kernel/layout.h"
 #include "kernel/mm/pmm.h"
 #include "kernel/mm/mmu.h"
@@ -93,12 +94,16 @@ static void free_user_storage(panel_user_storage_t *storage) {
     storage->stack_paddr = 0;
 }
 
-static int load_named_image(const char *name, user_image_t *image,
-                            uint32_t slot, uint32_t entry_index,
-                            panel_user_storage_t *storage) {
+static int load_image(const char *name, const char *bootfs_name,
+                      const char *vfs_path, user_image_t *image,
+                      uint32_t slot, uint32_t entry_index,
+                      panel_user_storage_t *storage) {
     uint64_t image_paddr;
+    int status;
 
-    if (storage == 0 || storage->image_paddr != 0) {
+    if (name == 0 || image == 0 || storage == 0 ||
+        storage->image_paddr != 0 ||
+        ((bootfs_name == 0) == (vfs_path == 0))) {
         return -1;
     }
 
@@ -108,10 +113,16 @@ static int load_named_image(const char *name, user_image_t *image,
     }
     zero_memory(image_paddr, KERNEL_USER_IMAGE_SLOT_SIZE);
 
-    if (user_image_load_bootfs_flat(image, name, name,
-                                    image_paddr,
-                                    KERNEL_USER_IMAGE_SLOT_SIZE,
-                                    entry_index) != 0) {
+    if (bootfs_name != 0) {
+        status = user_image_load_bootfs_flat(
+            image, name, bootfs_name, image_paddr,
+            KERNEL_USER_IMAGE_SLOT_SIZE, entry_index);
+    } else {
+        status = user_image_load_vfs_flat(
+            image, name, vfs_path, image_paddr,
+            KERNEL_USER_IMAGE_SLOT_SIZE, entry_index);
+    }
+    if (status != 0) {
         free_image_pages(image_paddr);
         return -1;
     }
@@ -246,30 +257,17 @@ int app_spawn_vfs(const char *path, uint32_t entry_index,
     user_image_t image;
     panel_user_storage_t storage = {0};
     uint32_t slot;
-    const char *app_name;
-    size_t name_len;
+    app_image_source_t source;
     uint64_t argv_vaddr = 0;
 
-    if (path == 0 || g_spawn_memory_size == 0) {
-        return -1;
-    }
-
-    app_name = vfs_strip_prefix(path, "/armonios/");
-    if (app_name == 0) {
-        return -1;
-    }
-
-    name_len = 0;
-    while (app_name[name_len] != '\0') {
-        name_len++;
-    }
-    if (name_len == 0 || name_len >= 32) {
+    if (g_spawn_memory_size == 0 ||
+        app_image_source_resolve(path, &source) != 0) {
         return -1;
     }
 
     (void)process_reclaim_zombies();
     parent = process_current();
-    process = process_alloc(g_next_spawn_pid++, app_name);
+    process = process_alloc(g_next_spawn_pid++, source.name);
     if (process == 0) {
         return -1;
     }
@@ -287,7 +285,11 @@ int app_spawn_vfs(const char *path, uint32_t entry_index,
         return -1;
     }
 
-    if (load_named_image(app_name, &image, slot, entry_index, &storage) != 0) {
+    if (load_image(
+            source.name,
+            source.kind == APP_IMAGE_SOURCE_BOOTFS ? source.path : 0,
+            source.kind == APP_IMAGE_SOURCE_VFS ? source.path : 0,
+            &image, slot, entry_index, &storage) != 0) {
         process_release(process);
         free_user_storage(&storage);
         return -1;
@@ -347,8 +349,8 @@ uint64_t panel_boot_run(uint64_t memory_base, uint64_t memory_size,
         return 1;
     }
 
-    if (load_named_image(PANEL_BOOT_APP, &panel_image, slot, 0,
-                         &storage) != 0) {
+    if (load_image(PANEL_BOOT_APP, PANEL_BOOT_APP, 0, &panel_image,
+                   slot, 0, &storage) != 0) {
         process_release(panel);
         free_user_storage(&storage);
         uart_puts("panel_boot: image load failed\n");

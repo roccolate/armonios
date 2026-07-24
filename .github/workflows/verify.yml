@@ -78,6 +78,9 @@ jobs:
       - name: Test KLI1 image loading from VFS
         run: bash tests/run_user_image_vfs_loader_test.sh
 
+      - name: Test application image source policy
+        run: bash tests/run_app_image_source_test.sh
+
       - name: Test nested FAT32 directories
         run: bash tests/run_fat32_directory_test.sh
 
