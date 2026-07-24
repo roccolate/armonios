@@ -17,7 +17,7 @@ jobs:
   verify:
     name: Build, host tests, and FAT32 smoke
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
@@ -84,6 +84,9 @@ jobs:
       - name: Test external KLI FAT image
         run: bash tests/run_external_kli_fat_image_test.sh
 
+      - name: Execute external KLI from FAT32 in EL0
+        run: bash tools/qemu_external_kli_runtime_test.sh
+
       - name: Test nested FAT32 directories
         run: bash tests/run_fat32_directory_test.sh
 
@@ -133,6 +136,15 @@ jobs:
         with:
           name: qemu-fs-test-log
           path: build/qemu-fs-test.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload external KLI runtime log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: external-kli-runtime-log
+          path: build/tests/external-kli-runtime/serial.log
           if-no-files-found: warn
           retention-days: 14
 
