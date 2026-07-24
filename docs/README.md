@@ -24,6 +24,7 @@ adding another temporary banner; correct the stale source.
 | Area | Document |
 |---|---|
 | Built-in applications and their limits | [`APPLICATIONS.md`](APPLICATIONS.md) |
+| External SDK, KLI1 loading, and FAT32 execution | [`EXTERNAL_APPLICATIONS.md`](EXTERNAL_APPLICATIONS.md) |
 | Public syscall surface | [`SYSCALLS.md`](SYSCALLS.md) |
 | Public ABI ownership and compatibility | [`PUBLIC_ABI.md`](PUBLIC_ABI.md) |
 | Structured VFS metadata | [`VFS_METADATA_ABI.md`](VFS_METADATA_ABI.md) |
@@ -87,6 +88,8 @@ A behavior-changing change should update, where relevant:
 - `ROADMAP.md` when a planned cut lands or ordering changes;
 - `TECHNICAL_RISKS.md` when a risk opens, closes, or changes boundary;
 - `APPLICATIONS.md` when a built-in application changes behavior;
+- `EXTERNAL_APPLICATIONS.md` when the SDK, KLI loader, or external execution
+  route changes;
 - tests and evidence records.
 
 Documentation-only changes may correct, clarify, reorganize, or downgrade claims.
