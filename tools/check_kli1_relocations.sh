@@ -2,8 +2,8 @@
 
 # Reject input-object relocations that cannot survive KLI1's load model.
 #
-# KLI1 images are linked at address zero, copied to a page-aligned EL0 base, and
-# executed without a runtime relocator. PC-relative references and low-12-bit
+# The kernel loader copies KLI1 images linked at address zero to a page-aligned
+# EL0 base and applies no runtime fixups. PC-relative references and low-12-bit
 # page-relative address materialisation remain valid after that move. Absolute
 # pointers, GOT/dynamic-linker references, and TLS references do not.
 
