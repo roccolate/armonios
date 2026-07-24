@@ -43,3 +43,14 @@ DEPS += $(FOUNDATION_OBJS:.o=.d)
 # The original kernel target was parsed before the appended object list. Add the
 # prerequisites explicitly; its deferred link recipe sees the updated OBJS.
 $(KERNEL_ELF): $(FOUNDATION_OBJS)
+
+# Minimal console SDK. libarmdesk is intentionally excluded until its compiled
+# library and public object model are promoted in later independent cuts.
+SDK_DIR ?= $(BUILD_DIR)/sdk
+SDK_KLI1_HEADER_OBJ := $(BUILD_DIR)/$(APPS_DIR)/kli1_header.o
+SDK_KLI1_END_OBJ := $(BUILD_DIR)/$(APPS_DIR)/kli1_end.o
+
+.PHONY: sdk
+
+sdk: libkarm $(SDK_KLI1_HEADER_OBJ) $(SDK_KLI1_END_OBJ)
+	@bash tools/build_sdk.sh "$(BUILD_DIR)" "$(SDK_DIR)"
