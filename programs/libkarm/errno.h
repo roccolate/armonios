@@ -1,8 +1,8 @@
 // libkarm/errno.h
 //
 // Stable libkarm names for the public ArmoniOS syscall error ABI. Numeric
-// values live in <include/armonios/abi/errors.h> so kernel and userland compile
-// against one source of truth.
+// values live in <armonios/abi/errors.h> so kernel and userland compile against
+// one source of truth.
 //
 // `kli_isok` and `kli_again` exist because several syscalls (non-blocking read,
 // IPC recv/send, window event poll) return EAGAIN as a normal control-flow
@@ -11,7 +11,7 @@
 #ifndef ARMONIOS_PROGRAMS_LIBKARM_ERRNO_H
 #define ARMONIOS_PROGRAMS_LIBKARM_ERRNO_H
 
-#include "include/armonios/abi/errors.h"
+#include <armonios/abi/errors.h>
 
 /* Historical libkarm spellings retained for source compatibility. */
 #define KLI_NOMEM    ARMONIOS_ERR_NOMEM
