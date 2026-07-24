@@ -15,6 +15,7 @@
 #define VFS_MAX_GLOBAL_OPEN_FILES (VFS_MAX_OPEN_FILES * 16U)
 #define VFS_MAX_PATH 64U
 #define VFS_NAME_MAX 64U
+#define VFS_FILESYSTEM_NAME_MAX 16U
 #define VFS_READDIR_MAX_ENTRIES 8U
 
 /* Historical kernel spellings retained as aliases of the public ABI. */
@@ -33,6 +34,13 @@
 #define VFS_ATTRIBUTE_HIDDEN    0x02U
 #define VFS_ATTRIBUTE_SYSTEM    0x04U
 #define VFS_ATTRIBUTE_ARCHIVE   0x08U
+
+#define VFS_FS_FLAG_READ_ONLY        ARM_FS_FLAG_READ_ONLY
+#define VFS_FS_FLAG_DIRECTORIES      ARM_FS_FLAG_DIRECTORIES
+#define VFS_FS_FLAG_LONG_NAMES       ARM_FS_FLAG_LONG_NAMES
+#define VFS_FS_FLAG_FLUSH            ARM_FS_FLAG_FLUSH
+#define VFS_FS_FLAG_TRUNCATE         ARM_FS_FLAG_TRUNCATE
+#define VFS_FS_FLAG_FREE_BYTES_VALID ARM_FS_FLAG_FREE_BYTES_VALID
 
 /*
  * Fixed-table kernel VFS facade.
@@ -54,6 +62,16 @@ typedef struct {
     char name[VFS_NAME_MAX];
     vfs_metadata_t metadata;
 } vfs_dirent_t;
+
+typedef struct {
+    uint64_t total_bytes;
+    uint64_t free_bytes;
+    uint32_t block_size;
+    uint32_t max_name_length;
+    uint32_t max_path_length;
+    uint32_t flags;
+    char filesystem[VFS_FILESYSTEM_NAME_MAX];
+} vfs_fsinfo_t;
 
 typedef int (*vfs_read_fn_t)(void *context, uint64_t offset, uint8_t *buffer,
                              uint64_t capacity, uint64_t *bytes_read);
@@ -93,6 +111,8 @@ typedef int (*vfs_mount_readdir_path_fn_t)(void *context, const char *path,
                                            vfs_dirent_t *entries,
                                            uint64_t max_entries,
                                            uint64_t *entries_written);
+typedef int (*vfs_mount_fsinfo_fn_t)(void *context, const char *path,
+                                     vfs_fsinfo_t *info);
 typedef int (*vfs_mount_unlink_fn_t)(void *context, const char *path);
 typedef int (*vfs_mount_rename_fn_t)(void *context, const char *old_path,
                                      const char *new_path);
@@ -104,6 +124,7 @@ typedef struct {
     vfs_mount_list_path_fn_t list_path;
     vfs_mount_metadata_path_fn_t metadata_path;
     vfs_mount_readdir_path_fn_t readdir_path;
+    vfs_mount_fsinfo_fn_t fsinfo;
     vfs_mount_unlink_fn_t unlink;
     vfs_mount_rename_fn_t rename;
 } vfs_mount_ops_t;
@@ -140,17 +161,19 @@ int vfs_list_at(const char *path, uint64_t offset, uint8_t *buffer,
 int vfs_list(const char *path, uint8_t *buffer, uint64_t capacity,
              uint64_t *bytes_written);
 
-/* Filesystem-neutral structured metadata. */
+/* Filesystem-neutral structured metadata and mount information. */
 int vfs_metadata(const char *path, vfs_metadata_t *metadata);
 int vfs_readdir(const char *path, uint64_t start_index,
                 vfs_dirent_t *entries, uint64_t max_entries,
                 uint64_t *entries_written);
+int vfs_fsinfo(const char *path, vfs_fsinfo_t *info);
 
 /* Public ABI adapters. The global ABI remains 1.0 during pre-release work. */
 int vfs_stat_v2(const char *path, arm_stat_v2_t *stat);
 int vfs_readdir_v2(const char *path, uint64_t start_index,
                    arm_dirent_v2_t *entries, uint64_t max_entries,
                    uint64_t *entries_written);
+int vfs_fsinfo_v1(const char *path, arm_fsinfo_t *info);
 
 int vfs_open(const char *path);
 int vfs_open_flags(const char *path, uint32_t flags);

@@ -83,6 +83,8 @@ static uint64_t syscall_call(process_t *current, const uint64_t x[31]) {
         return (uint64_t)sys_stat_v2(current, x[0], x[1]);
     case SYS_READDIR_V2:
         return (uint64_t)sys_readdir_v2(current, x[0], x[1], x[2], x[3]);
+    case SYS_FSINFO:
+        return (uint64_t)sys_fsinfo(current, x[0], x[1]);
     case SYS_IPC_SEND:
         return (uint64_t)sys_ipc_send(current, x[0], x[1], x[2]);
     case SYS_IPC_RECV:

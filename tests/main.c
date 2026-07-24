@@ -347,6 +347,7 @@ void test_virtio_net_init_negotiates_feature_banks(void);
 void test_virtio_net_tx_uses_single_frame_buffer(void);
 void test_virtio_net_ready_ops_reject_invalid_device_state(void);
 void test_syscall_abi_implemented_numbers_match_dispatch(void);
+void test_syscall_abi_fsinfo_constants(void);
 void test_syscall_abi_ranges_do_not_overlap(void);
 void test_syscall_abi_error_codes_match_documented_constants(void);
 void test_syscall_abi_vfs_open_flags_match_documentation(void);
@@ -723,6 +724,7 @@ int main(void) {
     RUN_TEST(test_virtio_net_tx_uses_single_frame_buffer);
     RUN_TEST(test_virtio_net_ready_ops_reject_invalid_device_state);
     RUN_TEST(test_syscall_abi_implemented_numbers_match_dispatch);
+    RUN_TEST(test_syscall_abi_fsinfo_constants);
     RUN_TEST(test_syscall_abi_ranges_do_not_overlap);
     RUN_TEST(test_syscall_abi_error_codes_match_documented_constants);
     RUN_TEST(test_syscall_abi_vfs_open_flags_match_documentation);

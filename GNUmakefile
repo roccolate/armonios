@@ -15,7 +15,9 @@ FOUNDATION_OBJS := \
     $(BUILD_DIR)/kernel/fat32_device.o \
     $(BUILD_DIR)/kernel/fat32_directory.o \
     $(BUILD_DIR)/kernel/vfs_metadata.o \
-    $(BUILD_DIR)/kernel/syscall_vfs_metadata.o
+    $(BUILD_DIR)/kernel/syscall_vfs_metadata.o \
+    $(BUILD_DIR)/kernel/vfs_fsinfo.o \
+    $(BUILD_DIR)/kernel/syscall_vfs_fsinfo.o
 
 # RPi4 diagnostic builds already add mbr.o through STORAGE_DEV. Every other
 # production build needs it because kernel storage can open bounded MBR

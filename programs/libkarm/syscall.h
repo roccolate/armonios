@@ -2,7 +2,7 @@
 //
 // Typed C wrappers for every ArmoniOS syscall that is part of the
 // stable process / memory / I/O / IPC / system-info surface (numbers
-// 1..8, 20..21, 40..50, 60..61, 100..102). Each wrapper takes the
+// 1..8, 20..21, 40..51, 60..61, 100..102). Each wrapper takes the
 // syscall number from the public ArmoniOS ABI header and dispatches
 // through the raw trampolines in syscall.S.
 //
@@ -138,6 +138,11 @@ static inline long kli_readdir_v2(const char *path, uint64_t start_index,
     return __syscall4(SYS_READDIR_V2, (long)(uintptr_t)path,
                       (long)start_index, (long)(uintptr_t)entries,
                       (long)max_entries);
+}
+
+static inline long kli_fsinfo(const char *path, arm_fsinfo_t *info_ptr) {
+    return __syscall2(SYS_FSINFO, (long)(uintptr_t)path,
+                      (long)(uintptr_t)info_ptr);
 }
 
 static inline long kli_unlink(const char *path_ptr) {

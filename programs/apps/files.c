@@ -24,6 +24,7 @@
 #define PATH_CAP        32
 #define LIST_BUF_CAP   256
 #define STATUS_CAP      40
+#define FS_LABEL_CAP    40
 
 #define COLOR_BG        0xff182028U
 #define COLOR_BORDER    0xff809090U
@@ -55,6 +56,8 @@ typedef struct {
     uint32_t entry_types[ENTRY_CAP];
     uint64_t entry_sizes[ENTRY_CAP];
     arm_dirent_v2_t dirents[ENTRY_CAP];
+    arm_fsinfo_t fsinfo;
+    char fs_label[FS_LABEL_CAP];
     char list_buf[LIST_BUF_CAP];
     char input[NAME_CAP];
     int input_len;
@@ -162,6 +165,75 @@ static void clear_entries(files_state_t *s) {
 }
 
 
+
+static size_t text_length(const char *text) {
+    size_t length = 0;
+
+    while (text != 0 && text[length] != '\0') {
+        length++;
+    }
+    return length;
+}
+
+static void append_cstr(char *destination, size_t capacity,
+                        const char *source) {
+    size_t out = text_length(destination);
+    size_t in = 0;
+
+    while (source != 0 && source[in] != '\0' && out + 1 < capacity) {
+        destination[out++] = source[in++];
+    }
+    if (capacity != 0) {
+        destination[out] = '\0';
+    }
+}
+
+static void append_u64(char *destination, size_t capacity, uint64_t value) {
+    char digits[21];
+    size_t count = 0;
+
+    do {
+        digits[count++] = (char)('0' + value % 10U);
+        value /= 10U;
+    } while (value != 0 && count < sizeof(digits));
+
+    while (count != 0) {
+        char one[2] = {digits[--count], '\0'};
+        append_cstr(destination, capacity, one);
+    }
+}
+
+static void refresh_fsinfo(files_state_t *s) {
+    uint64_t amount;
+    const char *unit;
+
+    s->fsinfo.version = ARM_FSINFO_VERSION;
+    s->fsinfo.struct_size = sizeof(s->fsinfo);
+    if (kli_fsinfo("/fat", &s->fsinfo) < 0) {
+        copy_cstr(s->fs_label, sizeof(s->fs_label), "FSINFO UNAVAILABLE");
+        return;
+    }
+
+    copy_cstr(s->fs_label, sizeof(s->fs_label), s->fsinfo.filesystem);
+    append_cstr(s->fs_label, sizeof(s->fs_label), " ");
+    if (s->fsinfo.total_bytes >= 1024U * 1024U) {
+        amount = s->fsinfo.total_bytes / (1024U * 1024U);
+        unit = "MiB";
+    } else if (s->fsinfo.total_bytes >= 1024U) {
+        amount = s->fsinfo.total_bytes / 1024U;
+        unit = "KiB";
+    } else {
+        amount = s->fsinfo.total_bytes;
+        unit = "B";
+    }
+    append_u64(s->fs_label, sizeof(s->fs_label), amount);
+    append_cstr(s->fs_label, sizeof(s->fs_label), unit);
+    append_cstr(s->fs_label, sizeof(s->fs_label),
+                (s->fsinfo.flags & ARM_FS_FLAG_READ_ONLY) != 0U
+                    ? " RO"
+                    : " RW");
+}
+
 static int load_structured_entries(files_state_t *s) {
     long count = kli_readdir_v2("/fat", 0, s->dirents, ENTRY_CAP);
 
@@ -233,6 +305,8 @@ static void restore_selection(files_state_t *s, const char *name) {
 
 static void refresh_list(files_state_t *s) {
     char previous[NAME_CAP];
+
+    refresh_fsinfo(s);
     previous[0] = '\0';
     if (s->count > 0 && s->selected >= 0 && s->selected < s->count) {
         copy_cstr(previous, sizeof(previous), s->entries[s->selected]);
@@ -267,12 +341,13 @@ static void redraw(files_state_t *s) {
                                WIN_H - TITLE_BAR_H - 2, COLOR_BG);
     draw_text(s->wid, 12, 8, COLOR_TEXT, "FILES /fat");
     draw_text(s->wid, 12, 24, COLOR_DIM, "ENTER OPEN  N NEW  R RENAME  D DEL  F REFRESH");
-    draw_text(s->wid, 12, 40,
+    draw_text(s->wid, 12, 40, COLOR_DIM, s->fs_label);
+    draw_text(s->wid, 12, 52,
               s->mode == FILES_MODE_DELETE ? COLOR_WARN : COLOR_DIM,
               s->status);
 
     for (int i = 0; i < ENTRY_CAP; i++) {
-        long y = 60 + i * 16;
+        long y = 72 + i * 16;
         if (i == s->selected && s->count > 0) {
             (void)gui_window_draw_rect(s->wid, 8, y - 2, WIN_W - 16, 13,
                                        COLOR_SELECT);

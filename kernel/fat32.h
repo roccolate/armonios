@@ -45,6 +45,7 @@ typedef struct {
     uint8_t sector[FAT32_SECTOR_SIZE];
     uint8_t write_sector_buffer[FAT32_SECTOR_SIZE];
     uint8_t mounted;
+    uint8_t flush_supported;
 } fat32_fs_t;
 
 typedef struct {

@@ -47,6 +47,7 @@ void test_syscall_abi_implemented_numbers_match_dispatch(void) {
     TEST_ASSERT_EQUAL_UINT64(8U, sizeof(arm_stat_t));
     TEST_ASSERT_EQUAL_UINT64(32U, sizeof(arm_stat_v2_t));
     TEST_ASSERT_EQUAL_UINT64(96U, sizeof(arm_dirent_v2_t));
+    TEST_ASSERT_EQUAL_UINT64(64U, sizeof(arm_fsinfo_t));
 
     /* Implemented numbers must match the rows in docs/SYSCALLS.md under
      * "Implemented Now". A drift here means a number was renumbered
@@ -71,6 +72,7 @@ void test_syscall_abi_implemented_numbers_match_dispatch(void) {
     TEST_ASSERT_EQUAL_UINT64(48ULL, SYS_RENAME);
     TEST_ASSERT_EQUAL_UINT64(49ULL, SYS_STAT_V2);
     TEST_ASSERT_EQUAL_UINT64(50ULL, SYS_READDIR_V2);
+    TEST_ASSERT_EQUAL_UINT64(51ULL, SYS_FSINFO);
     TEST_ASSERT_EQUAL_UINT64(60ULL, SYS_IPC_SEND);
     TEST_ASSERT_EQUAL_UINT64(61ULL, SYS_IPC_RECV);
     TEST_ASSERT_EQUAL_UINT64(70ULL, SYS_WINDOW_CREATE);
@@ -95,6 +97,25 @@ void test_syscall_abi_implemented_numbers_match_dispatch(void) {
     TEST_ASSERT_EQUAL_UINT64(102ULL, SYS_PROCLIST);
 }
 
+void test_syscall_abi_fsinfo_constants(void) {
+    TEST_ASSERT_EQUAL_UINT64(1ULL, ARM_FSINFO_VERSION);
+    TEST_ASSERT_EQUAL_UINT64(16ULL, ARM_FS_NAME_MAX);
+    TEST_ASSERT_EQUAL_UINT64(0x01ULL, ARM_FS_FLAG_READ_ONLY);
+    TEST_ASSERT_EQUAL_UINT64(0x02ULL, ARM_FS_FLAG_DIRECTORIES);
+    TEST_ASSERT_EQUAL_UINT64(0x04ULL, ARM_FS_FLAG_LONG_NAMES);
+    TEST_ASSERT_EQUAL_UINT64(0x08ULL, ARM_FS_FLAG_FLUSH);
+    TEST_ASSERT_EQUAL_UINT64(0x10ULL, ARM_FS_FLAG_TRUNCATE);
+    TEST_ASSERT_EQUAL_UINT64(0x20ULL, ARM_FS_FLAG_FREE_BYTES_VALID);
+    TEST_ASSERT_EQUAL_UINT64(16ULL, VFS_FILESYSTEM_NAME_MAX);
+    TEST_ASSERT_EQUAL_UINT64(ARM_FS_FLAG_READ_ONLY, VFS_FS_FLAG_READ_ONLY);
+    TEST_ASSERT_EQUAL_UINT64(ARM_FS_FLAG_DIRECTORIES, VFS_FS_FLAG_DIRECTORIES);
+    TEST_ASSERT_EQUAL_UINT64(ARM_FS_FLAG_LONG_NAMES, VFS_FS_FLAG_LONG_NAMES);
+    TEST_ASSERT_EQUAL_UINT64(ARM_FS_FLAG_FLUSH, VFS_FS_FLAG_FLUSH);
+    TEST_ASSERT_EQUAL_UINT64(ARM_FS_FLAG_TRUNCATE, VFS_FS_FLAG_TRUNCATE);
+    TEST_ASSERT_EQUAL_UINT64(ARM_FS_FLAG_FREE_BYTES_VALID,
+                             VFS_FS_FLAG_FREE_BYTES_VALID);
+}
+
 void test_syscall_abi_ranges_do_not_overlap(void) {
     /* Process, memory, VFS, IPC, window and info ranges must not bleed
      * into each other. An overlap means a syscall lost its number to
@@ -102,7 +123,7 @@ void test_syscall_abi_ranges_do_not_overlap(void) {
     TEST_ASSERT_TRUE(SYS_KILL < SYS_MMAP);
     TEST_ASSERT_TRUE(SYS_SPAWN_ARGV < SYS_MMAP);
     TEST_ASSERT_TRUE(SYS_MUNMAP < SYS_OPEN);
-    TEST_ASSERT_TRUE(SYS_READDIR_V2 < SYS_IPC_SEND);
+    TEST_ASSERT_TRUE(SYS_FSINFO < SYS_IPC_SEND);
     TEST_ASSERT_TRUE(SYS_IPC_RECV < SYS_WINDOW_CREATE);
     TEST_ASSERT_TRUE(SYS_WINDOW_FLUSH < SYS_TIMEINFO);
 }
@@ -122,6 +143,22 @@ void test_syscall_abi_error_codes_match_documented_constants(void) {
                              (uint64_t)(int64_t)ARMONIOS_ERR_AGAIN);
     TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)-13,
                              (uint64_t)(int64_t)ARMONIOS_ERR_PERM);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)-14,
+                             (uint64_t)(int64_t)ARMONIOS_ERR_EXIST);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)-15,
+                             (uint64_t)(int64_t)ARMONIOS_ERR_NOTDIR);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)-16,
+                             (uint64_t)(int64_t)ARMONIOS_ERR_ISDIR);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)-17,
+                             (uint64_t)(int64_t)ARMONIOS_ERR_NOTEMPTY);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)-18,
+                             (uint64_t)(int64_t)ARMONIOS_ERR_NOSPC);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)-19,
+                             (uint64_t)(int64_t)ARMONIOS_ERR_ROFS);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)-20,
+                             (uint64_t)(int64_t)ARMONIOS_ERR_NOTSUP);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)-21,
+                             (uint64_t)(int64_t)ARMONIOS_ERR_RANGE);
 
     TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_NOMEM,
                              (uint64_t)(int64_t)USER_VM_ERR_NOMEM);
@@ -135,12 +172,30 @@ void test_syscall_abi_error_codes_match_documented_constants(void) {
                              (uint64_t)(int64_t)ERR_AGAIN);
     TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_PERM,
                              (uint64_t)(int64_t)ERR_PERM);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_EXIST,
+                             (uint64_t)(int64_t)ERR_EXIST);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_NOTDIR,
+                             (uint64_t)(int64_t)ERR_NOTDIR);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_ISDIR,
+                             (uint64_t)(int64_t)ERR_ISDIR);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_NOTEMPTY,
+                             (uint64_t)(int64_t)ERR_NOTEMPTY);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_NOSPC,
+                             (uint64_t)(int64_t)ERR_NOSPC);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_ROFS,
+                             (uint64_t)(int64_t)ERR_ROFS);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_NOTSUP,
+                             (uint64_t)(int64_t)ERR_NOTSUP);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)(int64_t)ARMONIOS_ERR_RANGE,
+                             (uint64_t)(int64_t)ERR_RANGE);
 
     TEST_ASSERT_TRUE(ARMONIOS_ERR_NOMEM != ARMONIOS_ERR_NOENT);
     TEST_ASSERT_TRUE(ARMONIOS_ERR_NOENT != ARMONIOS_ERR_BADF);
     TEST_ASSERT_TRUE(ARMONIOS_ERR_BADF != ARMONIOS_ERR_INVAL);
     TEST_ASSERT_TRUE(ARMONIOS_ERR_INVAL != ARMONIOS_ERR_AGAIN);
     TEST_ASSERT_TRUE(ARMONIOS_ERR_AGAIN != ARMONIOS_ERR_PERM);
+    TEST_ASSERT_TRUE(ARMONIOS_ERR_PERM != ARMONIOS_ERR_EXIST);
+    TEST_ASSERT_TRUE(ARMONIOS_ERR_EXIST != ARMONIOS_ERR_RANGE);
 }
 
 void test_syscall_abi_vfs_open_flags_match_documentation(void) {
@@ -218,6 +273,4 @@ void test_syscall_abi_user_range_validation_rejects_out_of_region(void) {
     TEST_ASSERT_TRUE(process_user_range_contains(&process, 0x1000ULL, 0ULL));
     TEST_ASSERT_TRUE(process_user_range_contains(&process, 0x1100ULL, 0ULL));
     TEST_ASSERT_TRUE(process_user_range_contains(&process, 0x0ULL, 0ULL));
-
-    process_release(&process);
 }
