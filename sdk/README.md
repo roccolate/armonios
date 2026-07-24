@@ -22,10 +22,9 @@ examples/hello-console/  external console example
 
 ## Current scope
 
-This is the first console SDK foundation. It can compile a KLI1 image outside the
-ArmoniOS repository, but the operating system does not yet load arbitrary KLI
-files from FAT32. Until the VFS loader lands, generated files are build artifacts
-used to prove the public toolchain and binary contract.
+The console SDK can compile a KLI1 image outside the ArmoniOS repository. The
+kernel can load a regular KLI1 file from an absolute VFS path without embedding
+or linking that application into `kernel.bin`.
 
 Applications produced by this SDK are trusted sideloaded applications. ArmoniOS
 does not yet claim a hardened sandbox for arbitrary third-party binaries.
@@ -37,6 +36,7 @@ does not yet claim a hardened sandbox for arbitrary third-party binaries.
 - No mutable static `.data` or `.bss`; use the public memory API.
 - No runtime relocator; absolute pointers requiring fixups are rejected.
 - The current kernel process slot accepts images up to 8192 bytes.
+- The current FAT32 test/distribution path uses 8.3 names.
 
 ## Build the example
 
@@ -53,3 +53,21 @@ examples/hello-console/build/HELLO.KLI
 ```
 
 The example Makefile uses only files inside the generated SDK tree.
+
+## Run the example in ArmoniOS
+
+From the ArmoniOS source tree:
+
+```sh
+make external-kli-image
+make qemu-external-kli
+```
+
+Then open the graphical Shell and run:
+
+```text
+run /fat/HELLO.KLI
+```
+
+`external-kli-image` builds the SDK example and places it in a separate FAT32
+image. Creating that disk image does not rebuild or relink `kernel.bin`.
