@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# This host gate links the real KLI1 parser with a controlled VFS backend and
+# covers fragmented progress, malformed files, and the fixed image-slot bound.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
