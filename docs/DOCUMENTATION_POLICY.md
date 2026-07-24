@@ -1,326 +1,259 @@
-# Documentation Policy
+# Documentation policy
 
-This document defines how ArmoniOS documentation earns and keeps trust.
-
-Code presence is implementation evidence. It does not by itself prove that a
+ArmoniOS documentation separates implementation, verification, future intent,
+active risk, and historical evidence. Code presence alone does not prove that a
 target builds, boots, remains responsive, preserves data, works visibly, or works
 on physical hardware.
 
-## Canonical document roles
+The documentation map is maintained in `README.md` inside this directory.
 
-When documents disagree, use this order:
+## Canonical roles
 
-1. `CURRENT_STATE.md` — audited operational status and exact promoted evidence;
-2. `TECHNICAL_RISKS.md` — open correctness, stability, security, responsiveness,
-   reproducibility, and portability risks;
-3. `ROADMAP.md` — ordered future work and release exit criteria;
-4. implemented technical contracts:
-   - `ARCHITECTURE.md`;
-   - `RUNTIME_SERVICE.md`;
-   - `MEMORY_MAP.md`;
-   - `SYSCALLS.md`;
-   - `GUI_ABI_NOTES.md`;
-   - `PORTING.md`;
-5. operating guidance derived from the sources above:
-   - `DEVELOPMENT_GUIDE.md`;
-   - `CONTRIBUTING.md`;
-   - repository-root `AGENTS.md`;
-6. repository-root `README.md` — public summary derived from verified documents;
-7. issues, PR descriptions, comments, external reviews, and chat notes — working
-   context only until promoted into the canonical documents.
+| Question | Source |
+|---|---|
+| What exists on current `main`? | `CURRENT_STATE.md` |
+| How is it implemented? | `ARCHITECTURE.md` and focused reference documents |
+| What remains to be built? | `ROADMAP.md` |
+| What risks are active? | `TECHNICAL_RISKS.md` |
+| How should development work proceed? | `DEVELOPMENT_GUIDE.md` |
+| What was proven on an exact historical tree? | `history/` or a release record |
+| What should a new reader know? | repository-root `README.md` |
 
-Do not create a second current-state, handoff, audit-summary, latest-status,
-release-status, or progress-log document. Correct the canonical source instead.
+Issues, pull requests, reviews, and chat notes are working context. They become
+canonical only after their durable facts are incorporated into the appropriate
+live or historical document.
+
+Do not create competing “latest status”, handoff, progress-log, or second
+current-state documents. Correct the canonical source.
+
+## Source-of-truth order
+
+When claims conflict, inspect in this order:
+
+1. current code and permanent tests;
+2. public ABI headers for public numbers and layouts;
+3. focused implementation/reference documents;
+4. `ARCHITECTURE.md`;
+5. `CURRENT_STATE.md`;
+6. `ROADMAP.md` for future intent;
+7. historical records, issues, PRs, and external notes for provenance only.
+
+A contradiction is a documentation defect. Do not hide it under another dated
+banner.
 
 ## Evidence labels
 
-Use these labels exactly when recording subsystem status:
-
 | Label | Meaning |
 |---|---|
-| `IMPLEMENTED` | Relevant code exists and was inspected. No build or runtime claim is implied. |
-| `HOST-VERIFIED` | Native host tests passed for the stated pure-C or mocked behavior. |
-| `BUILD-VERIFIED` | The stated target compiled and linked successfully. |
-| `QEMU-VERIFIED` | A QEMU run reached explicit expected markers or assertions. |
-| `CI-VERIFIED` | A hosted CI run completed the stated command and retained enough identity/log information to audit it. |
+| `IMPLEMENTED` | Relevant code exists and was inspected. |
+| `HOST-VERIFIED` | A native host test passed for pure or mocked behavior. |
+| `BUILD-VERIFIED` | The named target compiled and linked. |
+| `QEMU-VERIFIED` | QEMU reached explicit asserted behavior or markers. |
+| `CI-VERIFIED` | A hosted run completed the named checks with auditable identity. |
 | `MANUAL-VERIFIED` | A named person completed a documented visible or hardware workflow. |
-| `UNVERIFIED` | Code or intent exists, but required evidence is missing. |
-| `KNOWN-BROKEN` | A reproducible defect or contradiction prevents the claim. |
-| `PLANNED` | No current implementation claim. |
+| `UNVERIFIED` | Implementation or intent exists without required evidence. |
+| `KNOWN-BROKEN` | A reproducible defect prevents the claim. |
+| `PLANNED` | No implementation claim. |
 
-A stronger label does not automatically prove adjacent claims:
+Evidence does not automatically expand to adjacent claims:
 
 - host tests do not prove MMIO;
-- a successful build does not prove boot;
-- a QEMU serial marker does not prove visible layout or interaction;
+- a build does not prove boot;
+- a serial marker does not prove visible layout or interaction;
 - EOI ordering does not prove bounded exception-return latency;
 - a consumption counter does not prove absence of device loss;
 - one successful boot does not prove repeatability;
 - repeated non-reproduction does not identify a root cause;
-- a physical serial boot does not prove storage writes;
-- one filesystem fixture does not prove broad interoperability.
+- QEMU evidence does not prove physical hardware;
+- successful writes do not prove reboot durability;
+- one FAT fixture does not prove broad interoperability.
 
-## Promoted versus investigation evidence
+## Live versus historical evidence
 
-Evidence belongs to one of two operational categories.
+### Live documents
 
-### Promoted evidence
+Live documents describe the current contract or current capability. They should
+prefer stable component names and present-tense facts. They should not carry:
 
-Promoted evidence supports a claim in `CURRENT_STATE.md`. It must identify the
-exact tree and have completed all required checks for that claim.
+- branch names;
+- draft PR status;
+- obsolete investigations;
+- a measured image size that changes with later commits;
+- long workflow histories;
+- exact release identities that belong to one historical tree.
 
-### Investigation evidence
+### Historical records
 
-Investigation evidence comes from an issue branch, draft PR, ad hoc diagnostic
-image, partial workflow, failed run, rerun, or experiment. It may:
+Historical records may preserve:
 
-- narrow hypotheses;
-- reproduce a defect;
-- demonstrate non-reproduction under stated conditions;
-- validate a proposed test harness;
-- improve future diagnostics.
+- exact commits and PR heads;
+- workflow IDs;
+- measured sizes;
+- dated manual observations;
+- experiment scope;
+- accepted limitations;
+- evidence boundaries.
 
-It may not upgrade the promoted `main` claim until the final tree is merged or
-otherwise selected for promotion, the required checks complete, and
-`CURRENT_STATE.md` records the evidence.
+A historical record applies only to the exact tree and conditions it names. It
+must not be treated as proof for later `main` without content equivalence or a new
+run.
 
-An in-progress, queued, cancelled, or timed-out workflow is not passing evidence.
-A cancelled run may still contain useful investigation artifacts, but its scope
-must be described accurately.
+## Automated evidence identity
 
-A clean soak is evidence of non-reproduction for the tested sample and conditions.
-It is not proof that an unexplained intermittent correctness observation cannot
-occur.
+A release or promoted historical record should identify:
 
-## Evidence identity
-
-Every promoted automated result must identify the exact code tree it exercised.
-Record:
-
-- commit or PR head SHA;
-- merge commit when different;
-- workflow/run ID or local command;
+- exact implementation commit or tested tree;
+- PR head and merge commit when relevant;
+- command or workflow/run ID;
 - environment when material;
 - asserted behavior or required markers;
-- artifacts/logs where available;
+- artifacts or logs where available;
 - checks not run;
-- evidence boundary.
+- known limitations and unobservable behavior.
 
-### Pull-request and merge evidence
-
-GitHub Actions may run against a PR head or a synthetic merge ref.
-
-When a PR is merged:
-
-- the successful run validates the tree it actually checked;
-- if the final merge commit has the same resulting content, the PR evidence may be
-  cited for that content-equivalent merge tree;
-- record both identifiers when the PR head and merge commit differ;
-- do not claim the merge commit was independently rerun unless a workflow actually
-  exercised it;
-- if merge conflict resolution or another content difference changes the tree,
-  rerun the required promotion gate.
-
-Empty-history commits that add and then remove the same content may be documented
-as content-equivalent only after an exact tree/file comparison confirms no net
-file difference.
-
-A green badge is not a substitute for exact run IDs in `CURRENT_STATE.md`.
-
-## Required status metadata
-
-Every substantial `CURRENT_STATE.md` update must include:
-
-- audit date;
-- audited implementation tree;
-- relevant merge and PR head identities;
-- documentation branch/PR when different;
-- exact commands or hosted workflow runs;
-- manual tester and workflow where applicable;
-- checks not run;
-- known limitations;
-- whether evidence applies to main, PR head, synthetic merge, local tree, QEMU,
-  manual visible use, or physical hardware.
-
-Do not use `latest`, `stable`, `complete`, `supported`, `working`, `done`, or
-`release candidate` without identifying evidence and scope.
+A green badge without the tested tree and scope is not a durable release record.
+Queued, cancelled, or timed-out runs are not passing evidence.
 
 ## Claim rules
 
 ### Static inspection
 
-Static inspection may justify `IMPLEMENTED`, `KNOWN-BROKEN`, an architectural
-limit, or a risk entry. It may not justify build, QEMU, CI, manual, or hardware
-verification.
+Static inspection can establish implementation, an architectural boundary, or a
+risk. It cannot establish build, QEMU, CI, manual, or hardware verification.
 
 ### Host tests
 
-A host test proves only the pure-C or mocked contract it asserts. It does not
-prove real exception timing, MMIO ordering, QEMU integration, or hardware.
+A host test proves the pure-C or mocked behavior it asserts. It does not prove real
+exception timing, device ordering, integration, or hardware.
 
 ### Build tests
 
-A successful compile/link proves symbol and build-contract compatibility. It does
-not prove boot or runtime behavior.
+A successful compile/link proves build-contract compatibility. It does not prove
+boot or runtime behavior.
 
 ### QEMU tests
 
-A QEMU test must assert deterministic guest output or another explicit result. A
-target that merely launches until timeout is not a passing test.
-
-Documentation must name the markers or behavior checked. “QEMU boots” is too broad
-when a gate reaches only a storage, DHCP, focus, or panel marker.
+A QEMU test must assert deterministic guest output or another explicit result.
+Launching until timeout is not a passing test. The claim should name the marker or
+workflow actually checked.
 
 ### Stress and soak tests
 
-A stress or soak claim must record:
+Record:
 
 - workload generation;
 - duration or iteration count;
-- stop/failure conditions;
+- failure and stop conditions;
 - progress/liveness signal;
-- loss/overflow/panic observability;
+- overflow, loss, panic, or corruption observability;
 - maximum or aggregate metrics where relevant;
-- what cannot be observed.
+- what the test cannot observe.
 
-A test-only image may validate a contract but must not be presented as the release
-artifact. Test instrumentation that forces a condition must be distinguished from
-natural production-threshold behavior.
+Forced instrumentation must be distinguished from natural production-threshold
+behavior. A test image is not automatically the release artifact.
 
 ### Manual visible tests
 
-Record:
-
-- tester;
-- date;
-- exact commit and image where available;
-- launch command;
-- display/input configuration;
-- workflow steps;
-- result;
-- observed limitations.
-
-Do not carry old manual evidence forward as if it were rerun on every automated
-baseline.
+Record tester, date, exact tree/image, launch command, setup, steps, result, and
+observed limitations. Historical manual evidence is not silently carried forward
+to every new tree.
 
 ### Physical hardware
 
-A board may be called supported only after all of the following are recorded:
+A board support claim requires:
 
-1. target builds and links;
-2. kernel reaches an explicit serial milestone on the physical board;
-3. exact board revision, firmware, boot files, and reproduction steps exist;
-4. each claimed subsystem has separate evidence;
-5. unsupported capabilities fail closed;
-6. destructive storage operations use an explicit safety plan and disposable
-   media where applicable.
+1. a reproducible build;
+2. an explicit physical serial milestone;
+3. exact board revision, firmware, boot files, and steps;
+4. separate evidence for each claimed subsystem;
+5. fail-closed behavior for unsupported capabilities;
+6. an explicit safety plan for destructive storage operations.
 
-Files under `drivers/boards/<board>/` do not constitute hardware support.
+Source files or a cross-build alone do not establish physical support.
 
-### Documentation-only changes
+## Behavior-changing workflow
+
+For a behavior-changing cut:
+
+1. identify the affected claim and risk;
+2. add or update the smallest focused test;
+3. run focused checks;
+4. run the full verification matrix before promotion;
+5. update public headers and focused reference documents with the code contract;
+6. update architecture when ownership or subsystem boundaries change;
+7. update current state when user-visible capability or a major limit changes;
+8. update roadmap when a planned cut lands or ordering changes;
+9. update risks when severity, mitigation, or exit criteria change;
+10. update README last.
+
+The author of a behavior change owns its tests and documentation.
+
+## Documentation-only changes
 
 Documentation-only changes may:
 
-- correct stale identifiers;
-- align contracts with already-promoted implementation;
-- clarify architecture;
-- downgrade unsupported language;
-- record investigation state;
-- add a risk discovered during validation;
-- reorganize roadmap dependencies or operating guidance.
+- correct stale facts;
+- align text with already-merged implementation;
+- clarify architecture and ownership;
+- downgrade unsupported wording;
+- separate historical evidence from live contracts;
+- add a risk discovered by inspection;
+- reorganize future dependencies.
 
-They may not upgrade runtime evidence. Newly discovered correctness, release, or
-maintenance risks belong in `TECHNICAL_RISKS.md`.
+They may not upgrade runtime evidence or claim a test was run when it was not.
 
-## Update workflow
+## Risks
 
-For every behavior-changing change:
+A live risk entry needs:
 
-1. identify the affected public claim and risk;
-2. add or update the smallest relevant automated test;
-3. run focused checks;
-4. run `bash tools/verify.sh` before promotion;
-5. update `TECHNICAL_RISKS.md` when risk state changes;
-6. update `CURRENT_STATE.md` with exact evidence;
-7. update architecture, runtime, memory, ABI, porting, or roadmap documents only
-   where their contract or ordering changed;
-8. update `DEVELOPMENT_GUIDE.md`, `CONTRIBUTING.md`, and `AGENTS.md` when operating
-   rules changed;
-9. update README last.
+- severity;
+- precise failure or limitation;
+- current mitigation or foundation;
+- concrete exit criteria.
 
-The author of a behavior-changing change owns its tests and documentation. No
-separate documentation team is assumed.
+A risk closes only when its exit criteria and evidence are recorded. A bounded
+residual may be accepted for one release with rationale, mitigation, release
+impact, and follow-up. Acceptance is not closure.
 
-## Closing or accepting a risk
+The live register should retain active risks and a compact closed-risk summary.
+Long experiment timelines belong in issues or historical records.
 
-### Closing
+## Release language
 
-A risk may move to `CLOSED` only when:
+A tree may be called a release candidate only when:
 
-- its exit criteria are satisfied;
-- exact evidence is named;
-- the affected release claim is updated;
-- follow-up boundaries remain explicit.
+- mandatory gates have deterministic pass/fail behavior;
+- release-blocking P0 risks are closed;
+- each release-blocking P1 risk is closed or explicitly accepted;
+- required manual workflows have dated results;
+- live documents agree;
+- the exact tested tree and artifact are identified;
+- unsupported product and hardware claims remain explicit.
 
-“Fixed”, “looks good”, “rerun passed”, or “all tests pass” is insufficient without
-scope and identity.
+Until then use language such as alpha, experimental, baseline, or promotion
+candidate with clear scope.
 
-### Accepting for a release
-
-A P1 residual may be marked `ACCEPTED FOR <release>` only when:
-
-- the remaining behavior is understood well enough to bound the claim;
-- the release impact and affected users/workloads are stated;
-- the rationale for accepting instead of fixing is recorded;
-- detection/mitigation exists where practical;
-- a follow-up issue or milestone is named when work remains;
-- the release notes repeat the limitation.
-
-Acceptance is not closure. The risk remains traceable.
-
-Closed and accepted risks stay in the register. Do not create a dated archive by
-default.
-
-## Release claims
-
-A version may be called a **release candidate** only when:
-
-- every mandatory gate has deterministic pass/fail behavior;
-- all P0 risks for that release are closed;
-- every P1 risk is closed or explicitly accepted with rationale;
-- required visible/manual workflows have dated results;
-- README, current state, risks, roadmap, architecture, runtime, and ABI documents
-  agree;
-- the exact tested tree and release artifact are identified;
-- unsupported hardware/product claims remain explicit non-claims.
-
-Until those conditions are met, use `alpha`, `experimental`, `baseline`,
-`hardening candidate`, or `promotion candidate` as appropriate.
-
-## Verification record template
+## Historical record template
 
 ```text
+Title and scope:
 Date:
-Implementation commit/tree:
-PR head and merge commit (if applicable):
-Documentation branch/PR (if different):
+Implementation tree:
+PR head / merge identity, when relevant:
 Environment:
 
 Commands or hosted runs:
-- command/run ID -> result and asserted marker/contract
+- command/run -> result and asserted behavior
 
 Manual checks:
-- workflow -> result, tester, exact commit/image
-
-Investigation evidence:
-- branch/run -> result, sample/workload, evidence boundary
+- tester, exact tree/image, workflow, result
 
 Not run:
-- command/check -> reason
+- check -> reason
 
 Known limitations:
 - limitation and affected scope
 
-Evidence notes:
-- main, PR head, synthetic merge, local tree, QEMU, test image, manual, hardware
+Evidence boundary:
+- what this record proves and does not prove
 ```
