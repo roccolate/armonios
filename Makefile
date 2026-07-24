@@ -135,6 +135,7 @@ OBJS := \
     $(BUILD_DIR)/drivers/irq/gicv2.o \
     $(BUILD_DIR)/drivers/net/virtio_net.o \
     $(STORAGE_DEV) \
+    $(BUILD_DIR)/kernel/app_image_source.o \
     $(BUILD_DIR)/kernel/boot_program.o \
     $(BUILD_DIR)/kernel/bootfs.o \
     $(BUILD_DIR)/kernel/console.o \
