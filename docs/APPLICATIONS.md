@@ -1,6 +1,6 @@
-# Built-in applications
+# Applications
 
-ArmoniOS currently embeds seven KLI1 applications in the kernel image:
+ArmoniOS currently ships seven KLI1 applications embedded in the kernel image:
 
 ```text
 panel
@@ -12,18 +12,24 @@ control
 clock
 ```
 
-The visible application catalog is defined by
+It also has a minimal external application platform. A freestanding C program can
+be compiled against the generated SDK, stored as a regular KLI1 file in FAT32,
+and spawned in EL0 without embedding or relinking that application into
+`kernel.bin`.
+
+The visible built-in application catalog is defined by
 `include/armonios/app_catalog.h`. Shell, Editor, Files, and Monitor are pinned on
 the panel. Control Panel and Clock are available from the application menu. Panel
-is boot-only and does not list itself as a launchable application.
+is boot-only and does not list itself as a launchable application. External files
+are not automatically added to this catalog.
 
-This document describes the applications present on current `main`. It does not
-turn compact demonstrations into claims of daily-use completeness.
+This document describes the applications and launch boundaries present on current
+`main`. It does not turn compact demonstrations into claims of daily-use
+completeness.
 
 ## Shared application model
 
-Built-in applications are freestanding C11 programs packaged as KLI1 images under
-`/armonios/`.
+Applications are freestanding C11 programs packaged as KLI1 images.
 
 ```text
 application
@@ -31,6 +37,19 @@ application
   -> libkarm
   -> public ArmoniOS ABI
   -> kernel
+```
+
+Built-in applications are linked into the kernel image and resolved under:
+
+```text
+/armonios/<name>
+```
+
+External applications use the same public ABI and static runtime, but are built
+from the generated SDK and loaded from an absolute VFS path such as:
+
+```text
+/fat/HELLO.KLI
 ```
 
 Shared rules:
@@ -41,9 +60,15 @@ Shared rules:
 - `programs/libkarmdesk/gui.h` remains a temporary compatibility include used by
   applications not yet migrated;
 - large mutable state is mapped with `SYS_MMAP` where needed;
-- shipping images preserve the KLI1 mutable-storage and stack gates;
-- all UI is rendered through text and rectangle GUI syscalls;
-- there is no promoted reusable widget toolkit yet.
+- shipping and external images preserve the KLI1 mutable-storage, relocation,
+  size, and stack gates;
+- all current built-in UI is rendered through text and rectangle GUI syscalls;
+- there is no promoted reusable widget toolkit yet;
+- external applications are currently trusted sideloaded programs, not hostile
+  sandbox workloads.
+
+The full external SDK and loader contract is documented in
+[`EXTERNAL_APPLICATIONS.md`](EXTERNAL_APPLICATIONS.md).
 
 ## Panel
 
@@ -53,7 +78,7 @@ Panel is the boot-owned desktop taskbar and application launcher.
 
 Implemented behavior:
 
-- application menu generated from the shared application catalog;
+- application menu generated from the shared built-in application catalog;
 - pinned launch buttons for Shell, Editor, Files, and Monitor;
 - launch of additional catalog applications from the menu;
 - process-list refresh and association of running processes with application
@@ -68,6 +93,7 @@ Current limits:
 
 - the application model and displayed instance counts are fixed-capacity;
 - process/window discovery uses the current process-list and window-for-PID ABI;
+- external KLI files do not automatically become menu entries or pinned apps;
 - the panel is not a general desktop shell, notification center, tray protocol, or
   extensible plugin host;
 - icons are currently compact text markers rather than a bitmap/icon system.
@@ -87,7 +113,7 @@ pwd
 cd [path]
 ls [path]
 cat <path>
-run <application> [arguments...]
+run <application-or-path> [arguments...]
 kill last
 mem
 ps
@@ -101,7 +127,9 @@ Interaction features:
 - sixteen-line circular output log;
 - Page Up/Page Down scrollback;
 - relative and absolute path construction;
-- application launch through `/armonios/<name>` and `SYS_SPAWN_ARGV`;
+- built-in launch through `/armonios/<name>` and `SYS_SPAWN_ARGV`;
+- external application launch from an absolute VFS path, for example
+  `run /fat/HELLO.KLI`;
 - display of memory, timer, and process information.
 
 Current limits:
@@ -109,7 +137,8 @@ Current limits:
 - paths and command lines use small fixed buffers;
 - arguments are whitespace-separated only; there is no quoting, escaping,
   redirection, pipelines, variables, scripts, globbing, or job control;
-- `run` launches only embedded `/armonios/` applications;
+- external applications must already exist as valid KLI1 regular files;
+- `run` does not discover packages, add extensions, or install dependencies;
 - `kill last` remembers only the last PID launched by that Shell instance;
 - `cat` reads at most eight 128-byte chunks and reports truncation after that;
 - directory listing still uses the legacy byte-stream wrapper rather than the
@@ -174,6 +203,7 @@ Current limits:
 - directories are displayed but cannot be entered, renamed, or deleted;
 - nested read traversal exists in the VFS, but Files does not expose it yet;
 - create, rename, and delete remain root-only 8.3 operations;
+- Files does not currently execute a selected `.KLI` file; use Shell `run`;
 - there are no long names, copy, move, properties dialog, free-space accounting,
   mounts view, or recycle bin.
 
@@ -243,9 +273,35 @@ Current limits:
   format;
 - refresh timing is yield-count based rather than a blocking timer wait.
 
+## External console example
+
+**Source template:** `sdk/examples/hello-console/`
+
+The generated SDK includes a console example that writes through the public
+standard-output syscall and exits normally. It is intentionally small enough for
+the current 8192-byte KLI1 process image slot.
+
+Implemented workflow:
+
+```sh
+make sdk
+make external-kli-image
+make qemu-external-kli
+```
+
+Then in Shell:
+
+```text
+run /fat/HELLO.KLI
+```
+
+Permanent tests also build a dedicated external parent KLI that spawns a second
+copy from the same FAT32 path, waits for the child, and exits cleanly. That source
+exists for runtime verification; it is not another built-in application.
+
 ## Application catalog and build boundaries
 
-The catalog defines visible runtime metadata:
+The built-in catalog defines visible runtime metadata:
 
 - application identifier;
 - menu label;
@@ -253,11 +309,20 @@ The catalog defines visible runtime metadata:
 - pinned-panel flag;
 - clock-widget flag.
 
-The `Makefile` separately lists the application objects and linker sections. Keep
-these roles distinct: the catalog is runtime metadata; build lists and linker
-markers define image construction.
+The `Makefile` separately lists built-in application objects and linker sections.
+Keep these roles distinct: the catalog is runtime metadata; build lists and linker
+markers define embedded image construction.
 
-When adding an application:
+An external application does not need a catalog entry or kernel linker section.
+It needs:
+
+1. public SDK headers and archives;
+2. a valid generic KLI1 link;
+3. relocation, `.data`/`.bss`, stack, and image-size gates;
+4. placement in a mounted filesystem;
+5. an explicit absolute path supplied to `run` or `kli_spawn`.
+
+When adding a built-in application:
 
 1. add its KLI1 source and image markers;
 2. update the explicit build/link lists;
@@ -269,14 +334,18 @@ When adding an application:
 7. update this document and current-state documentation when product capability
    changes.
 
+When publishing an external example, do not add it to the embedded app list merely
+to simplify testing. Build it through the SDK and exercise the normal FAT32/VFS
+loader path.
+
 ## Roadmap boundary
 
 The next application work should follow the platform order rather than duplicate
 missing infrastructure inside each program:
 
-1. finish storage mutation and durability contracts;
-2. expand `libkarm` only for shared runtime needs;
-3. establish reusable `libarmdesk` models and widgets;
+1. promote compiled `libarmdesk` application and window objects;
+2. add the desktop library to the external SDK;
+3. demonstrate a windowed external KLI with a label and button;
 4. migrate compatibility includes to the canonical desktop layer;
 5. then expand Files, Editor, Shell, Monitor, Control, Panel, and Clock into more
    complete tools.
