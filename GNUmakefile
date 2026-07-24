@@ -51,6 +51,7 @@ SDK_KLI1_HEADER_OBJ := $(BUILD_DIR)/$(APPS_DIR)/kli1_header.o
 SDK_KLI1_END_OBJ := $(BUILD_DIR)/$(APPS_DIR)/kli1_end.o
 SDK_HELLO_DIR := $(SDK_DIR)/examples/hello-console
 SDK_HELLO_KLI := $(SDK_HELLO_DIR)/build/HELLO.KLI
+SDK_HELLO_EXTRA_CFLAGS ?=
 EXTERNAL_KLI_IMG ?= $(BUILD_DIR)/external-kli.img
 
 .PHONY: sdk external-kli-image qemu-external-kli
@@ -60,7 +61,8 @@ sdk: libkarm $(SDK_KLI1_HEADER_OBJ) $(SDK_KLI1_END_OBJ)
 
 $(SDK_HELLO_KLI): sdk
 	$(Q)$(MAKE) --no-print-directory -C $(SDK_HELLO_DIR) \
-	    SDK=$(abspath $(SDK_DIR))
+	    SDK=$(abspath $(SDK_DIR)) \
+	    EXTRA_CFLAGS="$(SDK_HELLO_EXTRA_CFLAGS)"
 
 $(EXTERNAL_KLI_IMG): $(MKFAT32_IMAGE) \
                      $(BUILD_DIR)/$(APPS_DIR)/shell.bin \
