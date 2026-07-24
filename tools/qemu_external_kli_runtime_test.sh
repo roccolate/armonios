@@ -56,7 +56,12 @@ grep -q 'USER exit: 0x0000000000000000' "$SERIAL_LOG" || {
     echo 'FAIL: external KLI did not exit cleanly' >&2
     exit 1
 }
-grep -q 'panel_boot: returned to EL1' "$SERIAL_LOG" || {
+grep -q 'panel:exit' "$SERIAL_LOG" || {
+    cat "$SERIAL_LOG" >&2
+    echo 'FAIL: recovery wrapper did not observe the EL0 return' >&2
+    exit 1
+}
+grep -q 'USER exit code: 0x0000000000000000' "$SERIAL_LOG" || {
     cat "$SERIAL_LOG" >&2
     echo 'FAIL: kernel did not regain control after external KLI exit' >&2
     exit 1
