@@ -126,8 +126,52 @@ Additional rules:
 - zero-byte append succeeds even when its source pointer is null;
 - this is a binary buffer, not a null-terminated string.
 
-String ownership and termination belong to a later `kli_string_t` layer built
-on this primitive.
+## Dynamic text string
+
+`kli_string_t` layers null-terminated text semantics over `kli_buffer_t`:
+
+```c
+kli_string_t text;
+
+if (kli_string_init(&text, &arena) < 0) {
+    return 1;
+}
+
+(void)kli_string_assign(&text, "ArmoniOS");
+(void)kli_string_append(&text, " BASIC");
+(void)kli_string_append_char(&text, '!');
+
+kli_write_cstr(ARM_FD_STDOUT, kli_string_cstr(&text));
+```
+
+A valid string always satisfies:
+
+```text
+buffer.length < buffer.capacity
+buffer.data[buffer.length] == '\0'
+```
+
+`kli_string_length` reports text bytes and excludes the terminator.
+`kli_string_capacity` reports usable text capacity and also excludes the
+terminator. Empty strings still own valid storage and return a usable `""`
+through `kli_string_cstr`.
+
+Text rules:
+
+- C-string forms use `strlen` and never include the source terminator;
+- `_n` forms accept explicit byte lengths but reject embedded NUL bytes;
+- UTF-8 can be stored as bytes, but libkarm does not validate, normalize, or
+  count Unicode code points;
+- `append_char` rejects `\0` so logical length and C-string length cannot drift;
+- assign and append use overlap-safe copying, including self-append that grows
+  into a new arena block;
+- failed growth preserves the old text, terminator, capacity, and arena offset;
+- `clear` restores the empty string while retaining allocated capacity;
+- resetting or destroying the backing arena invalidates every string using it.
+
+The dynamic string implementation shares `buffer.o` with the binary-buffer
+layer. Function sections and `--gc-sections` keep unused string operations out
+of applications that only need raw buffers.
 
 ## In-tree application link
 
@@ -180,7 +224,7 @@ the supported application linker script.
 ## Current limitations
 
 `libkarm` is not yet a complete libc. It currently provides syscall wrappers,
-minimal output, memory/string helpers, integer conversion, monotonic arenas, and
-growable binary buffers. A reusable free-list heap, dynamic strings, formatted
-output, and higher-level file helpers are future runtime cuts built on this
-foundation.
+minimal output, memory/string helpers, integer conversion, monotonic arenas,
+growable binary buffers, and arena-backed dynamic strings. A reusable free-list
+heap, formatted output, and higher-level file helpers are future runtime cuts
+built on this foundation.
